@@ -98,7 +98,9 @@ export async function handler(event) {
     if (method === 'GET'  && path === '/api/admin/users')          return await handleAdminUsers(event)
     if (method === 'POST' && path === '/api/admin/users')          return await handleAdminAddUser(event)
     if (method === 'DELETE' && path.startsWith('/api/admin/users/')) return await handleAdminRemoveUser(event)
-    if (method === 'GET'  && path === '/api/admin/admins')         return await handleAdminAdmins(event)
+    if (method === 'GET'  && path === '/api/admin/admins')          return await handleAdminAdmins(event)
+    if (method === 'POST' && path === '/api/admin/admins')          return await handleAdminAddAdmin(event)
+    if (method === 'DELETE' && path.startsWith('/api/admin/admins/')) return await handleAdminRemoveAdmin(event)
     return json(404, { message: 'Not found' })
   } catch (err) {
     console.error('Unhandled error', err)
@@ -304,6 +306,69 @@ async function handleAdminAdmins(event) {
       'SELECT id, email, added_at FROM admins ORDER BY added_at ASC'
     )
     return json(200, { admins: rows })
+  } finally {
+    await db.end()
+  }
+}
+
+async function handleAdminAddAdmin(event) {
+  const check = await requireAdmin(event)
+  if (check) return check
+
+  const body  = parseBody(event)
+  const email = normalise(body?.email)
+  if (!email) return json(400, { message: 'Invalid email' })
+
+  // Prevent self-demotion accidents (can't remove yourself via add, but guard anyway)
+  const db = await connect()
+  try {
+    await ensureSchema(db)
+    const { rows } = await db.query(
+      `INSERT INTO admins (email) VALUES ($1)
+       ON CONFLICT (email) DO NOTHING
+       RETURNING id, email, added_at`,
+      [email]
+    )
+    if (rows.length === 0) return json(409, { message: 'Already an admin' })
+
+    // Also ensure they can log in by having an approved investor_access row
+    await db.query(
+      `INSERT INTO investor_access (email, type, status, approved_at)
+       VALUES ($1, 'investor', 'approved', NOW())
+       ON CONFLICT (email) DO UPDATE SET status = 'approved', approved_at = NOW()`,
+      [email]
+    )
+
+    return json(201, { admin: rows[0] })
+  } finally {
+    await db.end()
+  }
+}
+
+async function handleAdminRemoveAdmin(event) {
+  const check = await requireAdmin(event)
+  if (check) return check
+
+  const id = parseInt(event.rawPath.split('/').pop(), 10)
+  if (isNaN(id)) return json(400, { message: 'Invalid ID' })
+
+  // Prevent removing yourself
+  const payload = (() => {
+    try {
+      const h = event.headers?.authorization ?? event.headers?.Authorization ?? ''
+      return jwt.verify(h.slice(7), process.env.JWT_SECRET)
+    } catch { return null }
+  })()
+
+  const db = await connect()
+  try {
+    await ensureSchema(db)
+    const { rows: target } = await db.query('SELECT email FROM admins WHERE id = $1', [id])
+    if (target.length === 0) return json(404, { message: 'Admin not found' })
+    if (payload?.email === target[0].email) return json(400, { message: 'Cannot remove yourself' })
+
+    await db.query('DELETE FROM admins WHERE id = $1', [id])
+    return json(200, { ok: true })
   } finally {
     await db.end()
   }
