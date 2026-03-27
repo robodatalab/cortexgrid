@@ -17,3 +17,13 @@ output "website_url" {
   description = "Website URL"
   value       = "https://${var.domain_name}"
 }
+
+output "api_gateway_invoke_url" {
+  description = "Auth API Gateway invoke URL"
+  value       = aws_apigatewayv2_stage.default.invoke_url
+}
+
+output "rds_endpoint" {
+  description = "Auth RDS endpoint — connect here to run schema.sql after first deploy"
+  value       = "${aws_db_instance.auth.address}:${aws_db_instance.auth.port}"
+}

@@ -32,25 +32,50 @@ Cloud infrastructure and deployment orchestration for RoboLab. All resources run
   +----------------+
 ```
 
+### Folder → repository mapping
+
+| Folder                    | Owns infrastructure for          |
+|---------------------------|----------------------------------|
+| `terraform/website/`      | `robolabwebsite` (marketing site)|
+| `terraform/platform/`     | `robolab-platform` (platform SPA)|
+| `lambda/auth/`            | Auth Lambda source (deployed by `terraform/website/`) |
+
+Each folder contains all infrastructure for that repository. Do not create new top-level Terraform modules for features that belong to an existing repository — extend the relevant module instead.
+
 ### Terraform modules
 
-#### `terraform/website/` -- Marketing website
+#### `terraform/website/` — Marketing website + investor auth
 
-Serves the marketing site at **robodatalab.com** (deployed from the `robolabwebsite` repo).
+Serves the marketing site at **robodatalab.com** and the investor authentication backend.
+Source: `robolabwebsite` repo.
 
-| Resource              | Purpose                                              |
-|-----------------------|------------------------------------------------------|
-| S3 bucket             | Hosts built static assets (private, OAC-gated)       |
-| CloudFront            | CDN with HTTP/2+3, Brotli/gzip, SPA fallback         |
-| ACM certificate       | TLS for `robodatalab.com` + `www`, DNS-validated      |
-| Route53 records       | A-record aliases for apex and `www`                   |
-| OIDC provider + role  | GitHub Actions deploys via `AssumeRoleWithWebIdentity`|
+| Resource              | Purpose                                                |
+|-----------------------|--------------------------------------------------------|
+| S3 bucket             | Hosts built static assets (private, OAC-gated)         |
+| CloudFront            | CDN; routes `/api/*` to API Gateway, `/*` to S3        |
+| ACM certificate       | TLS for `robodatalab.com` + `www`, DNS-validated        |
+| Route53 records       | A-record aliases for apex and `www`                     |
+| OIDC provider + role  | GitHub Actions deploys via `AssumeRoleWithWebIdentity`  |
+| VPC + NAT gateway     | Isolates RDS; Lambda uses NAT for outbound SES calls    |
+| RDS PostgreSQL        | Investor whitelist + OTP codes (`db.t4g.micro`)         |
+| Lambda (Node 22)      | Auth API — OTP email flow, JWT issuance, admin approval |
+| API Gateway v2        | HTTPS endpoint for the Lambda                           |
+| SES email identity    | Sends OTP and approval emails from `noreply@robodatalab.com` |
+| Secrets Manager       | JWT signing secret + DB password                        |
 
 State backend: `s3://robolab-terraform-state/website/terraform.tfstate`
 
-#### `terraform/platform/` -- Platform frontend
+**First-deploy order:**
+1. `terraform apply` (with `api_gateway_domain = ""`)
+2. Copy `api_gateway_invoke_url` output → set `api_gateway_domain` in `terraform.tfvars`
+3. `terraform apply` again (wires up CloudFront `/api/*` behavior)
+4. `psql -h <rds_endpoint> ... -f ../../lambda/auth/schema.sql` to create tables
+5. Verify SES sender in AWS Console; request production access to lift sandbox
+
+#### `terraform/platform/` — Platform frontend
 
 Serves the platform SPA via CloudFront (no custom domain yet).
+Source: `robolab-platform` repo.
 
 | Resource              | Purpose                                              |
 |-----------------------|------------------------------------------------------|

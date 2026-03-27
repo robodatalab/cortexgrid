@@ -1,0 +1,12 @@
+{
+  "name": "robolab-auth",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Investor auth Lambda — OTP email flow + JWT",
+  "main": "index.mjs",
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.0.0"
+  }
+}
