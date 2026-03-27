@@ -24,7 +24,7 @@ const ALLOWED_ORIGIN = process.env.SITE_URL ?? 'https://robodatalab.com'
 const CORS = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
 }
 
 // ── Schema migration ──────────────────────────────────────────────────────────
@@ -96,6 +96,8 @@ export async function handler(event) {
     if (method === 'GET'  && path.startsWith('/api/admin/reject/'))  return await handleReject(event)
     if (method === 'POST' && path === '/api/interest/register')    return await handleRegisterInterest(event)
     if (method === 'GET'  && path === '/api/admin/users')          return await handleAdminUsers(event)
+    if (method === 'POST' && path === '/api/admin/users')          return await handleAdminAddUser(event)
+    if (method === 'DELETE' && path.startsWith('/api/admin/users/')) return await handleAdminRemoveUser(event)
     if (method === 'GET'  && path === '/api/admin/admins')         return await handleAdminAdmins(event)
     return json(404, { message: 'Not found' })
   } catch (err) {
@@ -302,6 +304,53 @@ async function handleAdminAdmins(event) {
       'SELECT id, email, added_at FROM admins ORDER BY added_at ASC'
     )
     return json(200, { admins: rows })
+  } finally {
+    await db.end()
+  }
+}
+
+async function handleAdminAddUser(event) {
+  const check = await requireAdmin(event)
+  if (check) return check
+
+  const body  = parseBody(event)
+  const email = normalise(body?.email)
+  const name  = typeof body?.name === 'string' ? body.name.trim().slice(0, 200) : null
+  const type  = body?.type === 'design_partner' ? 'design_partner' : 'investor'
+
+  if (!email) return json(400, { message: 'Invalid email' })
+
+  const db = await connect()
+  try {
+    await ensureSchema(db)
+    const { rows } = await db.query(
+      `INSERT INTO investor_access (email, name, type, status, approved_at)
+       VALUES ($1, $2, $3, 'approved', NOW())
+       ON CONFLICT (email) DO NOTHING
+       RETURNING id, email, name, type, status, requested_at, approved_at`,
+      [email, name, type]
+    )
+    if (rows.length === 0) return json(409, { message: 'Email already registered' })
+    await sendApprovalEmail(email)
+    return json(201, { user: rows[0] })
+  } finally {
+    await db.end()
+  }
+}
+
+async function handleAdminRemoveUser(event) {
+  const check = await requireAdmin(event)
+  if (check) return check
+
+  const id = parseInt(event.rawPath.split('/').pop(), 10)
+  if (isNaN(id)) return json(400, { message: 'Invalid ID' })
+
+  const db = await connect()
+  try {
+    await ensureSchema(db)
+    const { rowCount } = await db.query('DELETE FROM investor_access WHERE id = $1', [id])
+    if (rowCount === 0) return json(404, { message: 'User not found' })
+    return json(200, { ok: true })
   } finally {
     await db.end()
   }
