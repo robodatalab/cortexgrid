@@ -251,7 +251,7 @@ async function handleApprove(event) {
 
     if (rowCount === 0) return html(400, '<h1>Invalid or already-processed link.</h1>')
 
-    await sendApprovalEmail(updated[0].email)
+    try { await sendApprovalEmail(updated[0].email) } catch (e) { console.warn('Approval email failed:', e.message) }
     return html(200, `<h1>Access approved.</h1><p>${updated[0].email} has been notified.</p>`)
   } finally {
     await db.end()
@@ -396,7 +396,7 @@ async function handleAdminAddUser(event) {
       [email, name, type]
     )
     if (rows.length === 0) return json(409, { message: 'Email already registered' })
-    await sendApprovalEmail(email)
+    try { await sendApprovalEmail(email) } catch (e) { console.warn('Approval email failed:', e.message) }
     return json(201, { user: rows[0] })
   } finally {
     await db.end()
