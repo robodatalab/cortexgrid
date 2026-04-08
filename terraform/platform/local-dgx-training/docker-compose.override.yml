@@ -1,6 +1,4 @@
-# =============================================================================
 # Local Development Overrides
-# =============================================================================
 # This file is automatically loaded by Docker Compose alongside
 # docker-compose.yml. Use it for local dev tweaks that shouldn't be committed.
 #
@@ -10,8 +8,5 @@
 #   - Override resource limits for smaller machines
 #
 # To disable: rename to docker-compose.override.yml.disabled
-# =============================================================================
-
-version: "3.8"
 
 services: {}

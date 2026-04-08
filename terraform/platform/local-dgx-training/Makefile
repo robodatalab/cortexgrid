@@ -10,7 +10,7 @@ check-dir:
 	fi
 
 .PHONY: setup-dgx
-setup-dgx: check-dir ## Full DGX setup: validate .env, pull images, start stack
+setup-dgx: check-dir ## Full DGX setup (from Mac): sync files, copy .env, start stack
 	@bash scripts/setup-dgx.sh
 
 .PHONY: setup-mac
@@ -18,12 +18,8 @@ setup-mac: check-dir ## Full Mac setup: install deps, push/pull secrets, configu
 	@bash scripts/setup-mac.sh
 
 .PHONY: teardown-dgx
-teardown-dgx: check-dir ## Tear down DGX: stop stack, remove volumes and .env
-	@echo "This will stop all services and DELETE all data (volumes)."
-	@read -rp "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	docker compose down -v
-	rm -f .env
-	@echo "DGX teardown complete. Volumes and .env removed."
+teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes and .env
+	@bash scripts/teardown-dgx.sh
 
 .PHONY: teardown-mac
 teardown-mac: check-dir ## Tear down Mac: remove shell exports, .env, and pip packages
