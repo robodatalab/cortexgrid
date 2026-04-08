@@ -2,8 +2,7 @@
  * RoboDataLab investor auth Lambda
  *
  * Routes:
- *   POST /api/auth/request          — login: send OTP if approved, else status
- *   POST /api/auth/verify           — verify OTP → 30-min JWT
+ *   POST /api/auth/request          — login: return JWT if approved, else status
  *   GET  /api/auth/me               — validate JWT → { email, isAdmin }
  *   GET  /api/admin/approve/:token  — admin approves investor application
  *   GET  /api/admin/reject/:token   — admin rejects investor application
@@ -54,16 +53,8 @@ async function ensureSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_investor_access_email ON investor_access (email);
     CREATE INDEX IF NOT EXISTS idx_investor_access_token ON investor_access (approval_token);
 
-    CREATE TABLE IF NOT EXISTS otp_codes (
-      id          SERIAL PRIMARY KEY,
-      email       VARCHAR(255) NOT NULL,
-      code        CHAR(6)      NOT NULL,
-      expires_at  TIMESTAMPTZ  NOT NULL,
-      used        BOOLEAN      NOT NULL DEFAULT FALSE,
-      created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_otp_lookup ON otp_codes (email, used, expires_at);
+    -- OTP login removed; drop legacy table
+    DROP TABLE IF EXISTS otp_codes;
 
     CREATE TABLE IF NOT EXISTS admins (
       id         SERIAL PRIMARY KEY,
@@ -90,7 +81,6 @@ export async function handler(event) {
 
   try {
     if (method === 'POST' && path === '/api/auth/request')         return await handleRequest(event)
-    if (method === 'POST' && path === '/api/auth/verify')          return await handleVerify(event)
     if (method === 'GET'  && path === '/api/auth/me')              return await handleMe(event)
     if (method === 'GET'  && path.startsWith('/api/admin/approve/')) return await handleApprove(event)
     if (method === 'GET'  && path.startsWith('/api/admin/reject/'))  return await handleReject(event)
@@ -134,47 +124,12 @@ async function handleRequest(event) {
     if (status === 'rejected') return json(200, { status: 'rejected' })
 
     if (status === 'approved') {
-      const code      = randomSixDigits()
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
-
-      await db.query('UPDATE otp_codes SET used = TRUE WHERE email = $1 AND used = FALSE', [email])
-      await db.query(
-        'INSERT INTO otp_codes (email, code, expires_at) VALUES ($1, $2, $3)',
-        [email, code, expiresAt]
-      )
-      await sendOtpEmail(email, code)
-      return json(200, { status: 'otp_sent' })
+      const isAdmin = await checkIsAdmin(db, email)
+      const token   = jwt.sign({ email, isAdmin }, process.env.JWT_SECRET, { expiresIn: '30m' })
+      return json(200, { token, email, isAdmin })
     }
 
     return json(400, { message: 'Unknown account state' })
-  } finally {
-    await db.end()
-  }
-}
-
-async function handleVerify(event) {
-  const body  = parseBody(event)
-  const email = normalise(body?.email)
-  const code  = String(body?.code ?? '').trim()
-  if (!email || !code) return json(400, { message: 'Missing email or code' })
-
-  const db = await connect()
-  try {
-    await ensureSchema(db)
-    const { rows } = await db.query(
-      `SELECT id FROM otp_codes
-       WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()
-       ORDER BY created_at DESC LIMIT 1`,
-      [email, code]
-    )
-
-    if (rows.length === 0) return json(401, { message: 'Invalid or expired code' })
-
-    await db.query('UPDATE otp_codes SET used = TRUE WHERE id = $1', [rows[0].id])
-
-    const isAdmin = await checkIsAdmin(db, email)
-    const token   = jwt.sign({ email, isAdmin }, process.env.JWT_SECRET, { expiresIn: '30m' })
-    return json(200, { token, email, isAdmin })
   } finally {
     await db.end()
   }
@@ -479,28 +434,6 @@ async function sendAdminNotification(investorEmail, approvalToken) {
   }))
 }
 
-async function sendOtpEmail(email, code) {
-  await ses.send(new SendEmailCommand({
-    Source:      process.env.FROM_EMAIL,
-    Destination: { ToAddresses: [email] },
-    Message: {
-      Subject: { Data: 'Your RoboDataLab sign-in code' },
-      Body: {
-        Html: {
-          Data: `
-            <p style="font-family:monospace">Your sign-in code for RoboDataLab:</p>
-            <p style="font-family:monospace;font-size:36px;font-weight:bold;
-                      letter-spacing:12px;color:#1a1a1a;margin:24px 0">${code}</p>
-            <p style="font-family:monospace;color:#888">
-              Expires in 10&nbsp;minutes. Single use.
-            </p>
-          `,
-        },
-      },
-    },
-  }))
-}
-
 async function sendApprovalEmail(email) {
   const site = process.env.SITE_URL ?? 'https://robodatalab.com'
   await ses.send(new SendEmailCommand({
@@ -575,10 +508,6 @@ function normalise(email) {
   if (!email || typeof email !== 'string') return null
   const t = email.trim().toLowerCase()
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t) ? t : null
-}
-
-function randomSixDigits() {
-  return String(Math.floor(100000 + Math.random() * 900000))
 }
 
 function json(status, body) {
