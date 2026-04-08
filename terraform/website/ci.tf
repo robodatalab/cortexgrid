@@ -1,8 +1,7 @@
-# GitHub Actions OIDC provider (one per AWS account — shared across repos)
-resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["ffffffffffffffffffffffffffffffffffffffff"]
+# GitHub Actions OIDC provider is managed centrally in terraform/platform/secrets/.
+# Look it up by URL so the deploy role can reference it.
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 # IAM role assumed by GitHub Actions to deploy the website
@@ -23,7 +22,7 @@ data "aws_iam_policy_document" "github_actions_assume" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {

@@ -27,11 +27,12 @@ data "aws_iam_policy_document" "lambda_permissions" {
   }
 
   # Secrets Manager: read JWT secret and DB password at runtime
+  # Secrets are managed centrally in terraform/platform/secrets/
   statement {
     actions = ["secretsmanager:GetSecretValue"]
     resources = [
-      aws_secretsmanager_secret.jwt.arn,
-      aws_secretsmanager_secret.db_password.arn,
+      data.aws_secretsmanager_secret.jwt.arn,
+      data.aws_secretsmanager_secret.db_password.arn,
     ]
   }
 }
