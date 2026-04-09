@@ -170,6 +170,7 @@ services:
       mlflow server
         --host 0.0.0.0
         --port 5000
+        --allowed-hosts all
         --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
         --default-artifact-root s3://${ARTIFACT_STORE_BUCKET}/
         --artifacts-destination s3://${ARTIFACT_STORE_BUCKET}/
