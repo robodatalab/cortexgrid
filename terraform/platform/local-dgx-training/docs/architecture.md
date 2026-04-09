@@ -27,9 +27,10 @@ No job script changes. No MLflow config changes. The S3 API contract is the abst
 ## Job Flow
 
 ```
-Mac (submit.py)
+Mac (your code + cortexflow)
     │
-    │  HTTP POST to Ray Jobs API
+    │  cortexflow.init() connects to Ray
+    │  cortexflow.remote() submits tasks
     ▼
 Ray Head Node (:8265)
     │
