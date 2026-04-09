@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir \
     "ray[default,train,tune,data]==2.9.3" \
-    mlflow==2.10.2 \
+    mlflow==3.11.1 \
     boto3==1.34.29 \
     python-dotenv==1.0.1 \
     psutil==5.9.8
