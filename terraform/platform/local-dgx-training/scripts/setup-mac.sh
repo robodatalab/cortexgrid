@@ -113,10 +113,11 @@ echo "=========================================="
 echo
 echo "  Run 'source $SHELL_RC' or open a new terminal to apply changes."
 echo
-echo "  To use 'spark' in a project, add spark-cli as a dependency:"
+echo "  To use cortexflow in a project, add to pyproject.toml:"
+echo ""
 echo "    [project.dependencies]"
-echo "    spark-cli"
+echo "    cortexflow"
 echo ""
 echo "    [tool.uv.sources]"
-echo "    spark-cli = { git = \"https://github.com/<org>/robolab-infra.git\", subdirectory = \"terraform/platform/local-dgx-training\" }"
+echo "    cortexflow = { git = \"https://github.com/paksas/robolab-infra.git\", subdirectory = \"terraform/platform/local-dgx-training\" }"
 echo
