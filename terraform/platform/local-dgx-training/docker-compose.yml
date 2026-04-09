@@ -46,8 +46,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8265:8265"   # Ray Dashboard
-      - "10001:10001" # Ray Client
+      - "8265:8265"   # Ray Dashboard + Jobs API
       - "6380:6379"   # Ray GCS port (mapped to 6380 on host to avoid redis conflict)
       - "8080:8080"   # Prometheus metrics
     environment:

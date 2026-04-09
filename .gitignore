@@ -2,6 +2,14 @@
 *.local
 .env
 .venv
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 .terraform
 *.tfstate
 *.tfstate.backup

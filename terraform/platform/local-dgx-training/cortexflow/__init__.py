@@ -21,31 +21,23 @@ from __future__ import annotations
 def init() -> None:
     """Configure connections to Ray, MLflow, and S3.
 
-    If running inside a Ray job (env vars already injected by cortexflow.remote),
-    reads config from env and does not re-init Ray.
+    On the Mac: pulls secrets from AWS Secrets Manager. Ray is NOT initialized
+    locally — work is submitted to the DGX via the Jobs API (HTTP).
 
-    On the Mac: pulls secrets from AWS Secrets Manager and connects to the Ray
-    cluster via the Ray Client protocol (ray://<ip>:10001).
+    Inside a Ray job on the DGX: reads env vars injected by cortexflow.remote.
 
     Call once at the top of your script.
     """
     import os
 
-    import ray
-
     from cortexflow.config import CortexConfig, set_config
 
-    inside_ray_job = bool(os.environ.get("DGX_TAILSCALE_IP"))
-
-    if inside_ray_job:
+    if os.environ.get("DGX_TAILSCALE_IP"):
         config = CortexConfig.from_env()
     else:
         config = CortexConfig.from_secrets_manager()
 
     set_config(config)
-
-    if not ray.is_initialized() and config.dgx_ip:
-        ray.init(address=f"ray://{config.dgx_ip}:10001", ignore_reinit_error=True)
 
 
 def __getattr__(name: str):  # noqa: ANN204
