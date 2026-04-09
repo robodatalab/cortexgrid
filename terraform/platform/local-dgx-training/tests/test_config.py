@@ -62,8 +62,9 @@ class TestCortexConfigFromSecretsManager(unittest.TestCase):
     @patch("cortexflow.config._get_secret")
     def test_builds_config_from_secrets(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = lambda sid: {
-            "robolab/infra/dgx-tailscale-ip": "100.1.2.3",
-            "robolab/infra/minio-root-password": "minio-secret",
+            "robolab/infra/DGX_TAILSCALE_IP": "100.1.2.3",
+            "robolab/infra/MINIO_ROOT_PASSWORD": "minio-secret",
+            "robolab/infra/GH_TOKEN": "ghp_test123",
         }[sid]
 
         config = CortexConfig.from_secrets_manager()
