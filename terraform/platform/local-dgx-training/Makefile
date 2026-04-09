@@ -22,16 +22,9 @@ teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes 
 	@bash scripts/teardown-dgx.sh
 
 .PHONY: teardown-mac
-teardown-mac: check-dir ## Tear down Mac: remove shell exports and .env
-	@echo "Removing shell exports and local config..."
-	@SHELL_RC="$$HOME/.zshrc"; \
-	if [ "$$SHELL" = "/bin/bash" ]; then SHELL_RC="$$HOME/.bashrc"; fi; \
-	for var in RAY_ADDRESS MLFLOW_TRACKING_URI DGX_TAILSCALE_IP; do \
-		sed -i '' "/^export $${var}=/d" "$$SHELL_RC" 2>/dev/null || true; \
-	done; \
-	echo "  Cleaned $$SHELL_RC"
+teardown-mac: check-dir ## Tear down Mac: remove local .env
 	rm -f .env
-	@echo "Mac teardown complete. Open a new terminal to apply shell changes."
+	@echo "Mac teardown complete."
 
 .PHONY: push-secrets
 push-secrets: check-dir ## Push .env secrets to AWS Secrets Manager

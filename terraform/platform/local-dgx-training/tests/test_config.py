@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from cortexflow.config import CortexConfig, get_config, set_config
 
 
 class TestCortexConfigFromEnv(unittest.TestCase):
+    """Tests for from_env() — used inside Ray jobs where env vars are pre-injected."""
+
     def setUp(self) -> None:
         self.env_patcher = patch.dict(os.environ, {}, clear=True)
         self.env_patcher.start()
@@ -41,35 +43,44 @@ class TestCortexConfigFromEnv(unittest.TestCase):
         self.assertEqual(config.mlflow_tracking_uri, "http://custom:5555")
         self.assertEqual(config.s3_endpoint_url, "http://custom:8888")
 
-    def test_s3_credentials_from_aws_env(self) -> None:
+    def test_s3_credentials_from_env(self) -> None:
         os.environ["AWS_ACCESS_KEY_ID"] = "AKIA_TEST"
         os.environ["AWS_SECRET_ACCESS_KEY"] = "secret123"
         config = CortexConfig.from_env()
         self.assertEqual(config.s3_access_key, "AKIA_TEST")
         self.assertEqual(config.s3_secret_key, "secret123")
 
-    def test_s3_credentials_fallback_to_artifact_store(self) -> None:
-        os.environ["ARTIFACT_STORE_ACCESS_KEY"] = "minio_key"
-        os.environ["ARTIFACT_STORE_SECRET_KEY"] = "minio_secret"
-        config = CortexConfig.from_env()
-        self.assertEqual(config.s3_access_key, "minio_key")
-        self.assertEqual(config.s3_secret_key, "minio_secret")
-
-    def test_artifact_store_credentials_take_precedence_over_aws(self) -> None:
-        os.environ["ARTIFACT_STORE_ACCESS_KEY"] = "minio_key"
-        os.environ["AWS_ACCESS_KEY_ID"] = "aws_key"
-        config = CortexConfig.from_env()
-        self.assertEqual(config.s3_access_key, "minio_key")
-
     def test_custom_default_bucket(self) -> None:
         os.environ["ARTIFACT_STORE_BUCKET"] = "my-bucket"
         config = CortexConfig.from_env()
         self.assertEqual(config.s3_default_bucket, "my-bucket")
 
-    def test_s3_endpoint_fallback_to_artifact_store_endpoint(self) -> None:
-        os.environ["ARTIFACT_STORE_ENDPOINT"] = "http://minio:9000"
-        config = CortexConfig.from_env()
-        self.assertEqual(config.s3_endpoint_url, "http://minio:9000")
+
+class TestCortexConfigFromSecretsManager(unittest.TestCase):
+    """Tests for from_secrets_manager() — used on the Mac."""
+
+    @patch("cortexflow.config._get_secret")
+    def test_builds_config_from_secrets(self, mock_get: MagicMock) -> None:
+        mock_get.side_effect = lambda sid: {
+            "robolab/infra/dgx-tailscale-ip": "100.1.2.3",
+            "robolab/infra/minio-root-password": "minio-secret",
+        }[sid]
+
+        config = CortexConfig.from_secrets_manager()
+        self.assertEqual(config.dgx_ip, "100.1.2.3")
+        self.assertEqual(config.ray_address, "http://100.1.2.3:8265")
+        self.assertEqual(config.mlflow_tracking_uri, "http://100.1.2.3:5000")
+        self.assertEqual(config.s3_endpoint_url, "http://100.1.2.3:9000")
+        self.assertEqual(config.s3_access_key, "minioadmin")
+        self.assertEqual(config.s3_secret_key, "minio-secret")
+
+    @patch("cortexflow.config._get_secret")
+    def test_empty_secrets_returns_empty_config(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = ""
+        config = CortexConfig.from_secrets_manager()
+        self.assertEqual(config.dgx_ip, "")
+        self.assertEqual(config.ray_address, "")
+        self.assertEqual(config.s3_endpoint_url, "")
 
 
 class TestEnvVarsForJob(unittest.TestCase):

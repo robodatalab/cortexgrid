@@ -4,11 +4,9 @@ set -euo pipefail
 # Mac Workstation — One-time setup script
 #
 # Flow:
-#   1. Checks AWS CLI
-#   2. If .env exists but secrets aren't in AWS yet → pushes them
-#   3. If secrets are in AWS → pulls them into .env
-#   4. Configures shell (RAY_ADDRESS, MLFLOW_TRACKING_URI)
-#   5. Runs health check
+#   1. Checks AWS CLI can reach Secrets Manager
+#   2. If secrets don't exist yet, prompts to create .env and pushes them
+#   3. Runs health check
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -26,7 +24,7 @@ echo "  RoboLab ML Infrastructure — Mac Setup"
 echo "=========================================="
 echo
 
-echo "[1/4] Checking prerequisites..."
+echo "[1/3] Checking prerequisites..."
 
 if ! command -v aws &>/dev/null; then
     echo "Error: AWS CLI is not installed."
@@ -35,20 +33,15 @@ if ! command -v aws &>/dev/null; then
 fi
 echo "  aws CLI — OK"
 
-echo "[2/4] Configuring secrets..."
 REGION="${AWS_REGION:-us-east-1}"
 
-SECRETS_IN_AWS=false
+echo "[2/3] Checking secrets..."
+
 if aws secretsmanager get-secret-value \
     --secret-id "robolab/infra/dgx-tailscale-ip" \
     --region "$REGION" \
     --query 'SecretString' --output text &>/dev/null; then
-    SECRETS_IN_AWS=true
-fi
-
-if [[ "$SECRETS_IN_AWS" == "true" ]]; then
-    echo "  Secrets found in AWS Secrets Manager — pulling..."
-    bash "$REPO_ROOT/scripts/pull-secrets.sh"
+    echo "  Secrets found in AWS Secrets Manager — OK"
 else
     echo "  No secrets in AWS Secrets Manager yet — first-time setup."
     if [[ ! -f .env ]]; then
@@ -70,46 +63,14 @@ else
     bash "$REPO_ROOT/scripts/push-secrets.sh"
 fi
 
-set -a
-source .env
-set +a
-DGX_IP="${DGX_TAILSCALE_IP}"
+DGX_IP=$(aws secretsmanager get-secret-value \
+    --secret-id "robolab/infra/dgx-tailscale-ip" \
+    --region "$REGION" \
+    --query 'SecretString' --output text)
 
-echo "[3/4] Configuring shell environment..."
-
-SHELL_RC="$HOME/.zshrc"
-if [[ "$SHELL" == */bash ]]; then
-    SHELL_RC="$HOME/.bashrc"
-fi
-
-add_export() {
-    local var_name="$1"
-    local var_value="$2"
-    if grep -q "^export ${var_name}=" "$SHELL_RC" 2>/dev/null; then
-        sed -i '' "s|^export ${var_name}=.*|export ${var_name}=${var_value}|" "$SHELL_RC"
-    else
-        echo "export ${var_name}=${var_value}" >> "$SHELL_RC"
-    fi
-}
-
-add_export "RAY_ADDRESS" "http://${DGX_IP}:8265"
-add_export "MLFLOW_TRACKING_URI" "http://${DGX_IP}:5000"
-add_export "MLFLOW_S3_ENDPOINT_URL" "http://${DGX_IP}:9000"
-add_export "DGX_TAILSCALE_IP" "${DGX_IP}"
-add_export "ARTIFACT_STORE_ACCESS_KEY" "${ARTIFACT_STORE_ACCESS_KEY:-minioadmin}"
-add_export "ARTIFACT_STORE_SECRET_KEY" "${ARTIFACT_STORE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}"
-
-echo "  Updated $SHELL_RC"
-
-export RAY_ADDRESS="http://${DGX_IP}:8265"
-export MLFLOW_TRACKING_URI="http://${DGX_IP}:5000"
-export MLFLOW_S3_ENDPOINT_URL="http://${DGX_IP}:9000"
-export DGX_TAILSCALE_IP="${DGX_IP}"
-export ARTIFACT_STORE_ACCESS_KEY="${ARTIFACT_STORE_ACCESS_KEY:-minioadmin}"
-export ARTIFACT_STORE_SECRET_KEY="${ARTIFACT_STORE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}"
-
-echo "[4/4] Running health check..."
+echo "[3/3] Running health check..."
 echo
+export DGX_TAILSCALE_IP="$DGX_IP"
 bash "$REPO_ROOT/scripts/health-check.sh" || true
 
 echo
@@ -117,7 +78,8 @@ echo "=========================================="
 echo "  Mac Setup Complete!"
 echo "=========================================="
 echo
-echo "  Run 'source $SHELL_RC' or open a new terminal to apply changes."
+echo "  cortexflow.init() will pull secrets from AWS SM automatically."
+echo "  No env vars needed — just 'aws configure' once."
 echo
 echo "  To use cortexflow in a project, add to pyproject.toml:"
 echo ""

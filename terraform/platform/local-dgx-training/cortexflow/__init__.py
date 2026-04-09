@@ -21,16 +21,23 @@ from __future__ import annotations
 def init(ray_address: str | None = None) -> None:
     """Configure connections to Ray, MLflow, and S3.
 
-    Reads configuration from environment variables:
-        RAY_ADDRESS, MLFLOW_TRACKING_URI, DGX_TAILSCALE_IP, etc.
+    If running inside a Ray job (env vars already injected), reads from env.
+    Otherwise, pulls secrets from AWS Secrets Manager.
 
     Call once at the top of your script.
     """
+    import os
+
     import ray
 
     from cortexflow.config import CortexConfig, set_config
 
-    config = CortexConfig.from_env()
+    # Inside a Ray job, env vars are pre-injected by cortexflow.remote
+    if os.environ.get("DGX_TAILSCALE_IP"):
+        config = CortexConfig.from_env()
+    else:
+        config = CortexConfig.from_secrets_manager()
+
     if ray_address:
         config.ray_address = ray_address
     set_config(config)

@@ -1,15 +1,27 @@
-"""Configuration and context detection.
+"""Configuration — pulls secrets from AWS Secrets Manager at runtime.
 
-Reads env vars to determine where services live. Works in all contexts:
-- Mac (dev): env vars set by setup-mac.sh
-- DGX (inside Ray job): env vars injected by cortexflow.remote
-- AWS EC2 (future): env vars set on the instance
+On Mac: cortexflow.init() fetches secrets from AWS SM (requires aws CLI configured).
+On DGX (inside Ray job): reads env vars injected by cortexflow.remote.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+
+
+SM_PREFIX = "robolab/infra"
+SM_REGION = "us-east-1"
+
+
+def _get_secret(secret_id: str) -> str:
+    """Fetch a secret from AWS Secrets Manager. Returns empty string on failure."""
+    try:
+        import boto3
+        client = boto3.client("secretsmanager", region_name=SM_REGION)
+        return client.get_secret_value(SecretId=secret_id)["SecretString"]
+    except Exception:
+        return ""
 
 
 @dataclass
@@ -27,42 +39,43 @@ class CortexConfig:
 
     @staticmethod
     def from_env() -> CortexConfig:
+        """Build config from env vars (used inside Ray jobs where env is pre-injected)."""
         dgx_ip = os.environ.get("DGX_TAILSCALE_IP", "")
-
-        ray_address = os.environ.get("RAY_ADDRESS", "")
-        if not ray_address and dgx_ip:
-            ray_address = f"http://{dgx_ip}:8265"
-
-        mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
-        if not mlflow_uri and dgx_ip:
-            mlflow_uri = f"http://{dgx_ip}:5000"
-
-        s3_endpoint = os.environ.get(
-            "MLFLOW_S3_ENDPOINT_URL",
-            os.environ.get("ARTIFACT_STORE_ENDPOINT", ""),
-        )
+        s3_endpoint = os.environ.get("MLFLOW_S3_ENDPOINT_URL", "")
         if not s3_endpoint and dgx_ip:
             s3_endpoint = f"http://{dgx_ip}:9000"
 
         return CortexConfig(
-            ray_address=ray_address,
+            ray_address=os.environ.get("RAY_ADDRESS", f"http://{dgx_ip}:8265" if dgx_ip else ""),
             dgx_ip=dgx_ip,
-            mlflow_tracking_uri=mlflow_uri,
+            mlflow_tracking_uri=os.environ.get("MLFLOW_TRACKING_URI", f"http://{dgx_ip}:5000" if dgx_ip else ""),
             mlflow_s3_endpoint_url=s3_endpoint,
             s3_endpoint_url=s3_endpoint,
-            s3_access_key=os.environ.get(
-                "ARTIFACT_STORE_ACCESS_KEY",
-                os.environ.get("AWS_ACCESS_KEY_ID", ""),
-            ),
-            s3_secret_key=os.environ.get(
-                "ARTIFACT_STORE_SECRET_KEY",
-                os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-            ),
+            s3_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
+            s3_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
             s3_default_bucket=os.environ.get("ARTIFACT_STORE_BUCKET", "ray-checkpoints"),
         )
 
+    @staticmethod
+    def from_secrets_manager() -> CortexConfig:
+        """Build config by pulling secrets from AWS Secrets Manager."""
+        dgx_ip = _get_secret(f"{SM_PREFIX}/dgx-tailscale-ip")
+        minio_password = _get_secret(f"{SM_PREFIX}/minio-root-password")
+        s3_endpoint = f"http://{dgx_ip}:9000" if dgx_ip else ""
+
+        return CortexConfig(
+            ray_address=f"http://{dgx_ip}:8265" if dgx_ip else "",
+            dgx_ip=dgx_ip,
+            mlflow_tracking_uri=f"http://{dgx_ip}:5000" if dgx_ip else "",
+            mlflow_s3_endpoint_url=s3_endpoint,
+            s3_endpoint_url=s3_endpoint,
+            s3_access_key="minioadmin",
+            s3_secret_key=minio_password,
+            s3_default_bucket="ray-checkpoints",
+        )
+
     def env_vars_for_job(self) -> dict[str, str]:
-        """Return env vars to inject into Ray jobs so task code can call cortexflow.init()."""
+        """Return env vars to inject into Ray jobs so task code can use from_env()."""
         env: dict[str, str] = {}
         if self.mlflow_tracking_uri:
             env["MLFLOW_TRACKING_URI"] = self.mlflow_tracking_uri
