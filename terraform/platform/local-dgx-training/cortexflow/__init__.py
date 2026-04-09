@@ -18,11 +18,14 @@
 from __future__ import annotations
 
 
-def init(ray_address: str | None = None) -> None:
+def init() -> None:
     """Configure connections to Ray, MLflow, and S3.
 
-    If running inside a Ray job (env vars already injected), reads from env.
-    Otherwise, pulls secrets from AWS Secrets Manager.
+    If running inside a Ray job (env vars already injected by cortexflow.remote),
+    reads config from env and does not re-init Ray.
+
+    On the Mac: pulls secrets from AWS Secrets Manager and connects to the Ray
+    cluster via the Ray Client protocol (ray://<ip>:10001).
 
     Call once at the top of your script.
     """
@@ -32,18 +35,17 @@ def init(ray_address: str | None = None) -> None:
 
     from cortexflow.config import CortexConfig, set_config
 
-    # Inside a Ray job, env vars are pre-injected by cortexflow.remote
-    if os.environ.get("DGX_TAILSCALE_IP"):
+    inside_ray_job = bool(os.environ.get("DGX_TAILSCALE_IP"))
+
+    if inside_ray_job:
         config = CortexConfig.from_env()
     else:
         config = CortexConfig.from_secrets_manager()
 
-    if ray_address:
-        config.ray_address = ray_address
     set_config(config)
 
-    if config.ray_address and not ray.is_initialized():
-        ray.init(address=config.ray_address, ignore_reinit_error=True)
+    if not ray.is_initialized() and config.dgx_ip:
+        ray.init(address=f"ray://{config.dgx_ip}:10001", ignore_reinit_error=True)
 
 
 def __getattr__(name: str):  # noqa: ANN204
