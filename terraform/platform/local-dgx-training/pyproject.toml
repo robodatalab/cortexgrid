@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Connect your ML code to the RoboLab compute cluster — Ray, MLflow, and S3"
 requires-python = ">=3.11"
 dependencies = [
-    "ray[default]==2.9.3",
-    "mlflow==2.10.2",
+    "ray[default]>=2.9,<3",
+    "mlflow>=2.10,<3",
     "boto3>=1.34",
 ]
 
