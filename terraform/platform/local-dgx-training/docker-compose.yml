@@ -51,18 +51,13 @@ services:
       - "8080:8080"   # Prometheus metrics
     environment:
       - RAY_REDIS_ADDRESS=redis:6379
+      - RAY_GRAFANA_HOST=http://grafana:3000
+      - RAY_GRAFANA_IFRAME_HOST=http://${DGX_TAILSCALE_IP}:3000
+      - RAY_PROMETHEUS_HOST=http://prometheus:9090
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_S3_ENDPOINT_URL=${ARTIFACT_STORE_ENDPOINT}
       - AWS_ACCESS_KEY_ID=${ARTIFACT_STORE_ACCESS_KEY}
       - AWS_SECRET_ACCESS_KEY=${ARTIFACT_STORE_SECRET_KEY}
-    command: >
-      ray start --head
-        --node-ip-address=0.0.0.0
-        --dashboard-host=0.0.0.0
-        --dashboard-port=8265
-        --metrics-export-port=8080
-        --redis-address=redis:6379
-        --block
     deploy:
       resources:
         reservations:
@@ -72,6 +67,13 @@ services:
               capabilities: [gpu]
     volumes:
       - ray-tmp:/tmp/ray
+    command: >
+      ray start --head
+        --node-ip-address=0.0.0.0
+        --dashboard-host=0.0.0.0
+        --dashboard-port=8265
+        --metrics-export-port=8080
+        --block
     healthcheck:
       test: ["CMD", "ray", "status"]
       interval: 30s
@@ -186,7 +188,7 @@ services:
     image: prom/node-exporter:v1.7.0
     container_name: robolab-node-exporter
     restart: unless-stopped
-    profiles: ["monitoring", "default"]
+    profiles: ["monitoring"]
     ports:
       - "9100:9100"
     volumes:
@@ -209,7 +211,7 @@ services:
     image: prom/prometheus:v2.48.1
     container_name: robolab-prometheus
     restart: unless-stopped
-    profiles: ["monitoring", "default"]
+    profiles: ["monitoring"]
     depends_on:
       node-exporter:
         condition: service_healthy
@@ -232,19 +234,25 @@ services:
     image: grafana/grafana:10.2.3
     container_name: robolab-grafana
     restart: unless-stopped
-    profiles: ["monitoring", "default"]
+    profiles: ["monitoring"]
     depends_on:
       prometheus:
         condition: service_healthy
+      ray-head:
+        condition: service_started
     ports:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ray-tmp:/tmp/ray:ro
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 15s

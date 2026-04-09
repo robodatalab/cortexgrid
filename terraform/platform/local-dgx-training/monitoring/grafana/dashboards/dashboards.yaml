@@ -10,3 +10,14 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards
       foldersFromFilesStructure: false
+
+  - name: "ray"
+    orgId: 1
+    folder: "Ray"
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /tmp/ray/session_latest/metrics/grafana/dashboards
+      foldersFromFilesStructure: false

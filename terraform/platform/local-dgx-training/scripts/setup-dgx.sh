@@ -85,8 +85,9 @@ echo "[4/5] Starting services on DGX..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
 cd "${DGX_DIR}"
-docker compose pull --ignore-pull-failures 2>/dev/null || true
-docker compose up -d --build
+docker compose --profile monitoring pull --ignore-pull-failures 2>/dev/null || true
+docker compose --profile monitoring build --no-cache
+docker compose --profile monitoring up -d
 REMOTE_UP
 
 echo "[5/5] Waiting for Ray Dashboard..."

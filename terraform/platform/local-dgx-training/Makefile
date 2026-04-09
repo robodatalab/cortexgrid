@@ -44,11 +44,11 @@ pull-secrets: check-dir ## Pull secrets from AWS Secrets Manager into .env
 
 .PHONY: up
 up: check-dir ## Start all services
-	docker compose up -d --build
+	docker compose --profile monitoring up -d --build
 
 .PHONY: down
 down: check-dir ## Stop all services
-	docker compose down
+	docker compose --profile monitoring down
 
 .PHONY: restart
 restart: check-dir ## Restart all services

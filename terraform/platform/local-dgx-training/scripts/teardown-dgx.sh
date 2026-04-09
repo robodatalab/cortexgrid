@@ -45,7 +45,7 @@ echo "Tearing down DGX at ${DGX_HOST}..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_DOWN
 set -euo pipefail
 cd "${DGX_DIR}" 2>/dev/null || { echo "Directory not found on DGX"; exit 0; }
-docker compose down -v
+docker compose --profile monitoring down -v
 rm -f .env
 echo "Done."
 REMOTE_DOWN

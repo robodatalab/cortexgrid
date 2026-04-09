@@ -1,13 +1,10 @@
 # Ray Head/Worker Image — Python 3.11 + ML Libraries
 # GPU access is handled by NVIDIA Container Toolkit (--gpus all in compose).
-# PyTorch CUDA wheels bundle the runtime libraries they need.
 
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    wget \
-    git \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
@@ -23,6 +20,17 @@ RUN pip install --no-cache-dir \
     boto3==1.34.29 \
     python-dotenv==1.0.1 \
     psutil==5.9.8
+
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 EXPOSE 8265 6379 8080
 
