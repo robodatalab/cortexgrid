@@ -5,41 +5,32 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. All 
 ## Architecture
 
 ```
-                   +-----------+
-                   |  Route53  |
-                   | (DNS)     |
-                   +-----+-----+
-                         |
-          +--------------+--------------+
-          |                             |
-  robodatalab.com              (default domain)
-  www.robodatalab.com
-          |                             |
-  +-------v--------+          +--------v-------+
-  |   CloudFront   |          |   CloudFront   |
-  |   (website)    |          |   (platform)   |
-  +-------+--------+          +--------+-------+
-          |                             |
-  +-------v--------+          +--------v-------+
-  |   S3 Bucket    |          |   S3 Bucket    |
-  |  (static SPA)  |          |  (static SPA)  |
-  +----------------+          +----------------+
-          ^
-          |
-  +-------+--------+
-  | GitHub Actions  |
-  | (OIDC deploy)   |
-  +----------------+
+  AWS (us-east-1)
+  +--------------------------------------------------+
+  |                                                  |
+  |  Route53 --> CloudFront --> S3 (robodatalab.com) |
+  |                  |                               |
+  |            API Gateway --> Lambda (auth)          |
+  |                              |                   |
+  |                     VPC [ RDS + NAT ]            |
+  |                                                  |
+  |  Secrets Manager (robolab/auth/*, robolab/infra/*)|
+  |       ^                                          |
+  |       |  OIDC                                    |
+  |  GitHub Actions                                  |
+  +--------------------------------------------------+
 
-
-          Tailscale Network
-  +-------------+     +---------------------------+
-  |  MacBook    |     |  DGX Spark (128GB VRAM)   |
-  |             | SSH |                           |
-  |  your code ------>|  Ray, MLflow, MinIO,      |
-  |  (cortexflow)     |  Prometheus, Grafana      |
-  |             |     |                           |
-  +-------------+     +---------------------------+
+  Tailscale Network
+  +-------------+         +---------------------------+
+  |  MacBook    |  SSH    |  DGX Spark (128GB VRAM)   |
+  |             |-------->|                           |
+  |  your code  |         |  Ray         :8265        |
+  |  (cortexflow)         |  MLflow      :5000        |
+  |             |         |  MinIO       :9000        |
+  |             |         |  Grafana     :3000        |
+  |             |         |  Prometheus  :9090        |
+  |             |         |  Redis, PostgreSQL        |
+  +-------------+         +---------------------------+
 ```
 
 ### Folder layout
