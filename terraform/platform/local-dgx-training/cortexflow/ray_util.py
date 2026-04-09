@@ -158,8 +158,14 @@ def get(futures: list[_JobFuture], timeout: float | None = None) -> list[Any]:
                 break
             elif status in (JobStatus.FAILED, JobStatus.STOPPED):
                 logs = future.client.get_job_logs(future.job_id)
+                info = future.client.get_job_info(future.job_id)
+                details = ""
+                if info and info.message:
+                    details += info.message + "\n"
+                if logs:
+                    details += logs
                 raise RuntimeError(
-                    f"Job {future.job_id} {status.value}:\n{logs}"
+                    f"Job {future.job_id} {status.value}:\n{details}"
                 )
             else:
                 time.sleep(2)
