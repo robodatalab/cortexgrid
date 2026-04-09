@@ -109,9 +109,8 @@ def remote(
         future = train_fn.remote(arg1, arg2)
         result = cortexflow.get([future])
     """
-    runtime_env = build_runtime_env()
-
     config = get_config()
+    runtime_env = build_runtime_env(github_token=config.github_token)
     env_vars = config.env_vars_for_job()
     if env_vars:
         existing = runtime_env.get("env_vars", {})

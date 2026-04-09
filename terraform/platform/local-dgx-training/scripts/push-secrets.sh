@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# Push secrets from .env to AWS Secrets Manager
-# =============================================================================
-# Reads the local .env and creates or updates each secret in AWS SM.
+# Push all KEY=VALUE pairs from .env to AWS Secrets Manager.
+# Each env var becomes robolab/infra/<KEY>.
 # Safe to run multiple times — existing secrets are updated in place.
 #
 # Usage:
-#   bash scripts/push-secrets.sh              # push from .env
+#   bash scripts/push-secrets.sh
 #   AWS_PROFILE=robolab bash scripts/push-secrets.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,21 +24,19 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Load .env
-set -a
-source "$ENV_FILE"
-set +a
-
-REGION="${AWS_REGION:-us-east-1}"
-
-# --- Check aws CLI ---
 if ! command -v aws &>/dev/null; then
     echo "Error: aws CLI is not installed." >&2
     echo "  Install: brew install awscli" >&2
     exit 1
 fi
 
-# --- Helper: create or update a secret ---
+# Source .env so variable references (e.g. ${DGX_TAILSCALE_IP}) resolve
+set -a
+source "$ENV_FILE"
+set +a
+
+REGION="${AWS_REGION:-us-east-1}"
+
 put_secret() {
     local secret_name="$1"
     local secret_value="$2"
@@ -62,30 +58,14 @@ put_secret() {
     fi
 }
 
-# --- Validate required values are set ---
-missing=()
-[[ -z "${DGX_TAILSCALE_IP:-}" || "${DGX_TAILSCALE_IP}" == "100.x.x.x" ]] && missing+=("DGX_TAILSCALE_IP")
-[[ -z "${POSTGRES_PASSWORD:-}" ]] && missing+=("POSTGRES_PASSWORD")
-[[ -z "${MINIO_ROOT_PASSWORD:-}" ]] && missing+=("MINIO_ROOT_PASSWORD")
-[[ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]] && missing+=("GRAFANA_ADMIN_PASSWORD")
-
-if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "Error: The following required values are missing or placeholder in .env:" >&2
-    for var in "${missing[@]}"; do
-        echo "  - $var" >&2
-    done
-    echo "" >&2
-    echo "Fill them in: \$EDITOR .env" >&2
-    exit 1
-fi
-
 echo "Pushing secrets to AWS Secrets Manager (region: ${REGION})..."
 echo
 
-put_secret "robolab/infra/dgx-tailscale-ip"       "$DGX_TAILSCALE_IP"
-put_secret "robolab/infra/mlflow-postgres-password" "$POSTGRES_PASSWORD"
-put_secret "robolab/infra/minio-root-password"      "$MINIO_ROOT_PASSWORD"
-put_secret "robolab/infra/grafana-admin-password"   "$GRAFANA_ADMIN_PASSWORD"
+# Parse every KEY=VALUE line from .env, push each as robolab/infra/KEY
+while IFS='=' read -r key _; do
+    value="${!key}"
+    put_secret "robolab/infra/${key}" "$value"
+done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE")
 
 echo
-echo "Done. All infra secrets are now in AWS Secrets Manager."
+echo "Done."

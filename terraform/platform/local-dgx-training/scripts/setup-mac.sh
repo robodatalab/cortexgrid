@@ -38,7 +38,7 @@ REGION="${AWS_REGION:-us-east-1}"
 echo "[2/3] Checking secrets..."
 
 if aws secretsmanager get-secret-value \
-    --secret-id "robolab/infra/dgx-tailscale-ip" \
+    --secret-id "robolab/infra/DGX_TAILSCALE_IP" \
     --region "$REGION" \
     --query 'SecretString' --output text &>/dev/null; then
     echo "  Secrets found in AWS Secrets Manager — OK"
@@ -64,7 +64,7 @@ else
 fi
 
 DGX_IP=$(aws secretsmanager get-secret-value \
-    --secret-id "robolab/infra/dgx-tailscale-ip" \
+    --secret-id "robolab/infra/DGX_TAILSCALE_IP" \
     --region "$REGION" \
     --query 'SecretString' --output text)
 

@@ -36,6 +36,7 @@ class CortexConfig:
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_default_bucket: str = "ray-checkpoints"
+    github_token: str = ""
 
     @staticmethod
     def from_env() -> CortexConfig:
@@ -59,8 +60,9 @@ class CortexConfig:
     @staticmethod
     def from_secrets_manager() -> CortexConfig:
         """Build config by pulling secrets from AWS Secrets Manager."""
-        dgx_ip = _get_secret(f"{SM_PREFIX}/dgx-tailscale-ip")
-        minio_password = _get_secret(f"{SM_PREFIX}/minio-root-password")
+        dgx_ip = _get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+        minio_password = _get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
+        github_token = _get_secret(f"{SM_PREFIX}/GH_TOKEN")
         s3_endpoint = f"http://{dgx_ip}:9000" if dgx_ip else ""
 
         return CortexConfig(
@@ -72,6 +74,7 @@ class CortexConfig:
             s3_access_key="minioadmin",
             s3_secret_key=minio_password,
             s3_default_bucket="ray-checkpoints",
+            github_token=github_token,
         )
 
     def env_vars_for_job(self) -> dict[str, str]:

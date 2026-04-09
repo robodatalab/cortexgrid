@@ -40,10 +40,12 @@ def read_pyproject(path: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
-def _source_to_pip(name: str, source: dict[str, str]) -> str:
+def _source_to_pip(name: str, source: dict[str, str], github_token: str = "") -> str:
     """Convert a [tool.uv.sources] entry to a pip install specifier."""
     if "git" in source:
         url = source["git"]
+        if github_token and url.startswith("https://github.com/"):
+            url = url.replace("https://github.com/", f"https://{github_token}@github.com/", 1)
         spec = f"{name} @ git+{url}"
         if "subdirectory" in source:
             spec += f"#subdirectory={source['subdirectory']}"
@@ -55,6 +57,7 @@ def _source_to_pip(name: str, source: dict[str, str]) -> str:
 
 def build_runtime_env(
     extra_excludes: list[str] | None = None,
+    github_token: str = "",
 ) -> dict[str, Any]:
     """Build a Ray runtime_env from the current project's pyproject.toml.
 
@@ -85,7 +88,7 @@ def build_runtime_env(
                 break
 
         if source:
-            pip_deps.append(_source_to_pip(name, source))
+            pip_deps.append(_source_to_pip(name, source, github_token))
         else:
             pip_deps.append(dep)
 
