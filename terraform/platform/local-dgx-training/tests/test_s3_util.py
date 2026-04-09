@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from cortexflow.config import CortexConfig, set_config
 
@@ -48,8 +48,9 @@ class TestUpload(unittest.TestCase):
     def tearDown(self) -> None:
         set_config(None)  # type: ignore[arg-type]
 
+    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
-    def test_upload_uses_default_bucket_and_filename(self, mock_client_fn: MagicMock) -> None:
+    def test_upload_uses_default_bucket_and_filename(self, mock_client_fn: MagicMock, _getsize: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
 
@@ -58,12 +59,13 @@ class TestUpload(unittest.TestCase):
 
         mock_client.head_bucket.assert_called_once_with(Bucket="my-bucket")
         mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "my-bucket", "data.parquet"
+            "/tmp/data.parquet", "my-bucket", "data.parquet", Callback=ANY
         )
         self.assertEqual(result, "s3://my-bucket/data.parquet")
 
+    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
-    def test_upload_with_explicit_bucket_and_key(self, mock_client_fn: MagicMock) -> None:
+    def test_upload_with_explicit_bucket_and_key(self, mock_client_fn: MagicMock, _getsize: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
 
@@ -72,12 +74,13 @@ class TestUpload(unittest.TestCase):
 
         mock_client.head_bucket.assert_called_once_with(Bucket="other")
         mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "other", "run/output.parquet"
+            "/tmp/data.parquet", "other", "run/output.parquet", Callback=ANY
         )
         self.assertEqual(result, "s3://other/run/output.parquet")
 
+    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
-    def test_upload_creates_bucket_when_missing(self, mock_client_fn: MagicMock) -> None:
+    def test_upload_creates_bucket_when_missing(self, mock_client_fn: MagicMock, _getsize: MagicMock) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
 
@@ -91,12 +94,13 @@ class TestUpload(unittest.TestCase):
         mock_client.head_bucket.assert_called_once_with(Bucket="new-bucket")
         mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
         mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "new-bucket", "file.parquet"
+            "/tmp/data.parquet", "new-bucket", "file.parquet", Callback=ANY
         )
         self.assertEqual(result, "s3://new-bucket/file.parquet")
 
+    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
-    def test_upload_creates_bucket_on_client_error(self, mock_client_fn: MagicMock) -> None:
+    def test_upload_creates_bucket_on_client_error(self, mock_client_fn: MagicMock, _getsize: MagicMock) -> None:
         from botocore.exceptions import ClientError
 
         mock_client = MagicMock()
@@ -113,7 +117,7 @@ class TestUpload(unittest.TestCase):
 
         mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
         mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "new-bucket", "file.parquet"
+            "/tmp/data.parquet", "new-bucket", "file.parquet", Callback=ANY
         )
         self.assertEqual(result, "s3://new-bucket/file.parquet")
 

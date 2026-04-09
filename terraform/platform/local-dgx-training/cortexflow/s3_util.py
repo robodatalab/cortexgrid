@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 import boto3
+from tqdm import tqdm
 
 from cortexflow.config import get_config
 
@@ -53,7 +54,14 @@ def upload(
         client.create_bucket(Bucket=bucket)
     except client.exceptions.ClientError:
         client.create_bucket(Bucket=bucket)
-    client.upload_file(local_path, bucket, key)
+    file_size = os.path.getsize(local_path)
+    with tqdm(
+        total=file_size,
+        unit="B",
+        unit_scale=True,
+        desc=f"Uploading {os.path.basename(local_path)}",
+    ) as pbar:
+        client.upload_file(local_path, bucket, key, Callback=pbar.update)
     return f"s3://{bucket}/{key}"
 
 

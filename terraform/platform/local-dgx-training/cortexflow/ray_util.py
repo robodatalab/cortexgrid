@@ -140,35 +140,72 @@ def get(futures: list[_JobFuture], timeout: float | None = None) -> list[Any]:
         timeout: Max seconds to wait. None = wait forever.
     """
     from ray.job_submission import JobStatus
+    from tqdm import tqdm
+
+    _STATUS_LABELS = {
+        "PENDING": "Setting up environment",
+        "RUNNING": "Running",
+    }
 
     results: list[Any] = []
     deadline = time.time() + timeout if timeout else None
 
     for future in futures:
-        while True:
-            if deadline and time.time() > deadline:
-                raise TimeoutError(f"Job {future.job_id} did not complete in time")
+        prev_log_len = 0
+        pbar = tqdm(
+            bar_format="  {desc} [{elapsed}]",
+            desc=f"{future.job_id}: Submitted",
+        )
+        try:
+            while True:
+                if deadline and time.time() > deadline:
+                    pbar.close()
+                    raise TimeoutError(
+                        f"Job {future.job_id} did not complete in time"
+                    )
 
-            status = future.client.get_job_status(future.job_id)
+                status = future.client.get_job_status(future.job_id)
 
-            if status == JobStatus.SUCCEEDED:
-                logs = future.client.get_job_logs(future.job_id)
-                result = _extract_result(logs)
-                results.append(result)
-                break
-            elif status in (JobStatus.FAILED, JobStatus.STOPPED):
-                logs = future.client.get_job_logs(future.job_id)
-                info = future.client.get_job_info(future.job_id)
-                details = ""
-                if info and info.message:
-                    details += info.message + "\n"
-                if logs:
-                    details += logs
-                raise RuntimeError(
-                    f"Job {future.job_id} {status.value}:\n{details}"
-                )
-            else:
-                time.sleep(2)
+                if status == JobStatus.SUCCEEDED:
+                    pbar.set_description_str(
+                        f"{future.job_id}: Complete"
+                    )
+                    pbar.close()
+                    logs = future.client.get_job_logs(future.job_id)
+                    result = _extract_result(logs)
+                    results.append(result)
+                    break
+                elif status in (JobStatus.FAILED, JobStatus.STOPPED):
+                    pbar.set_description_str(
+                        f"{future.job_id}: {status.value}"
+                    )
+                    pbar.close()
+                    logs = future.client.get_job_logs(future.job_id)
+                    info = future.client.get_job_info(future.job_id)
+                    details = ""
+                    if info and info.message:
+                        details += info.message + "\n"
+                    if logs:
+                        details += logs
+                    raise RuntimeError(
+                        f"Job {future.job_id} {status.value}:\n{details}"
+                    )
+                else:
+                    label = _STATUS_LABELS.get(status.value, status.value)
+                    pbar.set_description_str(f"{future.job_id}: {label}")
+
+                    if status == JobStatus.RUNNING:
+                        logs = future.client.get_job_logs(future.job_id)
+                        new_logs = logs[prev_log_len:]
+                        prev_log_len = len(logs)
+                        for line in new_logs.strip().splitlines():
+                            if not line.startswith("__CORTEXFLOW_"):
+                                tqdm.write(f"  {line}")
+
+                    time.sleep(2)
+        except BaseException:
+            pbar.close()
+            raise
 
     return results
 
