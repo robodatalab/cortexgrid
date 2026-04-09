@@ -9,6 +9,7 @@ Uses the Ray Jobs API (HTTP to :8265). The Mac never joins the cluster.
 from __future__ import annotations
 
 import base64
+import cloudpickle
 import pickle
 import textwrap
 import time
@@ -49,7 +50,7 @@ class _RemoteFunction:
         client = JobSubmissionClient(f"http://{config.dgx_ip}:8265")
 
         # Serialize function and arguments
-        payload = base64.b64encode(pickle.dumps({
+        payload = base64.b64encode(cloudpickle.dumps({
             "fn": self._fn,
             "args": args,
             "kwargs": kwargs,
