@@ -1,5 +1,9 @@
-# Ray Head/Worker Image — Python 3.11 + ML Libraries
+# Ray Head/Worker Image — Infrastructure + PyTorch base
 # GPU access is handled by NVIDIA Container Toolkit (--gpus all in compose).
+#
+# ML libraries (transformers, peft, accelerate, etc.) are NOT installed here.
+# Each Ray job's pip runtime_env installs them from the submitting project's
+# pyproject.toml, so different repos can use different versions.
 
 FROM python:3.11-slim AS builder
 
@@ -12,10 +16,6 @@ RUN pip install --no-cache-dir \
     torch==2.2.0 \
     torchvision==0.17.0 \
     torchaudio==2.2.0 \
-    transformers==4.37.2 \
-    datasets==2.16.1 \
-    accelerate==0.26.1 \
-    peft==0.8.2 \
     mlflow==2.10.2 \
     boto3==1.34.29 \
     python-dotenv==1.0.1 \
