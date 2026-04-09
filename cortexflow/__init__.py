@@ -4,15 +4,23 @@
 
     cortexflow.init()
 
-    with cortexflow.mlflow_run("my-experiment") as run:
-        cortexflow.log_metric("loss", 0.5, step=1)
-        cortexflow.save_checkpoint(model, optimizer, epoch=5)
+    # Fire-and-forget training on the DGX
+    train_fn = cortexflow.remote(num_gpus=1, max_retries=3)(my_train)
+    job = train_fn.remote(config)
+    print(f"Submitted: {job.job_id}")
 
-    @cortexflow.remote(num_gpus=1)
-    def train(config):
-        ...
+    # Check on it later
+    info = cortexflow.status(job.job_id)
 
-    cortexflow.get(train.remote({"lr": 1e-3}))
+    # Inside the training function — checkpoint after each epoch
+    with cortexflow.checkpoint() as ckpt:
+        ckpt.epoch = epoch
+        ckpt.save_training_state(model, optimizer, scheduler)
+
+    # On resume — load checkpoint if it exists
+    ckpt = cortexflow.resume()
+    if ckpt:
+        ckpt.restore_training_state(model, optimizer, scheduler)
 """
 
 from __future__ import annotations
@@ -42,7 +50,7 @@ def init() -> None:
 
 def __getattr__(name: str):  # noqa: ANN204
     """Lazy imports so heavy deps (ray, mlflow, boto3) aren't loaded at import time."""
-    if name in ("remote", "get", "get_ray_client"):
+    if name in ("remote", "get", "get_ray_client", "status", "result", "logs", "Job", "JobInfo"):
         from cortexflow import ray_util
         return getattr(ray_util, name)
 
@@ -53,27 +61,26 @@ def __getattr__(name: str):  # noqa: ANN204
         from cortexflow import mlflow_util
         return getattr(mlflow_util, name)
 
-    if name in ("upload", "download", "get_s3_client"):
+    if name in ("upload", "upload_dir", "download", "get_s3_client"):
         from cortexflow import s3_util
         return getattr(s3_util, name)
+
+    if name in ("checkpoint", "resume", "Checkpoint", "get_job_id"):
+        from cortexflow import checkpoint as ckpt_mod
+        return getattr(ckpt_mod, name)
 
     raise AttributeError(f"module 'cortexflow' has no attribute {name!r}")
 
 
 __all__ = [
     "init",
-    "remote",
-    "get",
-    "get_ray_client",
-    "mlflow_run",
-    "log_metric",
-    "log_metrics",
-    "log_params",
-    "log_artifact",
-    "save_checkpoint",
-    "load_checkpoint",
-    "get_mlflow_client",
-    "upload",
-    "download",
-    "get_s3_client",
+    # Ray / jobs
+    "remote", "get", "get_ray_client", "status", "result", "logs", "Job", "JobInfo",
+    # MLflow
+    "mlflow_run", "log_metric", "log_metrics", "log_params",
+    "log_artifact", "save_checkpoint", "load_checkpoint", "get_mlflow_client",
+    # S3
+    "upload", "upload_dir", "download", "get_s3_client",
+    # Checkpointing
+    "checkpoint", "resume", "Checkpoint", "get_job_id",
 ]

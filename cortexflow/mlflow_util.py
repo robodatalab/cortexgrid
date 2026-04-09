@@ -11,10 +11,11 @@ import tempfile
 from contextlib import contextmanager
 from typing import Any, Generator
 
-import mlflow
-import mlflow.tracking
-
 from cortexflow.config import get_config
+import mlflow
+import mlflow.artifacts
+import mlflow.tracking
+import torch
 
 
 def _ensure_configured() -> None:
@@ -29,6 +30,22 @@ def _ensure_configured() -> None:
         os.environ.setdefault("AWS_SECRET_ACCESS_KEY", config.s3_secret_key)
 
 
+def _find_run_by_job_id(experiment: str, cortexflow_job_id: str) -> str | None:
+    """Search for an existing MLflow run tagged with the given cortexflow job ID."""
+    client = mlflow.tracking.MlflowClient()
+    exp = client.get_experiment_by_name(experiment)
+    if exp is None:
+        return None
+    runs = client.search_runs(
+        experiment_ids=[exp.experiment_id],
+        filter_string=f"tags.`cortexflow.job_id` = '{cortexflow_job_id}'",
+        max_results=1,
+    )
+    if runs:
+        return runs[0].info.run_id
+    return None
+
+
 @contextmanager
 def mlflow_run(
     experiment: str,
@@ -38,13 +55,29 @@ def mlflow_run(
 ) -> Generator[mlflow.ActiveRun, None, None]:
     """Context manager for an MLflow run with auto-configured tracking.
 
+    On retry within a cortexflow job (same ``CORTEXFLOW_JOB_ID``), this
+    automatically resumes the MLflow run from the previous attempt
+    instead of creating a new one.
+
     Usage:
         with cortexflow.mlflow_run("my-experiment", run_name="v3") as run:
             cortexflow.log_metric("loss", 0.5, step=1)
     """
     _ensure_configured()
     mlflow.set_experiment(experiment)
-    with mlflow.start_run(run_id=run_id, run_name=run_name, tags=tags) as run:
+
+    cortexflow_job_id = os.environ.get("CORTEXFLOW_JOB_ID")
+
+    if cortexflow_job_id and run_id is None:
+        existing = _find_run_by_job_id(experiment, cortexflow_job_id)
+        if existing:
+            run_id = existing
+
+    all_tags = dict(tags or {})
+    if cortexflow_job_id:
+        all_tags["cortexflow.job_id"] = cortexflow_job_id
+
+    with mlflow.start_run(run_id=run_id, run_name=run_name, tags=all_tags) as run:
         yield run
 
 
@@ -85,8 +118,6 @@ def save_checkpoint(
     Returns:
         The artifact path of the saved checkpoint.
     """
-    import torch
-
     state: dict[str, Any] = {
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
@@ -119,8 +150,6 @@ def load_checkpoint(
     Returns:
         Dict with 'epoch', 'model_state_dict', 'optimizer_state_dict' (if saved), etc.
     """
-    import torch
-
     _ensure_configured()
     client = mlflow.tracking.MlflowClient()
 

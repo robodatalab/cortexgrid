@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+import boto3  # type: ignore
+
 
 SM_PREFIX = "robolab/infra"
 SM_REGION = "us-east-1"
@@ -17,7 +19,6 @@ SM_REGION = "us-east-1"
 def _get_secret(secret_id: str) -> str:
     """Fetch a secret from AWS Secrets Manager. Returns empty string on failure."""
     try:
-        import boto3
         client = boto3.client("secretsmanager", region_name=SM_REGION)
         return client.get_secret_value(SecretId=secret_id)["SecretString"]
     except Exception:
@@ -47,14 +48,20 @@ class CortexConfig:
             s3_endpoint = f"http://{dgx_ip}:9000"
 
         return CortexConfig(
-            ray_address=os.environ.get("RAY_ADDRESS", f"http://{dgx_ip}:8265" if dgx_ip else ""),
+            ray_address=os.environ.get(
+                "RAY_ADDRESS", f"http://{dgx_ip}:8265" if dgx_ip else ""
+            ),
             dgx_ip=dgx_ip,
-            mlflow_tracking_uri=os.environ.get("MLFLOW_TRACKING_URI", f"http://{dgx_ip}:5000" if dgx_ip else ""),
+            mlflow_tracking_uri=os.environ.get(
+                "MLFLOW_TRACKING_URI", f"http://{dgx_ip}:5000" if dgx_ip else ""
+            ),
             mlflow_s3_endpoint_url=s3_endpoint,
             s3_endpoint_url=s3_endpoint,
             s3_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
             s3_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-            s3_default_bucket=os.environ.get("ARTIFACT_STORE_BUCKET", "ray-checkpoints"),
+            s3_default_bucket=os.environ.get(
+                "ARTIFACT_STORE_BUCKET", "ray-checkpoints"
+            ),
         )
 
     @staticmethod

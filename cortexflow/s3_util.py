@@ -65,6 +65,44 @@ def upload(
     return f"s3://{bucket}/{key}"
 
 
+def upload_dir(
+    local_dir: str,
+    bucket: str | None = None,
+    prefix: str = "",
+) -> list[str]:
+    """Upload all files in a directory tree to S3/MinIO.
+
+    Args:
+        local_dir: Path to the local directory.
+        bucket: Target bucket. Defaults to the configured default bucket.
+        prefix: Key prefix for all uploaded objects.
+
+    Returns:
+        List of s3://bucket/key URIs for uploaded objects.
+    """
+    config = get_config()
+    bucket = bucket or config.s3_default_bucket
+
+    client = get_s3_client()
+    try:
+        client.head_bucket(Bucket=bucket)
+    except client.exceptions.NoSuchBucket:
+        client.create_bucket(Bucket=bucket)
+    except client.exceptions.ClientError:
+        client.create_bucket(Bucket=bucket)
+
+    uploaded: list[str] = []
+    for root, _dirs, files in os.walk(local_dir):
+        for filename in files:
+            local_path = os.path.join(root, filename)
+            rel_path = os.path.relpath(local_path, local_dir).replace(os.sep, "/")
+            key = f"{prefix}/{rel_path}" if prefix else rel_path
+            client.upload_file(local_path, bucket, key)
+            uploaded.append(f"s3://{bucket}/{key}")
+
+    return uploaded
+
+
 def download(
     bucket: str,
     key: str,

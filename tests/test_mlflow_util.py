@@ -92,7 +92,79 @@ class TestMlflowRun(unittest.TestCase):
 
         self.mock_mlflow.set_experiment.assert_called_once_with("test-experiment")
         self.mock_mlflow.start_run.assert_called_once_with(
-            run_id=None, run_name="v1", tags=None
+            run_id=None, run_name="v1", tags={}
+        )
+
+
+class TestMlflowRunAutoResume(unittest.TestCase):
+    def setUp(self) -> None:
+        set_config(CortexConfig(mlflow_tracking_uri="http://test:5000"))
+        self.mock_mlflow = _mock_mlflow()
+        mock_run = MagicMock()
+        self.mock_mlflow.start_run.return_value.__enter__ = MagicMock(return_value=mock_run)
+        self.mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
+        self.mock_run = mock_run
+        self.modules_patcher = patch.dict(sys.modules, {
+            "mlflow": self.mock_mlflow,
+            "mlflow.tracking": self.mock_mlflow.tracking,
+            "mlflow.artifacts": self.mock_mlflow.artifacts,
+        })
+        self.modules_patcher.start()
+        if "cortexflow.mlflow_util" in sys.modules:
+            del sys.modules["cortexflow.mlflow_util"]
+
+    def tearDown(self) -> None:
+        self.modules_patcher.stop()
+        set_config(None)  # type: ignore[arg-type]
+        if "cortexflow.mlflow_util" in sys.modules:
+            del sys.modules["cortexflow.mlflow_util"]
+
+    def test_resumes_existing_run_on_retry(self) -> None:
+        mock_client = self.mock_mlflow.tracking.MlflowClient.return_value
+        mock_exp = MagicMock()
+        mock_exp.experiment_id = "exp_1"
+        mock_client.get_experiment_by_name.return_value = mock_exp
+
+        mock_prev_run = MagicMock()
+        mock_prev_run.info.run_id = "run_prev_123"
+        mock_client.search_runs.return_value = [mock_prev_run]
+
+        with patch.dict(os.environ, {"CORTEXFLOW_JOB_ID": "job-uuid-1"}):
+            from cortexflow.mlflow_util import mlflow_run
+            with mlflow_run("test-exp", run_name="v1"):
+                pass
+
+        self.mock_mlflow.start_run.assert_called_once_with(
+            run_id="run_prev_123",
+            run_name="v1",
+            tags={"cortexflow.job_id": "job-uuid-1"},
+        )
+
+    def test_creates_new_run_when_no_existing(self) -> None:
+        mock_client = self.mock_mlflow.tracking.MlflowClient.return_value
+        mock_client.get_experiment_by_name.return_value = None
+
+        with patch.dict(os.environ, {"CORTEXFLOW_JOB_ID": "job-uuid-2"}):
+            from cortexflow.mlflow_util import mlflow_run
+            with mlflow_run("test-exp", run_name="v1"):
+                pass
+
+        self.mock_mlflow.start_run.assert_called_once_with(
+            run_id=None,
+            run_name="v1",
+            tags={"cortexflow.job_id": "job-uuid-2"},
+        )
+
+    def test_no_job_id_behaves_normally(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            from cortexflow.mlflow_util import mlflow_run
+            with mlflow_run("test-exp", run_name="v1"):
+                pass
+
+        self.mock_mlflow.start_run.assert_called_once_with(
+            run_id=None,
+            run_name="v1",
+            tags={},
         )
 
 
