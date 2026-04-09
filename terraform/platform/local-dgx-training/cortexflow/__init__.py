@@ -17,22 +17,6 @@
 
 from __future__ import annotations
 
-import ray
-
-from cortexflow.config import CortexConfig, get_config, set_config
-from cortexflow.mlflow_util import (
-    get_mlflow_client,
-    load_checkpoint,
-    log_artifact,
-    log_metric,
-    log_metrics,
-    log_params,
-    mlflow_run,
-    save_checkpoint,
-)
-from cortexflow.ray_util import get, get_ray_client, remote
-from cortexflow.s3_util import download, get_s3_client, upload
-
 
 def init(ray_address: str | None = None) -> None:
     """Configure connections to Ray, MLflow, and S3.
@@ -42,6 +26,10 @@ def init(ray_address: str | None = None) -> None:
 
     Call once at the top of your script.
     """
+    import ray
+
+    from cortexflow.config import CortexConfig, set_config
+
     config = CortexConfig.from_env()
     if ray_address:
         config.ray_address = ray_address
@@ -49,6 +37,26 @@ def init(ray_address: str | None = None) -> None:
 
     if config.ray_address and not ray.is_initialized():
         ray.init(address=config.ray_address, ignore_reinit_error=True)
+
+
+def __getattr__(name: str):  # noqa: ANN204
+    """Lazy imports so heavy deps (ray, mlflow, boto3) aren't loaded at import time."""
+    if name in ("remote", "get", "get_ray_client"):
+        from cortexflow import ray_util
+        return getattr(ray_util, name)
+
+    if name in (
+        "mlflow_run", "log_metric", "log_metrics", "log_params",
+        "log_artifact", "save_checkpoint", "load_checkpoint", "get_mlflow_client",
+    ):
+        from cortexflow import mlflow_util
+        return getattr(mlflow_util, name)
+
+    if name in ("upload", "download", "get_s3_client"):
+        from cortexflow import s3_util
+        return getattr(s3_util, name)
+
+    raise AttributeError(f"module 'cortexflow' has no attribute {name!r}")
 
 
 __all__ = [

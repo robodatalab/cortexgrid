@@ -1,0 +1,28 @@
+name: cortexflow tests
+
+on:
+  push:
+    paths:
+      - "terraform/platform/local-dgx-training/cortexflow/**"
+      - "terraform/platform/local-dgx-training/tests/**"
+      - "terraform/platform/local-dgx-training/pyproject.toml"
+  pull_request:
+    paths:
+      - "terraform/platform/local-dgx-training/cortexflow/**"
+      - "terraform/platform/local-dgx-training/tests/**"
+      - "terraform/platform/local-dgx-training/pyproject.toml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/platform/local-dgx-training
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Run tests
+        run: uv run python -m unittest discover -s tests -v
