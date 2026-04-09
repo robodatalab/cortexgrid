@@ -1,6 +1,7 @@
 .DS_Store
 *.local
 .env
+.venv
 .terraform
 *.tfstate
 *.tfstate.backup

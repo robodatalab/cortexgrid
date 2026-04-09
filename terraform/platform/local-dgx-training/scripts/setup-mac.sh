@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# Mac Workstation — One-time client setup script
-# =============================================================================
+# Mac Workstation — One-time setup script
 #
-# First-time flow:
-#   1. Checks Python + AWS CLI
+# Flow:
+#   1. Checks AWS CLI
 #   2. If .env exists but secrets aren't in AWS yet → pushes them
 #   3. If secrets are in AWS → pulls them into .env
 #   4. Configures shell (RAY_ADDRESS, MLFLOW_TRACKING_URI)
@@ -28,31 +26,8 @@ echo "  RoboLab ML Infrastructure — Mac Setup"
 echo "=========================================="
 echo
 
-# --- Step 1: Check prerequisites ---
-echo "[1/5] Checking prerequisites..."
+echo "[1/4] Checking prerequisites..."
 
-# Python
-PYTHON_CMD=""
-for cmd in python3.11 python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        version=$("$cmd" --version 2>&1 | awk '{print $2}')
-        major=$(echo "$version" | cut -d. -f1)
-        minor=$(echo "$version" | cut -d. -f2)
-        if [[ "$major" -ge 3 && "$minor" -ge 11 ]]; then
-            PYTHON_CMD="$cmd"
-            break
-        fi
-    fi
-done
-
-if [[ -z "$PYTHON_CMD" ]]; then
-    echo "Error: Python 3.11+ is required."
-    echo "  Install: brew install python@3.11"
-    exit 1
-fi
-echo "  $($PYTHON_CMD --version) — OK"
-
-# AWS CLI
 if ! command -v aws &>/dev/null; then
     echo "Error: AWS CLI is not installed."
     echo "  Install: brew install awscli && aws configure"
@@ -60,16 +35,9 @@ if ! command -v aws &>/dev/null; then
 fi
 echo "  aws CLI — OK"
 
-# --- Step 2: Install pip packages ---
-echo "[2/5] Installing client-side packages..."
-$PYTHON_CMD -m pip install --quiet "ray[default]==2.9.3" "mlflow==2.10.2" "boto3==1.34.29" "pyyaml" "python-dotenv"
-echo "  Installed ray, mlflow, boto3, pyyaml, python-dotenv"
-
-# --- Step 3: Secrets — push or pull ---
-echo "[3/5] Configuring secrets..."
+echo "[2/4] Configuring secrets..."
 REGION="${AWS_REGION:-us-east-1}"
 
-# Check if secrets already exist in AWS SM
 SECRETS_IN_AWS=false
 if aws secretsmanager get-secret-value \
     --secret-id "robolab/infra/dgx-tailscale-ip" \
@@ -83,7 +51,6 @@ if [[ "$SECRETS_IN_AWS" == "true" ]]; then
     bash "$REPO_ROOT/scripts/pull-secrets.sh"
 else
     echo "  No secrets in AWS Secrets Manager yet — first-time setup."
-    # Ensure .env exists
     if [[ ! -f .env ]]; then
         cp .env.example .env
         echo ""
@@ -103,14 +70,12 @@ else
     bash "$REPO_ROOT/scripts/push-secrets.sh"
 fi
 
-# Load the .env to get DGX_IP
 set -a
 source .env
 set +a
 DGX_IP="${DGX_TAILSCALE_IP}"
 
-# --- Step 4: Configure shell ---
-echo "[4/5] Configuring shell environment..."
+echo "[3/4] Configuring shell environment..."
 
 SHELL_RC="$HOME/.zshrc"
 if [[ "$SHELL" == */bash ]]; then
@@ -137,8 +102,7 @@ export RAY_ADDRESS="http://${DGX_IP}:8265"
 export MLFLOW_TRACKING_URI="http://${DGX_IP}:5000"
 export DGX_TAILSCALE_IP="${DGX_IP}"
 
-# --- Step 5: Health check ---
-echo "[5/5] Running health check..."
+echo "[4/4] Running health check..."
 echo
 bash "$REPO_ROOT/scripts/health-check.sh" || true
 
@@ -149,6 +113,10 @@ echo "=========================================="
 echo
 echo "  Run 'source $SHELL_RC' or open a new terminal to apply changes."
 echo
-echo "  Submit a job:    python jobs/submit.py --help"
-echo "  Monitor status:  python jobs/monitor.py"
+echo "  To use 'spark' in a project, add spark-cli as a dependency:"
+echo "    [project.dependencies]"
+echo "    spark-cli"
+echo ""
+echo "    [tool.uv.sources]"
+echo "    spark-cli = { git = \"https://github.com/<org>/robolab-infra.git\", subdirectory = \"terraform/platform/local-dgx-training\" }"
 echo

@@ -1,0 +1,17 @@
+[project]
+name = "spark-cli"
+version = "0.1.0"
+description = "Submit ML jobs to the RoboLab DGX Spark cluster"
+requires-python = ">=3.11"
+dependencies = [
+    "ray[default]==2.9.3",
+    "boto3>=1.34",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+spark = "spark_cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
