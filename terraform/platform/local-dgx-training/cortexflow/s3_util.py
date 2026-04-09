@@ -47,6 +47,12 @@ def upload(
     key = key or os.path.basename(local_path)
 
     client = get_s3_client()
+    try:
+        client.head_bucket(Bucket=bucket)
+    except client.exceptions.NoSuchBucket:
+        client.create_bucket(Bucket=bucket)
+    except client.exceptions.ClientError:
+        client.create_bucket(Bucket=bucket)
     client.upload_file(local_path, bucket, key)
     return f"s3://{bucket}/{key}"
 

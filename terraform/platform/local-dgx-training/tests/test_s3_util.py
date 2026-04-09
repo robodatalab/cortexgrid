@@ -56,6 +56,7 @@ class TestUpload(unittest.TestCase):
         from cortexflow.s3_util import upload
         result = upload("/tmp/data.parquet")
 
+        mock_client.head_bucket.assert_called_once_with(Bucket="my-bucket")
         mock_client.upload_file.assert_called_once_with(
             "/tmp/data.parquet", "my-bucket", "data.parquet"
         )
@@ -69,10 +70,52 @@ class TestUpload(unittest.TestCase):
         from cortexflow.s3_util import upload
         result = upload("/tmp/data.parquet", bucket="other", key="run/output.parquet")
 
+        mock_client.head_bucket.assert_called_once_with(Bucket="other")
         mock_client.upload_file.assert_called_once_with(
             "/tmp/data.parquet", "other", "run/output.parquet"
         )
         self.assertEqual(result, "s3://other/run/output.parquet")
+
+    @patch("cortexflow.s3_util.get_s3_client")
+    def test_upload_creates_bucket_when_missing(self, mock_client_fn: MagicMock) -> None:
+        mock_client = MagicMock()
+        mock_client_fn.return_value = mock_client
+
+        no_such_bucket = type("NoSuchBucket", (Exception,), {})
+        mock_client.exceptions.NoSuchBucket = no_such_bucket
+        mock_client.head_bucket.side_effect = no_such_bucket()
+
+        from cortexflow.s3_util import upload
+        result = upload("/tmp/data.parquet", bucket="new-bucket", key="file.parquet")
+
+        mock_client.head_bucket.assert_called_once_with(Bucket="new-bucket")
+        mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
+        mock_client.upload_file.assert_called_once_with(
+            "/tmp/data.parquet", "new-bucket", "file.parquet"
+        )
+        self.assertEqual(result, "s3://new-bucket/file.parquet")
+
+    @patch("cortexflow.s3_util.get_s3_client")
+    def test_upload_creates_bucket_on_client_error(self, mock_client_fn: MagicMock) -> None:
+        from botocore.exceptions import ClientError
+
+        mock_client = MagicMock()
+        mock_client_fn.return_value = mock_client
+
+        mock_client.exceptions.NoSuchBucket = type("NoSuchBucket", (Exception,), {})
+        mock_client.exceptions.ClientError = ClientError
+        mock_client.head_bucket.side_effect = ClientError(
+            {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket"
+        )
+
+        from cortexflow.s3_util import upload
+        result = upload("/tmp/data.parquet", bucket="new-bucket", key="file.parquet")
+
+        mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
+        mock_client.upload_file.assert_called_once_with(
+            "/tmp/data.parquet", "new-bucket", "file.parquet"
+        )
+        self.assertEqual(result, "s3://new-bucket/file.parquet")
 
 
 class TestDownload(unittest.TestCase):
