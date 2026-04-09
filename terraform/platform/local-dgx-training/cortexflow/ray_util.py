@@ -1,6 +1,7 @@
 """Ray wrappers.
 
-cortexflow.remote — decorator that wraps @ray.remote and auto-injects env vars
+cortexflow.remote — decorator that wraps @ray.remote, auto-builds runtime_env
+                    from pyproject.toml, and injects service env vars
 cortexflow.get    — ray.get with the same signature
 """
 
@@ -11,6 +12,7 @@ from typing import Any
 import ray
 
 from cortexflow.config import get_config
+from cortexflow.project import build_runtime_env
 
 
 def remote(
@@ -21,39 +23,51 @@ def remote(
     retry_exceptions: bool = False,
     **kwargs: Any,
 ) -> Any:
-    """Decorator wrapping @ray.remote that injects env vars into the runtime.
+    """Decorator wrapping @ray.remote that auto-configures the runtime.
+
+    Reads the project's pyproject.toml to build the runtime_env:
+    - working_dir: project root
+    - pip: dependencies from [project.dependencies] + [tool.uv.sources]
+    - excludes: .venv/, .git/, __pycache__/, etc.
+    - env_vars: MLflow, S3 credentials (so task code can call cortexflow.init())
 
     Usage:
         @cortexflow.remote(num_gpus=1, max_retries=3)
         def train_step(batch):
-            # MLflow, S3 env vars are available here automatically
             ...
+
+        # or inline
+        train_fn = cortexflow.remote(num_gpus=1)(my_function)
     """
     ray_kwargs: dict[str, Any] = {
         "num_gpus": num_gpus,
         "num_cpus": num_cpus,
         "max_retries": max_retries,
         "retry_exceptions": retry_exceptions,
-        **kwargs,
     }
+    ray_kwargs.update(kwargs)
+
+    runtime_env = build_runtime_env()
 
     config = get_config()
     env_vars = config.env_vars_for_job()
-
-    runtime_env = ray_kwargs.pop("runtime_env", {})
     if env_vars:
         existing = runtime_env.get("env_vars", {})
         existing.update(env_vars)
         runtime_env["env_vars"] = existing
-    if runtime_env:
-        ray_kwargs["runtime_env"] = runtime_env
+
+    ray_kwargs["runtime_env"] = runtime_env
 
     def decorator(fn: Any) -> Any:
         return ray.remote(**ray_kwargs)(fn)
 
-    # Support both @cortexflow.remote and @cortexflow.remote(num_gpus=1)
     if len(args) == 1 and callable(args[0]) and not kwargs:
-        return ray.remote(args[0])
+        rt = build_runtime_env()
+        env = get_config().env_vars_for_job()
+        if env:
+            rt.setdefault("env_vars", {}).update(env)
+        return ray.remote(runtime_env=rt)(args[0])
+
     return decorator
 
 
