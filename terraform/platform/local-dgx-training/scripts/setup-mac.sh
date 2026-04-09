@@ -94,13 +94,19 @@ add_export() {
 
 add_export "RAY_ADDRESS" "http://${DGX_IP}:8265"
 add_export "MLFLOW_TRACKING_URI" "http://${DGX_IP}:5000"
+add_export "MLFLOW_S3_ENDPOINT_URL" "http://${DGX_IP}:9000"
 add_export "DGX_TAILSCALE_IP" "${DGX_IP}"
+add_export "ARTIFACT_STORE_ACCESS_KEY" "${ARTIFACT_STORE_ACCESS_KEY:-minioadmin}"
+add_export "ARTIFACT_STORE_SECRET_KEY" "${ARTIFACT_STORE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}"
 
 echo "  Updated $SHELL_RC"
 
 export RAY_ADDRESS="http://${DGX_IP}:8265"
 export MLFLOW_TRACKING_URI="http://${DGX_IP}:5000"
+export MLFLOW_S3_ENDPOINT_URL="http://${DGX_IP}:9000"
 export DGX_TAILSCALE_IP="${DGX_IP}"
+export ARTIFACT_STORE_ACCESS_KEY="${ARTIFACT_STORE_ACCESS_KEY:-minioadmin}"
+export ARTIFACT_STORE_SECRET_KEY="${ARTIFACT_STORE_SECRET_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}"
 
 echo "[4/4] Running health check..."
 echo

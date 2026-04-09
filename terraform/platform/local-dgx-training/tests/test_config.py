@@ -55,11 +55,11 @@ class TestCortexConfigFromEnv(unittest.TestCase):
         self.assertEqual(config.s3_access_key, "minio_key")
         self.assertEqual(config.s3_secret_key, "minio_secret")
 
-    def test_aws_credentials_take_precedence_over_artifact_store(self) -> None:
-        os.environ["AWS_ACCESS_KEY_ID"] = "aws_key"
+    def test_artifact_store_credentials_take_precedence_over_aws(self) -> None:
         os.environ["ARTIFACT_STORE_ACCESS_KEY"] = "minio_key"
+        os.environ["AWS_ACCESS_KEY_ID"] = "aws_key"
         config = CortexConfig.from_env()
-        self.assertEqual(config.s3_access_key, "aws_key")
+        self.assertEqual(config.s3_access_key, "minio_key")
 
     def test_custom_default_bucket(self) -> None:
         os.environ["ARTIFACT_STORE_BUCKET"] = "my-bucket"

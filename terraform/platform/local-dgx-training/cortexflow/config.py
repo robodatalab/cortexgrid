@@ -51,12 +51,12 @@ class CortexConfig:
             mlflow_s3_endpoint_url=s3_endpoint,
             s3_endpoint_url=s3_endpoint,
             s3_access_key=os.environ.get(
-                "AWS_ACCESS_KEY_ID",
-                os.environ.get("ARTIFACT_STORE_ACCESS_KEY", ""),
+                "ARTIFACT_STORE_ACCESS_KEY",
+                os.environ.get("AWS_ACCESS_KEY_ID", ""),
             ),
             s3_secret_key=os.environ.get(
-                "AWS_SECRET_ACCESS_KEY",
-                os.environ.get("ARTIFACT_STORE_SECRET_KEY", ""),
+                "ARTIFACT_STORE_SECRET_KEY",
+                os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
             ),
             s3_default_bucket=os.environ.get("ARTIFACT_STORE_BUCKET", "ray-checkpoints"),
         )
