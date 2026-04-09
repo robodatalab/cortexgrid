@@ -85,6 +85,10 @@ echo "[4/5] Starting services on DGX..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
 cd "${DGX_DIR}"
+# Stop any existing stack (may be from a previous project name)
+docker compose --profile monitoring down 2>/dev/null || true
+# Also clean up containers from the old 'robolab-workspace' project if present
+docker rm -f robolab-redis robolab-ray-head robolab-postgres robolab-minio robolab-minio-init robolab-mlflow robolab-node-exporter robolab-prometheus robolab-grafana 2>/dev/null || true
 docker compose --profile monitoring pull --ignore-pull-failures 2>/dev/null || true
 docker compose --profile monitoring build --no-cache
 docker compose --profile monitoring up -d
