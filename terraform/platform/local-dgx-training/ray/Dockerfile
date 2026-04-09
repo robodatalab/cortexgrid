@@ -13,9 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir \
     "ray[default,train,tune,data]==2.9.3" \
-    torch==2.2.0 \
-    torchvision==0.17.0 \
-    torchaudio==2.2.0 \
     mlflow==2.10.2 \
     boto3==1.34.29 \
     python-dotenv==1.0.1 \
