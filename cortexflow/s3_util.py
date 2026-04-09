@@ -9,8 +9,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import boto3
-from tqdm import tqdm
+import boto3  # type: ignore
+from tqdm import tqdm  # type: ignore
 
 from cortexflow.config import get_config
 
