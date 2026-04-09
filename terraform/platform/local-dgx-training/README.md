@@ -1,140 +1,105 @@
 # RoboLab ML Training Infrastructure
 
-GPU-accelerated ML training infrastructure running on a DGX Spark, orchestrated from a MacBook over Tailscale. Designed for seamless expansion to AWS EC2 nodes with zero code changes.
+GPU-accelerated ML compute running on a DGX Spark, orchestrated from a MacBook over Tailscale. Designed for seamless expansion to AWS EC2 nodes with zero code changes.
 
-## Architecture
+## What's here
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Tailscale Network                           │
-│                                                                     │
-│  ┌──────────────┐         ┌─────────────────────────────────────┐  │
-│  │  MacBook Pro  │         │         DGX Spark (128GB VRAM)      │  │
-│  │              │  HTTP   │                                     │  │
-│  │  submit.py  ─┼────────▶│  ┌─────────┐    ┌───────────────┐  │  │
-│  │  monitor.py  │         │  │ Ray Head │◀──▶│    Redis       │  │  │
-│  │              │         │  │  :8265   │    │ (GCS backend)  │  │  │
-│  │  MLflow CLI  │         │  └────┬─────┘    └───────────────┘  │  │
-│  │              │         │       │                              │  │
-│  └──────────────┘         │       ▼ GPU tasks                   │  │
-│                           │  ┌─────────┐    ┌───────────────┐  │  │
-│  ┌──────────────┐         │  │ MLflow   │◀──▶│  PostgreSQL   │  │  │
-│  │  AWS EC2     │  ray    │  │  :5000   │    │  (metadata)   │  │  │
-│  │  (future)    │  start  │  └────┬─────┘    └───────────────┘  │  │
-│  │  ─ ─ ─ ─ ─ ─┼────────▶│       │ artifacts                  │  │
-│  │  Worker node │         │       ▼                              │  │
-│  └──────────────┘         │  ┌─────────┐    ┌───────────────┐  │  │
-│                           │  │  MinIO   │    │  Prometheus   │  │  │
-│                           │  │  :9000   │    │    :9090      │  │  │
-│                           │  └─────────┘    └───────┬───────┘  │  │
-│                           │                         ▼           │  │
-│                           │                 ┌───────────────┐  │  │
-│                           │                 │   Grafana      │  │  │
-│                           │                 │    :3000       │  │  │
-│                           │                 └───────────────┘  │  │
-│                           └─────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+cortexflow/          Python library — import cortexflow in your projects
+docker-compose.yml   Services deployed on the DGX Spark
+scripts/             Setup, teardown, secrets management
+monitoring/          Prometheus + Grafana config
+storage/             MinIO bucket initialization
+docs/                Architecture, secrets, troubleshooting
+tests/               cortexflow unit tests
 ```
 
-## Prerequisites
+## Setup
 
-| Machine    | Requirements                                           |
-|-----------|--------------------------------------------------------|
-| DGX Spark | Docker, Docker Compose V2, NVIDIA Container Toolkit, Tailscale |
-| MacBook   | Python 3.11+, Tailscale                                |
-
-Both machines must be on the same Tailscale network.
-
-## Quickstart
-
-### 1. Set up the DGX Spark
+**Prerequisites:** Mac and DGX on the same Tailscale network. DGX has Docker + NVIDIA Container Toolkit.
 
 ```bash
 cd terraform/platform/local-dgx-training
-bash scripts/setup-dgx.sh
-```
 
-### 2. Set up the Mac
+# 1. Configure secrets and shell env vars
+make setup-mac
 
-```bash
-cd terraform/platform/local-dgx-training
-bash scripts/setup-mac.sh
-```
+# 2. Deploy stack to DGX (SSH)
+make setup-dgx
 
-### 3. Verify connectivity
-
-```bash
+# 3. Verify
 make health
 ```
 
-### 4. Submit your first job
+## Using cortexflow
 
-```bash
-make submit ARGS="--script jobs/examples/train_example.py --working-dir . --env pytorch --gpus 1 --name my-first-job --follow"
+Add to your project's `pyproject.toml`:
+
+```toml
+[project]
+dependencies = ["cortexflow"]
+
+[tool.uv.sources]
+cortexflow = { git = "https://github.com/paksas/robolab-infra.git", subdirectory = "terraform/platform/local-dgx-training" }
+
+[tool.hatch.metadata]
+allow-direct-references = true
 ```
 
-## Service URLs
+Then in your code:
 
-| Service         | URL                              | Purpose                    |
-|----------------|----------------------------------|----------------------------|
-| Ray Dashboard  | `http://<DGX_IP>:8265`          | Job management, cluster view |
-| MLflow UI      | `http://<DGX_IP>:5000`          | Experiment tracking         |
-| Grafana        | `http://<DGX_IP>:3000`          | GPU/system monitoring       |
-| MinIO Console  | `http://<DGX_IP>:9001`          | Artifact storage browser    |
-| Prometheus     | `http://<DGX_IP>:9090`          | Raw metrics                 |
+```python
+import cortexflow
 
-## Common Workflows
+cortexflow.init()
 
-### Submit a training job
+# MLflow experiment tracking
+with cortexflow.mlflow_run("my-experiment") as run:
+    cortexflow.log_metric("loss", 0.5, step=1)
+    cortexflow.save_checkpoint(model, optimizer, epoch=5)
 
-```bash
-python jobs/submit.py \
-    --script train.py \
-    --working-dir ./experiments/my_experiment \
-    --env transformers \
-    --gpus 1 \
-    --name "finetune-v1" \
-    --mlflow-experiment "my-experiments" \
-    --follow
+# Distributed compute on the DGX
+@cortexflow.remote(num_gpus=1, max_retries=3)
+def train(config):
+    ...
+
+cortexflow.get(train.remote({"lr": 1e-3}))
 ```
 
-### Resume a failed job
+Run as normal: `uv run python train.py`
 
-```bash
-python jobs/examples/train_example.py --run-id <MLFLOW_RUN_ID>
-```
+See the [root README](../../../README.md#cortexflow) for the full API reference.
 
-### Monitor cluster status
+## Services
 
-```bash
-make monitor
-```
+| Service | Port | Purpose |
+|---------|------|---------|
+| Ray | 8265 | Job scheduling, distributed compute |
+| MLflow | 5000 | Experiment tracking, model registry |
+| MinIO | 9000/9001 | S3-compatible artifact storage |
+| PostgreSQL | 5432 | MLflow metadata backend |
+| Redis | 6379 | Ray GCS persistence |
+| Prometheus | 9090 | Metrics collection |
+| Grafana | 3000 | Dashboards |
 
-### Add an AWS EC2 node
+## Make targets
 
-```bash
-bash scripts/add-aws-node.sh
-# Then run the printed command on the EC2 instance
-```
-
-See [docs/adding-aws-nodes.md](docs/adding-aws-nodes.md) for the full guide.
-
-## Make Targets
-
-```
-make up          # Start all services
-make down        # Stop all services
-make logs        # Tail service logs
-make health      # Check all services
-make submit      # Submit a job (pass ARGS="...")
-make monitor     # Show job and cluster status
-make setup-dgx   # One-time DGX setup
-make setup-mac   # One-time Mac setup
-```
+| Target | Description |
+|--------|-------------|
+| `setup-mac` | Configure secrets and shell environment |
+| `setup-dgx` | Deploy stack to DGX via SSH |
+| `teardown-dgx` | Stop stack, remove volumes and .env on DGX |
+| `teardown-mac` | Remove shell exports and local .env |
+| `push-secrets` | Push .env secrets to AWS Secrets Manager |
+| `pull-secrets` | Pull secrets from AWS Secrets Manager |
+| `health` | Check all services are reachable |
+| `up` | Start all services |
+| `down` | Stop all services |
+| `logs` | Tail service logs |
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — design decisions and data flow
-- [Submitting Jobs](docs/submitting-jobs.md) — job submission reference
-- [Adding AWS Nodes](docs/adding-aws-nodes.md) — scaling to AWS
-- [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
+- [Architecture](docs/architecture.md)
+- [Secrets Management](docs/secrets.md)
+- [Adding AWS Nodes](docs/adding-aws-nodes.md)
+- [Troubleshooting](docs/troubleshooting.md)

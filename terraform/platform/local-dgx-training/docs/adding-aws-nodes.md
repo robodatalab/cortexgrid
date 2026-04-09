@@ -1,6 +1,6 @@
 # Adding AWS EC2 Nodes
 
-Scale the Ray cluster by adding GPU-equipped EC2 instances as worker nodes. The workers join the existing DGX Spark head node over Tailscale — no changes to job scripts or infrastructure config.
+Scale the Ray cluster by adding GPU-equipped EC2 instances as worker nodes. The workers join the existing DGX Spark head node over Tailscale — no changes to your code or infrastructure config.
 
 ## Recommended Instance Types
 

@@ -113,7 +113,11 @@ futures = [train_step.remote(b) for b in batches]
 results = cortexflow.get(futures)
 ```
 
-`cortexflow.remote` wraps `@ray.remote` and injects the credentials and service URLs so that task code running on the DGX can reach MLflow and MinIO without any extra setup.
+`cortexflow.remote` wraps `@ray.remote` and automatically:
+- Reads your project's `pyproject.toml` to build the pip dependency list (including `[tool.uv.sources]` git refs)
+- Sets `working_dir` to your project root
+- Excludes `.venv/`, `.git/`, `__pycache__/`, etc.
+- Injects MLflow/S3 credentials so task code running on the DGX can reach all services
 
 #### Object storage (S3/MinIO)
 
@@ -147,7 +151,7 @@ s3_client = cortexflow.get_s3_client()            # boto3 S3 client
 | `cortexflow.log_artifact(path, artifact_path)` | Log a file as an artifact |
 | `cortexflow.save_checkpoint(model, optimizer, epoch)` | Save a PyTorch checkpoint to MLflow |
 | `cortexflow.load_checkpoint(run_id, epoch)` | Load a checkpoint from MLflow |
-| `cortexflow.remote(**kwargs)` | Decorator wrapping `@ray.remote` with auto-injected env vars |
+| `cortexflow.remote(**kwargs)` | Decorator wrapping `@ray.remote` — auto-builds runtime_env from pyproject.toml |
 | `cortexflow.get(futures)` | `ray.get()` alias |
 | `cortexflow.upload(path, bucket, key)` | Upload a file to S3/MinIO |
 | `cortexflow.download(bucket, key, path)` | Download a file from S3/MinIO |

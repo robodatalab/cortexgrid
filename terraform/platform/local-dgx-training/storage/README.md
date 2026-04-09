@@ -38,7 +38,7 @@ Then restart the MLflow service:
 docker compose restart mlflow
 ```
 
-**No code changes are needed.** All job scripts read storage config from environment variables injected by the `jobs/submit.py` CLI tool.
+**No code changes are needed.** All storage config is read from environment variables, injected automatically by `cortexflow.init()`.
 
 ## Using Instance Roles (Recommended for AWS)
 

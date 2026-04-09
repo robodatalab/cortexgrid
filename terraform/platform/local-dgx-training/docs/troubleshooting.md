@@ -13,7 +13,7 @@ This checks connectivity to all services and reports which are unreachable.
 
 ### Cannot connect to Ray Dashboard
 
-**Symptoms:** `make health` shows Ray Dashboard as unreachable. `submit.py` fails with connection error.
+**Symptoms:** `make health` shows Ray Dashboard as unreachable. `cortexflow.init()` fails with connection error.
 
 **Causes & fixes:**
 1. **Stack not running:** `docker compose ps` on the DGX. If services are down, run `make up`.
@@ -36,7 +36,7 @@ This checks connectivity to all services and reports which are unreachable.
 
 **Fixes:**
 1. Check MLflow is running: `docker compose logs mlflow`
-2. Verify the job has `MLFLOW_TRACKING_URI` set: check `jobs/submit.py` injects it.
+2. Verify the job has `MLFLOW_TRACKING_URI` set: `cortexflow.remote` injects it automatically.
 3. Check PostgreSQL: `docker compose logs postgres`
 4. Test manually: `curl http://<DGX_IP>:5000/api/2.0/mlflow/experiments/list`
 
@@ -57,7 +57,7 @@ This checks connectivity to all services and reports which are unreachable.
 **Symptoms:** Job shows as PENDING in Ray Dashboard but never starts.
 
 **Causes:**
-1. **Insufficient resources:** Job requests more GPUs than available. Check with `make monitor`.
+1. **Insufficient resources:** Job requests more GPUs than available. Check the Ray Dashboard.
 2. **All workers busy:** Wait for running jobs to complete or add more nodes.
 3. **Runtime env install:** Ray is installing pip packages. Check job logs in the Dashboard.
 
