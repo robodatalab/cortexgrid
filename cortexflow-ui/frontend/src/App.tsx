@@ -3,9 +3,7 @@ import './App.css'
 
 type Dashboard = {
   id: string
-  name: string
-  description: string
-  port: number
+  url: string
 }
 
 type LoadState =
@@ -34,9 +32,6 @@ function App() {
     return () => controller.abort()
   }, [])
 
-  const dashboardUrl = (port: number) =>
-    `${window.location.protocol}//${window.location.hostname}:${port}`
-
   return (
     <>
       <header className="navbar">
@@ -55,12 +50,11 @@ function App() {
               <a
                 key={d.id}
                 className="navbar__link"
-                href={dashboardUrl(d.port)}
+                href={d.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title={d.description}
               >
-                {d.name}
+                {d.id}
               </a>
             ))}
         </nav>

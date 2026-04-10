@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import App from '../src/App'
 
 const sampleDashboards = [
-  { id: 'mlflow', name: 'MLflow', description: 'Experiment tracking', port: 5000 },
-  { id: 'ray', name: 'Ray', description: 'Compute dashboard', port: 8265 },
-  { id: 'minio', name: 'MinIO', description: 'Object storage console', port: 9001 },
+  { id: 'mlflow', url: 'http://100.1.2.3:5000' },
+  { id: 'ray', url: 'http://100.1.2.3:8265' },
+  { id: 'minio', url: 'http://100.1.2.3:9001' },
 ]
 
 describe('App', () => {
@@ -33,17 +33,14 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('renders a link per dashboard pointing at hostname + port', async () => {
+  it('renders a link per dashboard pointing at its url', async () => {
     render(<App />)
 
     for (const d of sampleDashboards) {
       const link = await waitFor(() =>
-        screen.getByRole('link', { name: new RegExp(d.name, 'i') }),
+        screen.getByRole('link', { name: new RegExp(d.id, 'i') }),
       )
-      expect(link).toHaveAttribute(
-        'href',
-        `${window.location.protocol}//${window.location.hostname}:${d.port}`,
-      )
+      expect(link).toHaveAttribute('href', d.url)
       expect(link).toHaveAttribute('target', '_blank')
     }
   })

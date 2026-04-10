@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from cortexflow.secrets import get_secret
+
 from config import settings
 
 app = FastAPI(title="CortexFlow UI", version="0.1.0")
@@ -20,9 +22,7 @@ app.add_middleware(
 
 class Dashboard(BaseModel):
     id: str
-    name: str
-    description: str
-    port: int
+    url: str
 
 
 @app.get("/health")
@@ -32,25 +32,11 @@ def health() -> dict[str, str]:
 
 @app.get("/api/dashboards")
 def dashboards() -> list[Dashboard]:
+    host = get_secret("robolab/infra/DGX_TAILSCALE_IP")
     return [
-        Dashboard(
-            id="mlflow",
-            name="MLflow",
-            description="Experiment tracking & model registry",
-            port=settings.mlflow_port,
-        ),
-        Dashboard(
-            id="ray",
-            name="Ray",
-            description="Distributed compute & jobs dashboard",
-            port=settings.ray_port,
-        ),
-        Dashboard(
-            id="minio",
-            name="MinIO",
-            description="S3-compatible object storage console",
-            port=settings.minio_port,
-        ),
+        Dashboard(id="mlflow", url=f"http://{host}:{get_secret('robolab/infra/MLFLOW_PORT')}"),
+        Dashboard(id="ray", url=f"http://{host}:{get_secret('robolab/infra/RAY_DASHBOARD_PORT')}"),
+        Dashboard(id="minio", url=f"http://{host}:{get_secret('robolab/infra/MINIO_CONSOLE_PORT')}"),
     ]
 
 
