@@ -167,6 +167,7 @@ services:
       AWS_ACCESS_KEY_ID: ${ARTIFACT_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${ARTIFACT_STORE_SECRET_KEY}
       MLFLOW_SERVER_ALLOWED_HOSTS: "100.*"
+      MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: "http://100.*"
     command: >
       mlflow server
         --host 0.0.0.0
