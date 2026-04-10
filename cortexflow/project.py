@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,16 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
+
+
+# DGX Spark is Grace+Blackwell (sm_100). Plain PyPI torch wheels on aarch64
+# resolve to a CPU build, which silently moves training to CPU. Point pip at
+# NVIDIA's cu128 index so torch resolves to a CUDA+Blackwell wheel. Overridable
+# for other hardware.
+PIP_EXTRA_INDEX_URL = os.environ.get(
+    "CORTEXFLOW_PIP_EXTRA_INDEX_URL",
+    "https://download.pytorch.org/whl/cu128",
+)
 
 
 DEFAULT_EXCLUDES = [
@@ -96,8 +107,19 @@ def build_runtime_env(
     if extra_excludes:
         excludes.extend(extra_excludes)
 
+    pip_field: Any
+    if PIP_EXTRA_INDEX_URL:
+        # Ray's runtime_env.pip only honours --extra-index-url when given as
+        # a requirements.txt file path, not when passed as a list element.
+        req_file = Path(tempfile.gettempdir()) / "cortexflow-requirements.txt"
+        lines = [f"--extra-index-url {PIP_EXTRA_INDEX_URL}", *pip_deps]
+        req_file.write_text("\n".join(lines) + "\n")
+        pip_field = str(req_file)
+    else:
+        pip_field = pip_deps
+
     return {
         "working_dir": project_root,
         "excludes": excludes,
-        "pip": pip_deps,
+        "pip": pip_field,
     }
