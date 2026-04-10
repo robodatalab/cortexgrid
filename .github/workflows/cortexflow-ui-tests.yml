@@ -4,14 +4,14 @@ on:
   push:
     paths:
       - "cortexflow-ui/**"
-      - "tests/cortexflow-ui/**"
+      - "tests/cortexflow-ui/backend/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cortexflow-ui-tests.yml"
   pull_request:
     paths:
       - "cortexflow-ui/**"
-      - "tests/cortexflow-ui/**"
+      - "tests/cortexflow-ui/backend/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cortexflow-ui-tests.yml"
