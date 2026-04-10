@@ -38,44 +38,35 @@ function App() {
     `${window.location.protocol}//${window.location.hostname}:${port}`
 
   return (
-    <main className="landing">
-      <header className="landing-header">
-        <h1>CortexFlow</h1>
-        <p>RoboLab ML Infrastructure</p>
+    <>
+      <header className="navbar">
+        <div className="navbar__title">cortexflow</div>
+        <nav className="navbar__links" aria-label="Dashboards">
+          {state.status === 'loading' && (
+            <span className="navbar__status">Loading…</span>
+          )}
+          {state.status === 'error' && (
+            <span className="navbar__status navbar__status--error">
+              Failed to load dashboards: {state.message}
+            </span>
+          )}
+          {state.status === 'ready' &&
+            state.dashboards.map((d) => (
+              <a
+                key={d.id}
+                className="navbar__link"
+                href={dashboardUrl(d.port)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={d.description}
+              >
+                {d.name}
+              </a>
+            ))}
+        </nav>
       </header>
-
-      <nav className="dashboard-nav" aria-label="Dashboards">
-        {state.status === 'loading' && (
-          <p className="nav-status">Loading dashboards…</p>
-        )}
-
-        {state.status === 'error' && (
-          <p className="nav-status nav-status--error">
-            Failed to load dashboards: {state.message}
-          </p>
-        )}
-
-        {state.status === 'ready' &&
-          state.dashboards.map((d) => (
-            <a
-              key={d.id}
-              className="dashboard-card"
-              href={dashboardUrl(d.port)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <div className="dashboard-card__title">
-                <h2>{d.name}</h2>
-                <span className="dashboard-card__arrow" aria-hidden="true">
-                  ↗
-                </span>
-              </div>
-              <p className="dashboard-card__desc">{d.description}</p>
-              <span className="dashboard-card__port">:{d.port}</span>
-            </a>
-          ))}
-      </nav>
-    </main>
+      <main className="main" />
+    </>
   )
 }
 
