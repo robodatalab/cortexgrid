@@ -55,10 +55,6 @@ class Job:
         return f"Job({self.job_id!r})"
 
 
-# Alias for internal backward compat
-_JobFuture = Job
-
-
 class _RemoteFunction:
     """A function wrapped for submission to the DGX via the Ray Jobs API."""
 
@@ -141,7 +137,7 @@ class _RemoteFunction:
             sys.exit(1)
         """)
 
-        entrypoint = f"python -c {_shell_quote(driver)} {payload}"
+        entrypoint = f"python -u -c {_shell_quote(driver)} {payload}"
 
         ray_job_id = client.submit_job(
             entrypoint=entrypoint,

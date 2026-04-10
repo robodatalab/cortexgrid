@@ -97,6 +97,9 @@ class CortexConfig:
             env["AWS_SECRET_ACCESS_KEY"] = self.s3_secret_key
         if self.dgx_ip:
             env["DGX_TAILSCALE_IP"] = self.dgx_ip
+        # flushing all logs returned by the jobs so that ray dashboard can visualize them
+        env["PYTHONUNBUFFERED"] = "1"
+        env["RAY_DEDUP_LOGS"] = "0"
         return env
 
 
