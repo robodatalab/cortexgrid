@@ -18,3 +18,7 @@ Cloud infrastructure and deployment orchestration for RoboLab.
 - `robolab-sims-unreal` — Unreal Engine simulation projects
 - `model-gateway` — LLM provider abstraction layer
 - `model-training` — Training facilities (SFT, LoRA), depends on `cortexflow`
+
+
+WORK in small increments, always consulting everything with the user.
+You are not allowed to touch more than one function at a time, maximum 20 lines of code.

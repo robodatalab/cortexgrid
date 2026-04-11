@@ -25,20 +25,8 @@ if ckpt:
 
 from __future__ import annotations
 
-import logging
-import os
-
-from cortexflow.config import CortexConfig, set_config
-from cortexflow.ray_util import (
-    remote,
-    get,
-    get_ray_client,
-    status,
-    result,
-    logs,
-    Job,
-    JobInfo,
-)
+from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_job_id
+from cortexflow.experiment import init
 from cortexflow.mlflow_util import (
     mlflow_run,
     log_metric,
@@ -49,29 +37,17 @@ from cortexflow.mlflow_util import (
     load_checkpoint,
     get_mlflow_client,
 )
+from cortexflow.ray_util import (
+    remote,
+    get,
+    get_ray_client,
+    status,
+    result,
+    logs,
+    Job,
+    JobInfo,
+)
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
-from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_job_id
-
-
-def init() -> None:
-    """Configure connections to Ray, MLflow, and S3.
-
-    On the Mac: pulls secrets from AWS Secrets Manager. Ray is NOT initialized
-    locally — work is submitted to the DGX via the Jobs API (HTTP).
-
-    Inside a Ray job on the DGX: reads env vars injected by cortexflow.remote.
-
-    Call once at the top of your script.
-    """
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-    if os.environ.get("DGX_TAILSCALE_IP"):
-        config = CortexConfig.from_env()
-    else:
-        config = CortexConfig.from_secrets_manager()
-
-    set_config(config)
 
 
 __all__ = [
