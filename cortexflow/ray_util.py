@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cloudpickle  # type: ignore
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,15 @@ from pydantic import BaseModel, ConfigDict
 from ray.job_submission import JobSubmissionClient
 
 from cortexflow.experiment import Experiment
+
+
+# DGX Spark is Grace+Blackwell (sm_100). Default PyPI ships only CPU torch
+# wheels for Linux aarch64; pointing pip at NVIDIA's cu128 index makes torch
+# resolve to the CUDA+Blackwell wheel. Overridable for other hardware.
+PIP_EXTRA_INDEX_URL = os.environ.get(
+    "CORTEXFLOW_PIP_EXTRA_INDEX_URL",
+    "https://download.pytorch.org/whl/cu128",
+)
 
 
 class Payload(BaseModel):
@@ -39,17 +49,21 @@ def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
     workdir = Path(tempfile.mkdtemp(prefix="cortexflow-"))
     (workdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
 
-    pip = subprocess.run(
+    freeze_output = subprocess.run(
         [sys.executable, "-m", "pip", "freeze"],
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.splitlines()
+    ).stdout
+    requirements = workdir / "requirements.txt"
+    requirements.write_text(
+        f"--extra-index-url {PIP_EXTRA_INDEX_URL}\n{freeze_output}"
+    )
 
     client = JobSubmissionClient(experiment.ray_address)
     job_id = client.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
-        runtime_env={"working_dir": str(workdir), "pip": pip},
+        runtime_env={"working_dir": str(workdir), "pip": str(requirements)},
     )
     _register_ray_job(experiment, job_id)
     return Job(client=client, job_id=job_id)
