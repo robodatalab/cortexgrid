@@ -33,6 +33,7 @@ from cortexflow.mlflow_util import (
     log_params,
     log_artifact,
     get_mlflow_client,
+    get_experiment_list,
 )
 from cortexflow.ray_util import remote, Job
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
@@ -50,6 +51,7 @@ __all__ = [
     "log_params",
     "log_artifact",
     "get_mlflow_client",
+    "get_experiment_list",
     # S3
     "upload",
     "upload_dir",

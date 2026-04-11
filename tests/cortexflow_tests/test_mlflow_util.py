@@ -4,7 +4,14 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from cortexflow.config import CortexConfig, set_config
-from cortexflow.mlflow_util import log_metric, log_metrics, log_params, log_artifact, try_create_experiment_and_run
+from cortexflow.mlflow_util import (
+    log_metric,
+    log_metrics,
+    log_params,
+    log_artifact,
+    try_create_experiment_and_run,
+    get_experiment_list,
+)
 
 
 RUN_ID = "test-run-123"
@@ -83,6 +90,25 @@ class TestMlflowUtil(unittest.TestCase):
         self.assertEqual(kwargs["experiment_id"], "exp-7")
         self.assertIsInstance(kwargs["run_name"], str)
         self.assertTrue(kwargs["run_name"])
+
+    def test_get_experiment_list_maps_names_to_run_ids(self) -> None:
+        exp_a = MagicMock(experiment_id="1", name="alpha")
+        exp_a.name = "alpha"
+        exp_b = MagicMock(experiment_id="2", name="beta")
+        exp_b.name = "beta"
+        self.client.search_experiments.return_value = [exp_a, exp_b]
+
+        run_a1 = MagicMock()
+        run_a1.info.run_id = "run-a1"
+        run_b1 = MagicMock()
+        run_b1.info.run_id = "run-b1"
+        run_b2 = MagicMock()
+        run_b2.info.run_id = "run-b2"
+        self.client.search_runs.side_effect = [[run_a1], [run_b1, run_b2]]
+
+        result = get_experiment_list()
+
+        self.assertEqual(result, {"alpha": ["run-a1"], "beta": ["run-b1", "run-b2"]})
 
 
 if __name__ == "__main__":
