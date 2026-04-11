@@ -14,7 +14,7 @@ from cortexflow.config import CortexConfig, set_config
 from ray.job_submission import JobStatus
 
 
-class TestRemoteDecorator(unittest.TestCase):
+class TestRayUtil(unittest.TestCase):
     def setUp(self) -> None:
         set_config(
             CortexConfig(
@@ -36,7 +36,21 @@ class TestRemoteDecorator(unittest.TestCase):
         self.old_cwd = os.getcwd()
         os.chdir(self.tmpdir)
 
+        self.mock_jsc = MagicMock()
+        mock_status = MagicMock()
+        mock_status.value = "RUNNING"
+        self.mock_jsc.get_job_status.return_value = mock_status
+        mock_info = MagicMock()
+        mock_info.message = "In progress"
+        self.mock_jsc.get_job_info.return_value = mock_info
+        self.client_patcher = patch(
+            "cortexflow.ray_util.JobSubmissionClient",
+            return_value=self.mock_jsc,
+        )
+        self.client_patcher.start()
+
     def tearDown(self) -> None:
+        self.client_patcher.stop()
         os.chdir(self.old_cwd)
         set_config(None)  # type: ignore[arg-type]
 
@@ -61,51 +75,14 @@ class TestRemoteDecorator(unittest.TestCase):
         self.assertIn(".git/", excludes)
         self.assertIn("__pycache__/", excludes)
 
-
-class TestStatus(unittest.TestCase):
-    def setUp(self) -> None:
-        set_config(CortexConfig(dgx_ip="100.1.2.3"))
-        self.mock_jsc = MagicMock()
-        mock_status = MagicMock()
-        mock_status.value = "RUNNING"
-        self.mock_jsc.get_job_status.return_value = mock_status
-        mock_info = MagicMock()
-        mock_info.message = "In progress"
-        self.mock_jsc.get_job_info.return_value = mock_info
-        self.client_patcher = patch(
-            "cortexflow.ray_util.JobSubmissionClient",
-            return_value=self.mock_jsc,
-        )
-        self.client_patcher.start()
-
-    def tearDown(self) -> None:
-        self.client_patcher.stop()
-        set_config(None)  # type: ignore[arg-type]
-
-    def test_returns_job_info(self) -> None:
+    def test_status_returns_job_info(self) -> None:
         info = status("raysubmit_abc123")
         self.assertIsInstance(info, JobInfo)
         self.assertEqual(info.job_id, "raysubmit_abc123")
         self.assertEqual(info.status, "RUNNING")
         self.assertEqual(info.message, "In progress")
 
-
-class TestResult(unittest.TestCase):
-    def setUp(self) -> None:
-        set_config(CortexConfig(dgx_ip="100.1.2.3"))
-        self.mock_jsc = MagicMock()
-        self.mock_jsc.get_job_status.return_value = JobStatus.SUCCEEDED
-        self.client_patcher = patch(
-            "cortexflow.ray_util.JobSubmissionClient",
-            return_value=self.mock_jsc,
-        )
-        self.client_patcher.start()
-
-    def tearDown(self) -> None:
-        self.client_patcher.stop()
-        set_config(None)  # type: ignore[arg-type]
-
-    def test_returns_result_when_succeeded(self) -> None:
+    def test_result_returns_result_when_succeeded(self) -> None:
         self.mock_jsc.get_job_status.return_value = JobStatus.SUCCEEDED
         result_bytes = base64.b64encode(pickle.dumps({"acc": 0.95})).decode()
         self.mock_jsc.get_job_logs.return_value = (
@@ -115,7 +92,7 @@ class TestResult(unittest.TestCase):
         r = result("raysubmit_abc123")
         self.assertEqual(r, {"acc": 0.95})
 
-    def test_raises_when_still_running(self) -> None:
+    def test_result_raises_when_still_running(self) -> None:
         self.mock_jsc.get_job_status.return_value = JobStatus.RUNNING
 
         with self.assertRaises(RuntimeError) as ctx:

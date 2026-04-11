@@ -10,7 +10,7 @@ from cortexflow.mlflow_util import log_metric, log_metrics, log_params, log_arti
 RUN_ID = "test-run-123"
 
 
-class TestLogFunctions(unittest.TestCase):
+class TestMlflowUtil(unittest.TestCase):
     def setUp(self) -> None:
         set_config(CortexConfig(
             mlflow_tracking_uri="http://test:5000",
@@ -54,21 +54,6 @@ class TestLogFunctions(unittest.TestCase):
         self.client.log_artifact.assert_called_once_with(
             RUN_ID, "/tmp/model.pt", artifact_path="models"
         )
-
-
-class TestTryCreateExperimentAndRun(unittest.TestCase):
-    def setUp(self) -> None:
-        self.client = MagicMock()
-        self.patcher = patch(
-            "cortexflow.mlflow_util.get_mlflow_client",
-            return_value=self.client,
-        )
-        self.patcher.start()
-        set_config(CortexConfig())
-
-    def tearDown(self) -> None:
-        set_config(None)
-        self.patcher.stop()
 
     def test_creates_experiment_when_none_exists(self) -> None:
         self.client.get_experiment_by_name.return_value = None
