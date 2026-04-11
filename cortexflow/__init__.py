@@ -35,7 +35,7 @@ from cortexflow.mlflow_util import (
     get_mlflow_client,
     get_experiment_list,
 )
-from cortexflow.ray_util import remote, Job
+from cortexflow.ray_util import remote, Job, get_ray_status, get_ray_logs
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
 
@@ -44,6 +44,8 @@ __all__ = [
     # Ray / jobs
     "remote",
     "Job",
+    "get_ray_status",
+    "get_ray_logs",
     # MLflow
     "log_metric",
     "log_metrics",

@@ -60,3 +60,15 @@ def _register_ray_job(experiment: Experiment, ray_job_id: str) -> None:
     marker.touch()
     client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
     client.log_artifact(experiment.run_id, str(marker), artifact_path="ray-job")
+
+
+def get_ray_status(experiment: Experiment, ray_job_id: str) -> str:
+    """Return the current status of a previously submitted ray job."""
+    client = JobSubmissionClient(experiment.ray_address)
+    return client.get_job_status(ray_job_id).value
+
+
+def get_ray_logs(experiment: Experiment, ray_job_id: str) -> str:
+    """Return the stdout/stderr of a previously submitted ray job."""
+    client = JobSubmissionClient(experiment.ray_address)
+    return client.get_job_logs(ray_job_id)

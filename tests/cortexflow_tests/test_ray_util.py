@@ -4,6 +4,7 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -31,12 +32,20 @@ def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Exper
 class FakeJobSubmissionClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.pending: list[str] = []
+        self.statuses: dict[str, str] = {}
+        self.logs_by_id: dict[str, str] = {}
 
     def submit_job(
         self, entrypoint: str, runtime_env: dict[str, Any], **kwargs: Any
     ) -> str:
         self.pending.append(runtime_env["working_dir"])
         return f"raysubmit_{len(self.pending)}"
+
+    def get_job_status(self, job_id: str) -> SimpleNamespace:
+        return SimpleNamespace(value=self.statuses.get(job_id, "PENDING"))
+
+    def get_job_logs(self, job_id: str) -> str:
+        return self.logs_by_id.get(job_id, "")
 
     def run_all(self) -> None:
         for workdir in self.pending:
@@ -124,6 +133,22 @@ class TestRemote(unittest.TestCase):
         self.assertEqual(args[0], "run-xyz")
         self.assertEqual(kwargs["artifact_path"], "ray-job")
         self.assertEqual(Path(args[1]).name, job.job_id)
+
+    def test_get_ray_status_returns_status_string(self) -> None:
+        exp = _make_experiment()
+        set_instance(exp)
+        self.fake_jsc.statuses["job-1"] = "RUNNING"
+
+        self.assertEqual(cortexflow.get_ray_status(exp, "job-1"), "RUNNING")
+
+    def test_get_ray_logs_returns_log_text(self) -> None:
+        exp = _make_experiment()
+        set_instance(exp)
+        self.fake_jsc.logs_by_id["job-1"] = "hello from the cluster"
+
+        self.assertEqual(
+            cortexflow.get_ray_logs(exp, "job-1"), "hello from the cluster"
+        )
 
 
 if __name__ == "__main__":
