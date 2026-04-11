@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,6 +34,7 @@ def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Exper
 class FakeJobSubmissionClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.pending: list[str] = []
+        self.runtime_envs: list[dict[str, Any]] = []
         self.statuses: dict[str, str] = {}
         self.logs_by_id: dict[str, str] = {}
 
@@ -39,6 +42,7 @@ class FakeJobSubmissionClient:
         self, entrypoint: str, runtime_env: dict[str, Any], **kwargs: Any
     ) -> str:
         self.pending.append(runtime_env["working_dir"])
+        self.runtime_envs.append(runtime_env)
         return f"raysubmit_{len(self.pending)}"
 
     def get_job_status(self, job_id: str) -> SimpleNamespace:
@@ -56,6 +60,14 @@ class FakeJobSubmissionClient:
 class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
         clear_instance()
+
+        self.project_root = Path(tempfile.mkdtemp(prefix="cortexflow-test-"))
+        (self.project_root / "pyproject.toml").write_text("[project]\nname='test'\n")
+        self.original_cwd = os.getcwd()
+        os.chdir(self.project_root)
+        self.addCleanup(os.chdir, self.original_cwd)
+        self.addCleanup(shutil.rmtree, self.project_root, True)
+
         self.fake_jsc = FakeJobSubmissionClient()
         self.fake_mlflow = MagicMock()
         patchers = [
@@ -149,6 +161,61 @@ class TestRemote(unittest.TestCase):
         self.assertEqual(
             cortexflow.get_ray_logs(exp, "job-1"), "hello from the cluster"
         )
+
+    def test_remote_uses_fresh_tempdir_as_working_dir(self) -> None:
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None)
+
+        workdir = Path(self.fake_jsc.runtime_envs[0]["working_dir"])
+        self.assertNotEqual(workdir, self.project_root)
+        self.assertTrue(workdir.exists())
+        self.assertTrue(workdir.name.startswith("cortexflow-"))
+
+    def test_remote_copies_project_files_into_workdir(self) -> None:
+        (self.project_root / "train.py").write_text("RESULT = 'loaded'\n")
+        (self.project_root / "pkg").mkdir()
+        (self.project_root / "pkg" / "__init__.py").write_text("")
+        (self.project_root / "pkg" / "model.py").write_text("MODEL = 'cnn'\n")
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None)
+
+        workdir = Path(self.fake_jsc.runtime_envs[0]["working_dir"])
+        self.assertTrue((workdir / "pyproject.toml").exists())
+        self.assertTrue((workdir / "train.py").exists())
+        self.assertTrue((workdir / "pkg" / "model.py").exists())
+        self.assertEqual((workdir / "train.py").read_text(), "RESULT = 'loaded'\n")
+        self.assertTrue((workdir / "payload.pkl").exists())
+        self.assertTrue((workdir / "requirements.txt").exists())
+
+    def test_remote_skips_default_excludes_when_copying(self) -> None:
+        (self.project_root / ".venv").mkdir()
+        (self.project_root / ".venv" / "should_not_ship.txt").write_text("nope")
+        (self.project_root / ".git").mkdir()
+        (self.project_root / ".git" / "HEAD").write_text("ref: refs/heads/main")
+        (self.project_root / "__pycache__").mkdir()
+        (self.project_root / "__pycache__" / "x.pyc").write_text("")
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None)
+
+        workdir = Path(self.fake_jsc.runtime_envs[0]["working_dir"])
+        self.assertFalse((workdir / ".venv").exists())
+        self.assertFalse((workdir / ".git").exists())
+        self.assertFalse((workdir / "__pycache__").exists())
+
+    def test_remote_finds_pyproject_in_parent_dir(self) -> None:
+        subdir = self.project_root / "src" / "nested"
+        subdir.mkdir(parents=True)
+        os.chdir(subdir)
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None)
+
+        workdir = Path(self.fake_jsc.runtime_envs[0]["working_dir"])
+        self.assertTrue((workdir / "pyproject.toml").exists())
+        self.assertTrue((workdir / "src" / "nested").exists())
 
 
 if __name__ == "__main__":

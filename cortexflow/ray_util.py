@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import cloudpickle  # type: ignore
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,27 @@ PIP_EXTRA_INDEX_URL = os.environ.get(
 )
 
 
+DEFAULT_EXCLUDES = [
+    ".venv",
+    ".git",
+    "__pycache__",
+    "*.pyc",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+]
+
+
+def _find_pyproject() -> Path:
+    """Walk up from cwd() to find pyproject.toml. Raises if none found."""
+    for parent in [Path.cwd(), *Path.cwd().parents]:
+        candidate = parent / "pyproject.toml"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError("No pyproject.toml found in any parent directory")
+
+
 class Payload(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -46,7 +68,14 @@ def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
     experiment = Experiment.get_instance()
     payload = Payload(fn=fn, args=args, kwargs=kwargs, experiment=experiment)
 
+    project_root = _find_pyproject().parent
     workdir = Path(tempfile.mkdtemp(prefix="cortexflow-"))
+    shutil.copytree(
+        project_root,
+        workdir,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
+    )
     (workdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
 
     freeze_output = subprocess.run(
