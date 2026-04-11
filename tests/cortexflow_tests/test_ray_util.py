@@ -35,6 +35,7 @@ class FakeJobSubmissionClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.pending: list[str] = []
         self.runtime_envs: list[dict[str, Any]] = []
+        self.submit_kwargs: list[dict[str, Any]] = []
         self.statuses: dict[str, str] = {}
         self.logs_by_id: dict[str, str] = {}
 
@@ -43,6 +44,7 @@ class FakeJobSubmissionClient:
     ) -> str:
         self.pending.append(runtime_env["working_dir"])
         self.runtime_envs.append(runtime_env)
+        self.submit_kwargs.append(kwargs)
         return f"raysubmit_{len(self.pending)}"
 
     def get_job_status(self, job_id: str) -> SimpleNamespace:
@@ -216,6 +218,24 @@ class TestRemote(unittest.TestCase):
         workdir = Path(self.fake_jsc.runtime_envs[0]["working_dir"])
         self.assertTrue((workdir / "pyproject.toml").exists())
         self.assertTrue((workdir / "src" / "nested").exists())
+
+    def test_remote_default_resources_are_zero_gpus_one_cpu(self) -> None:
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None)
+
+        kwargs = self.fake_jsc.submit_kwargs[0]
+        self.assertEqual(kwargs["entrypoint_num_gpus"], 0)
+        self.assertEqual(kwargs["entrypoint_num_cpus"], 1)
+
+    def test_remote_passes_resource_request_to_ray(self) -> None:
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None, num_gpus=2, num_cpus=4)
+
+        kwargs = self.fake_jsc.submit_kwargs[0]
+        self.assertEqual(kwargs["entrypoint_num_gpus"], 2)
+        self.assertEqual(kwargs["entrypoint_num_cpus"], 4)
 
 
 if __name__ == "__main__":

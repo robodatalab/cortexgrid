@@ -64,7 +64,13 @@ class Job:
     job_id: str
 
 
-def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
+def remote(
+    fn: Callable[..., Any],
+    *args: Any,
+    num_gpus: int = 0,
+    num_cpus: int = 1,
+    **kwargs: Any,
+) -> Job:
     experiment = Experiment.get_instance()
     payload = Payload(fn=fn, args=args, kwargs=kwargs, experiment=experiment)
 
@@ -93,6 +99,8 @@ def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
     job_id = client.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
         runtime_env={"working_dir": str(workdir), "pip": str(requirements)},
+        entrypoint_num_gpus=num_gpus,
+        entrypoint_num_cpus=num_cpus,
     )
     _register_ray_job(experiment, job_id)
     return Job(client=client, job_id=job_id)
