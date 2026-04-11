@@ -39,6 +39,9 @@ class CortexConfig:
     s3_default_bucket: str = "ray-checkpoints"
     github_token: str = ""
 
+    experiment_name: str = ""
+    run_id: str = ""
+
     @staticmethod
     def from_env() -> CortexConfig:
         """Build config from env vars (used inside Ray jobs where env is pre-injected)."""
@@ -112,6 +115,6 @@ def get_config() -> CortexConfig:
     return _config
 
 
-def set_config(config: CortexConfig) -> None:
+def set_config(config: CortexConfig | None) -> None:
     global _config
     _config = config

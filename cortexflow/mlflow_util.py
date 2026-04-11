@@ -8,86 +8,50 @@ from __future__ import annotations
 
 import os
 import tempfile
-from contextlib import contextmanager
-from typing import Any, Generator
+import time
+from typing import Any
 
 from cortexflow.config import get_config
 from haikunator import Haikunator  # type: ignore
 import mlflow
 import mlflow.artifacts
+from mlflow.entities import Metric, Param
 from mlflow.tracking import MlflowClient
 import torch
 
 
-def _find_run_by_job_id(experiment: str, cortexflow_job_id: str) -> str | None:
-    """Search for an existing MLflow run tagged with the given cortexflow job ID."""
-    client = get_mlflow_client()
-    exp = client.get_experiment_by_name(experiment)
-    if exp is None:
-        return None
-    runs = client.search_runs(
-        experiment_ids=[exp.experiment_id],
-        filter_string=f"tags.`cortexflow.job_id` = '{cortexflow_job_id}'",
-        max_results=1,
-    )
-    if runs:
-        return runs[0].info.run_id
-    return None
-
-
-@contextmanager
-def mlflow_run(
-    experiment: str,
-    run_name: str | None = None,
-    run_id: str | None = None,
-    tags: dict[str, str] | None = None,
-) -> Generator[mlflow.ActiveRun, None, None]:
-    """Context manager for an MLflow run with auto-configured tracking.
-
-    On retry within a cortexflow job (same ``CORTEXFLOW_JOB_ID``), this
-    automatically resumes the MLflow run from the previous attempt
-    instead of creating a new one.
-
-    Usage:
-        with cortexflow.mlflow_run("my-experiment", run_name="v3") as run:
-            cortexflow.log_metric("loss", 0.5, step=1)
-    """
-    client = get_mlflow_client()
-    mlflow.set_experiment(experiment)
-
-    cortexflow_job_id = os.environ.get("CORTEXFLOW_JOB_ID")
-
-    if cortexflow_job_id and run_id is None:
-        existing = _find_run_by_job_id(experiment, cortexflow_job_id)
-        if existing:
-            run_id = existing
-
-    all_tags = dict(tags or {})
-    if cortexflow_job_id:
-        all_tags["cortexflow.job_id"] = cortexflow_job_id
-
-    with mlflow.start_run(run_id=run_id, run_name=run_name, tags=all_tags) as run:
-        yield run
-
-
 def log_metric(key: str, value: float, step: int | None = None) -> None:
     """Log a metric to the current active MLflow run."""
-    mlflow.log_metric(key, value, step=step)
+    config = get_config()
+    client = get_mlflow_client()
+    client.log_metric(config.run_id, key, value, step=step)
 
 
 def log_metrics(metrics: dict[str, float], step: int | None = None) -> None:
     """Log multiple metrics to the current active MLflow run."""
-    mlflow.log_metrics(metrics, step=step)
+    config = get_config()
+    client = get_mlflow_client()
+    timestamp = int(time.time() * 1000)
+    metric_entities = [
+        Metric(key=k, value=v, timestamp=timestamp, step=step or 0)
+        for k, v in metrics.items()
+    ]
+    client.log_batch(config.run_id, metrics=metric_entities)
 
 
 def log_params(params: dict[str, Any]) -> None:
     """Log parameters to the current active MLflow run."""
-    mlflow.log_params(params)
+    config = get_config()
+    client = get_mlflow_client()
+    for key, value in params.items():
+        client.log_param(config.run_id, key, value)
 
 
 def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
     """Log a file as an artifact to the current active MLflow run."""
-    mlflow.log_artifact(local_path, artifact_path=artifact_path)
+    config = get_config()
+    client = get_mlflow_client()
+    client.log_artifact(config.run_id, local_path, artifact_path=artifact_path)
 
 
 def save_checkpoint(
@@ -159,6 +123,7 @@ def load_checkpoint(
     return torch.load(local_path, map_location="cpu")
 
 
+
 def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
     config = get_config()
@@ -178,4 +143,8 @@ def try_create_experiment_and_run(experiment: str | None) -> None:
         experiment_id = client.create_experiment(name=experiment)
 
     run_name = name_gen.haikunate(token_length=2, token_chars="0123456789")
-    client.create_run(experiment_id=experiment_id, run_name=run_name)
+    run = client.create_run(experiment_id=experiment_id, run_name=run_name)
+
+    config = get_config()
+    config.experiment_name = experiment
+    config.run_id = run.info.run_id

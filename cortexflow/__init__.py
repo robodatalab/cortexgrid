@@ -28,7 +28,6 @@ from __future__ import annotations
 from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_job_id
 from cortexflow.experiment import init
 from cortexflow.mlflow_util import (
-    mlflow_run,
     log_metric,
     log_metrics,
     log_params,
