@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(ls cortexflow/*.md)",
+      "Bash(ls *.md cortexflow/*.md)"
+    ]
+  }
+}

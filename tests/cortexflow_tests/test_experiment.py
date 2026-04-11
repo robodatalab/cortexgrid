@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from cortexflow.experiment import Experiment, set_instance
 
@@ -9,9 +9,13 @@ from cortexflow.experiment import Experiment, set_instance
 class TestExperiment(unittest.TestCase):
     def setUp(self) -> None:
         set_instance(None)
+        self.fake_mlflow = MagicMock()
         for p in (
             patch("boto3.client"),
-            patch("cortexflow.experiment.MlflowClient"),
+            patch(
+                "cortexflow.experiment.MlflowClient",
+                return_value=self.fake_mlflow,
+            ),
         ):
             p.start()
             self.addCleanup(p.stop)
@@ -49,6 +53,20 @@ class TestExperiment(unittest.TestCase):
         Experiment.from_experiment("my-exp", "run-xyz")
         with self.assertRaises(ValueError):
             Experiment.from_experiment("other-exp", "other-run")
+
+    def test_get_ray_jobs_lists_registered_ids(self) -> None:
+        self.fake_mlflow.list_artifacts.return_value = [
+            MagicMock(path="ray-job/job-1"),
+            MagicMock(path="ray-job/job-2"),
+        ]
+
+        exp = Experiment.from_experiment("my-exp", "run-xyz")
+        result = exp.get_ray_jobs()
+
+        self.fake_mlflow.list_artifacts.assert_called_once_with(
+            "run-xyz", path="ray-job"
+        )
+        self.assertEqual(result, ["job-1", "job-2"])
 
 
 if __name__ == "__main__":

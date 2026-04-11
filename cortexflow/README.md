@@ -130,3 +130,7 @@ The DGX Spark runs the following services via Docker Compose:
 | Redis | 6379 | Ray GCS persistence (fault tolerance) |
 | Prometheus | 9090 | Metrics collection |
 | Grafana | 3000 | Dashboards (GPU, jobs, system) |
+
+## Tasks
+
+- [ ] `remote()` currently fails the whole submission if mlflow is unreachable when registering the ray_job_id. Add a graceful-degradation path (warn + continue, with retry/buffering) so transient mlflow outages don't block job submission.

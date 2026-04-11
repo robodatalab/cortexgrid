@@ -48,9 +48,14 @@ class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
         clear_instance()
         self.fake_jsc = FakeJobSubmissionClient()
+        self.fake_mlflow = MagicMock()
         patchers = [
             patch("boto3.client"),
             patch("cortexflow.experiment.MlflowClient"),
+            patch(
+                "cortexflow.ray_util.MlflowClient",
+                return_value=self.fake_mlflow,
+            ),
             patch(
                 "cortexflow.ray_util.subprocess.run",
                 return_value=MagicMock(stdout=""),
@@ -108,6 +113,17 @@ class TestRemote(unittest.TestCase):
 
         mock_basic.assert_called()
         self.assertEqual(mock_basic.call_args.kwargs.get("level"), logging.INFO)
+
+    def test_remote_registers_ray_job_id_with_mlflow(self) -> None:
+        set_instance(_make_experiment(run_id="run-xyz"))
+
+        job = cortexflow.remote(lambda: None)
+
+        self.fake_mlflow.log_artifact.assert_called_once()
+        args, kwargs = self.fake_mlflow.log_artifact.call_args
+        self.assertEqual(args[0], "run-xyz")
+        self.assertEqual(kwargs["artifact_path"], "ray-job")
+        self.assertEqual(Path(args[1]).name, job.job_id)
 
 
 if __name__ == "__main__":

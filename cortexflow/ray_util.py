@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 from ray.job_submission import JobSubmissionClient
 
@@ -50,4 +51,12 @@ def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
         runtime_env={"working_dir": str(workdir), "pip": pip},
     )
+    _register_ray_job(experiment, job_id)
     return Job(client=client, job_id=job_id)
+
+
+def _register_ray_job(experiment: Experiment, ray_job_id: str) -> None:
+    marker = Path(tempfile.mkdtemp()) / ray_job_id
+    marker.touch()
+    client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    client.log_artifact(experiment.run_id, str(marker), artifact_path="ray-job")
