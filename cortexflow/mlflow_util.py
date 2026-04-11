@@ -15,7 +15,7 @@ from cortexflow.config import get_config
 from haikunator import Haikunator  # type: ignore
 import mlflow
 import mlflow.artifacts
-from mlflow.entities import Metric, Param
+from mlflow.entities import Metric
 from mlflow.tracking import MlflowClient
 import torch
 
