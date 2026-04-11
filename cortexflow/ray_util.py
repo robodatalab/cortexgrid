@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import base64
 import cloudpickle  # type: ignore
+import logging
 import pickle
 import textwrap
 import time
-import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,14 +45,13 @@ class Job:
     """
 
     def __init__(
-        self, client: Any, job_id: str, cortexflow_job_id: str | None = None
+        self, client: Any, ray_job_id: str
     ) -> None:
         self.client = client
-        self.job_id = job_id
-        self.cortexflow_job_id = cortexflow_job_id
+        self.ray_job_id = ray_job_id
 
     def __repr__(self) -> str:
-        return f"Job({self.job_id!r})"
+        return f"Job({self.ray_job_id!r})"
 
 
 class _RemoteFunction:
@@ -72,10 +71,15 @@ class _RemoteFunction:
 
     def remote(self, *args: Any, **kwargs: Any) -> Job:
         """Submit this function to the Ray cluster. Returns a Job handle."""
+        logging.basicConfig(
+            level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+        )
+            
         config = get_config()
-        client = JobSubmissionClient(f"http://{config.dgx_ip}:8265")
+        if config is None:
+            raise ValueError("Cortexflow was not initialized. Call cortexflow.init()")
 
-        cortexflow_job_id = str(uuid.uuid4())
+        client = JobSubmissionClient(f"http://{config.dgx_ip}:8265")
 
         payload = base64.b64encode(
             cloudpickle.dumps(
@@ -85,7 +89,6 @@ class _RemoteFunction:
                     "kwargs": kwargs,
                     "num_gpus": self._num_gpus,
                     "max_retries": self._max_retries,
-                    "cortexflow_job_id": cortexflow_job_id,
                 }
             )
         ).decode()
@@ -104,17 +107,12 @@ class _RemoteFunction:
             args = payload["args"]
             kwargs = payload["kwargs"]
             max_retries = payload.get("max_retries", 0)
-            cortexflow_job_id = payload["cortexflow_job_id"]
-
-            os.environ["CORTEXFLOW_JOB_ID"] = cortexflow_job_id
-            print(f"__CORTEXFLOW_JOB_ID__:{cortexflow_job_id}")
 
             ray.init()
 
             remote_fn = ray.remote(
                 num_gpus=payload["num_gpus"],
                 max_retries=0,
-                runtime_env={"env_vars": {"CORTEXFLOW_JOB_ID": cortexflow_job_id}},
             )(fn)
 
             last_exc = None
@@ -142,10 +140,9 @@ class _RemoteFunction:
         ray_job_id = client.submit_job(
             entrypoint=entrypoint,
             runtime_env=self._runtime_env,
-            metadata={"cortexflow_job_id": cortexflow_job_id},
         )
 
-        return Job(client, ray_job_id, cortexflow_job_id=cortexflow_job_id)
+        return Job(client, ray_job_id)
 
 
 def remote(
@@ -316,7 +313,7 @@ def _extract_result(log_text: str) -> Any:
 def get_ray_client() -> Any:
     """Return a Ray JobSubmissionClient connected to the cluster."""
     config = get_config()
-    if not config.dgx_ip:
+    if not config or not config.dgx_ip:
         raise RuntimeError("DGX IP not configured. Run cortexflow.init() first.")
     return JobSubmissionClient(f"http://{config.dgx_ip}:8265")
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from cortexflow.config import CortexConfig, set_config
+from cortexflow.config import CortexConfig, set_config, get_config
 from cortexflow import mlflow_util
 
 
@@ -17,7 +17,10 @@ def init(experiment: str | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
-    config = CortexConfig.from_secrets_manager()
-    set_config(config)
+    
+    config = get_config()
+    if config is None:
+        config = CortexConfig.from_secrets_manager()
+        set_config(config)
 
-    mlflow_util.try_create_experiment_and_run(experiment=experiment)
+        mlflow_util.try_create_experiment_and_run(experiment=experiment)

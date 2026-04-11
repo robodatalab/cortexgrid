@@ -9,20 +9,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-import boto3  # type: ignore
-
+from cortexflow.secrets import get_secret
 
 SM_PREFIX = "robolab/infra"
-SM_REGION = "us-east-1"
-
-
-def _get_secret(secret_id: str) -> str:
-    """Fetch a secret from AWS Secrets Manager. Returns empty string on failure."""
-    try:
-        client = boto3.client("secretsmanager", region_name=SM_REGION)
-        return client.get_secret_value(SecretId=secret_id)["SecretString"]
-    except Exception:
-        return ""
 
 
 @dataclass
@@ -70,9 +59,9 @@ class CortexConfig:
     @staticmethod
     def from_secrets_manager() -> CortexConfig:
         """Build config by pulling secrets from AWS Secrets Manager."""
-        dgx_ip = _get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
-        minio_password = _get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
-        github_token = _get_secret(f"{SM_PREFIX}/GH_TOKEN")
+        dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+        minio_password = get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
+        github_token = get_secret(f"{SM_PREFIX}/GH_TOKEN")
         s3_endpoint = f"http://{dgx_ip}:9000" if dgx_ip else ""
 
         return CortexConfig(
@@ -109,9 +98,8 @@ class CortexConfig:
 _config: CortexConfig | None = None
 
 
-def get_config() -> CortexConfig:
-    if _config is None:
-        raise RuntimeError("Call cortexflow.init() first")
+def get_config() -> CortexConfig | None:
+    global _config
     return _config
 
 
