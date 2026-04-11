@@ -7,9 +7,9 @@ from cortexflow import mlflow_util
 
 
 def init(experiment: str | None = None) -> None:
-    """Configure connections to Ray, MLflow, and S3.
+    """Configure a new experiment.
 
-    Call once at the top of your script.
+    Call once at the top of your binary.
 
     Args:
         experiment: name of the experiment. If None, a new experiment will be created.

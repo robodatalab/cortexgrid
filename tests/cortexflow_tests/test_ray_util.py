@@ -1,103 +1,98 @@
 from __future__ import annotations
 
-import base64
-import os
-import pickle
+import logging
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
-from cortexflow.ray_util import remote, result, status, JobInfo
+import cortexflow
+import cortexflow.config
 from cortexflow.config import CortexConfig, set_config
-from ray.job_submission import JobStatus
+from cortexflow._ray_job_driver import main as ray_job_driver_main
+
+class FakeJobSubmissionClient:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.pending: list[str] = []
+
+    def submit_job(
+        self, entrypoint: str, runtime_env: dict[str, Any], **kwargs: Any
+    ) -> str:
+        self.pending.append(runtime_env["working_dir"])
+        return f"raysubmit_{len(self.pending)}"
+
+    def run_all(self) -> None:
+        for workdir in self.pending:
+            ray_job_driver_main(str(Path(workdir) / "payload.pkl"))
+        self.pending.clear()
 
 
-class TestRayUtil(unittest.TestCase):
+class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
+        set_config(None)
+        self.fake_jsc = FakeJobSubmissionClient()
+        patchers = [
+            patch("boto3.client"),
+            patch("cortexflow.mlflow_util.MlflowClient"),
+            patch(
+                "cortexflow.ray_util.subprocess.run",
+                return_value=MagicMock(stdout=""),
+            ),
+            patch(
+                "cortexflow.ray_util.JobSubmissionClient",
+                return_value=self.fake_jsc,
+            ),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(set_config, None)
+
+    def test_submitted_job_executes(self) -> None:
+        set_config(CortexConfig(ray_address="http://test:8265"))
+        marker = str(Path(tempfile.mkdtemp()) / "marker")
+
+        def write_marker() -> None:
+            Path(marker).write_text("ran")
+
+        cortexflow.remote(write_marker)
+        self.assertFalse(Path(marker).exists())
+
+        self.fake_jsc.run_all()
+
+        self.assertTrue(Path(marker).exists())
+        self.assertEqual(Path(marker).read_text(), "ran")
+
+    def test_submitted_job_uses_config_active_at_submit_time(self) -> None:
         set_config(
-            CortexConfig(
-                dgx_ip="100.1.2.3",
-                mlflow_tracking_uri="http://100.1.2.3:5000",
-                s3_access_key="key",
-                s3_secret_key="secret",
-            )
+            CortexConfig(experiment_name="exp-a", ray_address="http://test:8265")
         )
-        self.tmpdir = tempfile.mkdtemp()
-        self.pyproject = Path(self.tmpdir) / "pyproject.toml"
-        self.pyproject.write_text(
-            textwrap.dedent("""\
-            [project]
-            name = "test-project"
-            dependencies = ["numpy>=1.26"]
-        """)
-        )
-        self.old_cwd = os.getcwd()
-        os.chdir(self.tmpdir)
+        out = str(Path(tempfile.mkdtemp()) / "exp")
 
-        self.mock_jsc = MagicMock()
-        mock_status = MagicMock()
-        mock_status.value = "RUNNING"
-        self.mock_jsc.get_job_status.return_value = mock_status
-        mock_info = MagicMock()
-        mock_info.message = "In progress"
-        self.mock_jsc.get_job_info.return_value = mock_info
-        self.client_patcher = patch(
-            "cortexflow.ray_util.JobSubmissionClient",
-            return_value=self.mock_jsc,
-        )
-        self.client_patcher.start()
+        def capture_experiment() -> None:
+            cfg = cortexflow.config.get_config()
+            Path(out).write_text(cfg.experiment_name if cfg else "")
 
-    def tearDown(self) -> None:
-        self.client_patcher.stop()
-        os.chdir(self.old_cwd)
-        set_config(None)  # type: ignore[arg-type]
+        cortexflow.remote(capture_experiment)
 
-    def test_runtime_env_includes_working_dir(self) -> None:
-        wrapped = remote()(lambda: None)
-        self.assertEqual(
-            os.path.realpath(wrapped._runtime_env["working_dir"]),
-            os.path.realpath(self.tmpdir),
+        set_config(
+            CortexConfig(experiment_name="exp-b", ray_address="http://test:8265")
         )
 
-    def test_runtime_env_injects_service_env_vars(self) -> None:
-        wrapped = remote()(lambda: None)
-        env_vars = wrapped._runtime_env["env_vars"]
-        self.assertEqual(env_vars["MLFLOW_TRACKING_URI"], "http://100.1.2.3:5000")
-        self.assertEqual(env_vars["AWS_ACCESS_KEY_ID"], "key")
-        self.assertEqual(env_vars["DGX_TAILSCALE_IP"], "100.1.2.3")
+        self.fake_jsc.run_all()
 
-    def test_runtime_env_includes_excludes(self) -> None:
-        wrapped = remote()(lambda: None)
-        excludes = wrapped._runtime_env["excludes"]
-        self.assertIn(".venv/", excludes)
-        self.assertIn(".git/", excludes)
-        self.assertIn("__pycache__/", excludes)
+        self.assertEqual(Path(out).read_text(), "exp-a")
 
-    def test_status_returns_job_info(self) -> None:
-        info = status("raysubmit_abc123")
-        self.assertIsInstance(info, JobInfo)
-        self.assertEqual(info.job_id, "raysubmit_abc123")
-        self.assertEqual(info.status, "RUNNING")
-        self.assertEqual(info.message, "In progress")
+    def test_default_log_level_inside_job_is_info(self) -> None:
+        set_config(CortexConfig(ray_address="http://test:8265"))
 
-    def test_result_returns_result_when_succeeded(self) -> None:
-        self.mock_jsc.get_job_status.return_value = JobStatus.SUCCEEDED
-        result_bytes = base64.b64encode(pickle.dumps({"acc": 0.95})).decode()
-        self.mock_jsc.get_job_logs.return_value = (
-            f"__CORTEXFLOW_RESULT__:{result_bytes}"
-        )
+        with patch("logging.basicConfig") as mock_basic:
+            cortexflow.remote(lambda: None)
+            self.fake_jsc.run_all()
 
-        r = result("raysubmit_abc123")
-        self.assertEqual(r, {"acc": 0.95})
-
-    def test_result_raises_when_still_running(self) -> None:
-        self.mock_jsc.get_job_status.return_value = JobStatus.RUNNING
-
-        with self.assertRaises(RuntimeError) as ctx:
-            result("raysubmit_abc123")
-        self.assertIn("still RUNNING", str(ctx.exception))
+        mock_basic.assert_called()
+        self.assertEqual(mock_basic.call_args.kwargs.get("level"), logging.INFO)
 
 
 if __name__ == "__main__":
