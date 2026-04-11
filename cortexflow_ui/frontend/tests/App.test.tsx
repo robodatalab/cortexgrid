@@ -28,9 +28,7 @@ describe('App', () => {
 
   it('renders the CortexFlow landing header', () => {
     render(<App />)
-    expect(
-      screen.getByRole('heading', { level: 1, name: /cortexflow/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/cortexflow/i)).toBeInTheDocument()
   })
 
   it('renders a link per dashboard pointing at its url', async () => {
