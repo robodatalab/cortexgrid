@@ -42,6 +42,12 @@ class TestInit(unittest.TestCase):
 
         self.assertIs(get_config(), existing)
 
+    def test_from_experiment_overrides_experiment_and_run_id(self) -> None:
+        cfg = CortexConfig.from_experiment("my-exp", "run-xyz")
+
+        self.assertEqual(cfg.experiment_name, "my-exp")
+        self.assertEqual(cfg.run_id, "run-xyz")
+
 
 if __name__ == "__main__":
     unittest.main()

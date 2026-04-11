@@ -76,6 +76,14 @@ class CortexConfig:
             github_token=github_token,
         )
 
+    @staticmethod
+    def from_experiment(experiment_name: str, run_id: str) -> CortexConfig:
+        """Build a config bound to an existing MLflow experiment+run."""
+        config = CortexConfig.from_secrets_manager()
+        config.experiment_name = experiment_name
+        config.run_id = run_id
+        return config
+
     def env_vars_for_job(self) -> dict[str, str]:
         """Return env vars to inject into Ray jobs so task code can use from_env()."""
         env: dict[str, str] = {}
