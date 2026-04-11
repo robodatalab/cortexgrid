@@ -26,26 +26,29 @@ Then `uv sync` to install it.
 ```python
 import cortexflow
 
-cortexflow.init()
+cortexflow.init(experiment="weather-forecast")
 ```
 
-That single call reads `RAY_ADDRESS`, `MLFLOW_TRACKING_URI`, and `DGX_TAILSCALE_IP` from your shell environment (set by `make setup-mac`) and connects to all services.
+That single call reads `RAY_ADDRESS`, `MLFLOW_TRACKING_URI`, and `DGX_TAILSCALE_IP` from your shell environment (set by `make setup-mac`) and connects to all services. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
+
+**One experiment per binary run.** `cortexflow.init()` may only be called once per process. Every subsequent `cortexflow.log_metric`, `cortexflow.log_artifact`, checkpoint, and `cortexflow.remote()` submission is scoped to that experiment+run. Ray jobs submitted via `.remote()` inherit the experiment+run via env vars, so their logging flows into the same MLflow run as the parent binary.
 
 #### Experiment tracking (MLflow)
 
 ```python
-with cortexflow.mlflow_run("my-experiment", run_name="v3") as run:
-    cortexflow.log_params({"lr": 1e-3, "epochs": 20, "batch_size": 64})
+cortexflow.init(experiment="weather-forecast")
 
-    for epoch in range(20):
-        loss = train_one_epoch(model, dataloader)
-        cortexflow.log_metric("loss", loss, step=epoch)
+cortexflow.log_params({"lr": 1e-3, "epochs": 20, "batch_size": 64})
 
-        if epoch % 5 == 0:
-            cortexflow.save_checkpoint(model, optimizer, epoch=epoch)
+for epoch in range(20):
+    loss = train_one_epoch(model, dataloader)
+    cortexflow.log_metric("loss", loss, step=epoch)
+
+    if epoch % 5 == 0:
+        cortexflow.save_checkpoint(model, optimizer, epoch=epoch)
 ```
 
-Metrics and artifacts are logged to the MLflow server on the DGX. View them at `http://<DGX_IP>:5000`.
+No run-scoping context manager — `init()` starts the run, and every subsequent logging call flows into it. Metrics and artifacts are logged to the MLflow server on the DGX. View them at `http://<DGX_IP>:5000`.
 
 #### Resuming from a checkpoint
 
@@ -99,8 +102,7 @@ s3_client = cortexflow.get_s3_client()            # boto3 S3 client
 
 | Function | Description |
 |----------|-------------|
-| `cortexflow.init()` | Configure all connections from env vars. Call once. |
-| `cortexflow.mlflow_run(experiment, ...)` | Context manager for an MLflow run |
+| `cortexflow.init(experiment=None)` | Configure connections + start a new MLflow run inside the named experiment. One call per binary. |
 | `cortexflow.log_metric(key, value, step)` | Log a metric |
 | `cortexflow.log_metrics(metrics, step)` | Log multiple metrics |
 | `cortexflow.log_params(params)` | Log parameters |
