@@ -32,8 +32,6 @@ from cortexflow.mlflow_util import (
     log_metrics,
     log_params,
     log_artifact,
-    save_checkpoint,
-    load_checkpoint,
     get_mlflow_client,
 )
 from cortexflow.ray_util import (
@@ -66,8 +64,6 @@ __all__ = [
     "log_metrics",
     "log_params",
     "log_artifact",
-    "save_checkpoint",
-    "load_checkpoint",
     "get_mlflow_client",
     # S3
     "upload",
