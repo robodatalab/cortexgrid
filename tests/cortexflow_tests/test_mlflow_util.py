@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from cortexflow.config import CortexConfig, set_config
+from cortexflow.mlflow_util import mlflow_run, log_metric, log_metrics, log_params, log_artifact, try_create_experiment_and_run
 
 
 def _mock_mlflow() -> MagicMock:
@@ -13,53 +14,6 @@ def _mock_mlflow() -> MagicMock:
     mock = MagicMock()
     mock.ActiveRun = MagicMock
     return mock
-
-
-class TestEnsureConfigured(unittest.TestCase):
-    def setUp(self) -> None:
-        self.env_patcher = patch.dict(os.environ, {}, clear=True)
-        self.env_patcher.start()
-        set_config(CortexConfig(
-            mlflow_tracking_uri="http://test:5000",
-            mlflow_s3_endpoint_url="http://test:9000",
-            s3_access_key="key",
-            s3_secret_key="secret",
-        ))
-        self.mock_mlflow = _mock_mlflow()
-        self.modules_patcher = patch.dict(sys.modules, {
-            "mlflow": self.mock_mlflow,
-            "mlflow.tracking": self.mock_mlflow.tracking,
-            "mlflow.artifacts": self.mock_mlflow.artifacts,
-        })
-        self.modules_patcher.start()
-        # Force reimport so the module uses our mock
-        if "cortexflow.mlflow_util" in sys.modules:
-            del sys.modules["cortexflow.mlflow_util"]
-
-    def tearDown(self) -> None:
-        self.modules_patcher.stop()
-        self.env_patcher.stop()
-        set_config(None)  # type: ignore[arg-type]
-        if "cortexflow.mlflow_util" in sys.modules:
-            del sys.modules["cortexflow.mlflow_util"]
-
-    def test_sets_tracking_uri(self) -> None:
-        from cortexflow.mlflow_util import _ensure_configured
-        _ensure_configured()
-        self.mock_mlflow.set_tracking_uri.assert_called_once_with("http://test:5000")
-
-    def test_sets_s3_env_vars(self) -> None:
-        from cortexflow.mlflow_util import _ensure_configured
-        _ensure_configured()
-        self.assertEqual(os.environ["MLFLOW_S3_ENDPOINT_URL"], "http://test:9000")
-        self.assertEqual(os.environ["AWS_ACCESS_KEY_ID"], "key")
-        self.assertEqual(os.environ["AWS_SECRET_ACCESS_KEY"], "secret")
-
-    def test_does_not_override_existing_env_vars(self) -> None:
-        os.environ["AWS_ACCESS_KEY_ID"] = "existing"
-        from cortexflow.mlflow_util import _ensure_configured
-        _ensure_configured()
-        self.assertEqual(os.environ["AWS_ACCESS_KEY_ID"], "existing")
 
 
 class TestMlflowRun(unittest.TestCase):
@@ -86,7 +40,6 @@ class TestMlflowRun(unittest.TestCase):
             del sys.modules["cortexflow.mlflow_util"]
 
     def test_sets_experiment_and_starts_run(self) -> None:
-        from cortexflow.mlflow_util import mlflow_run
         with mlflow_run("test-experiment", run_name="v1") as run:
             self.assertIs(run, self.mock_run)
 
@@ -130,7 +83,6 @@ class TestMlflowRunAutoResume(unittest.TestCase):
         mock_client.search_runs.return_value = [mock_prev_run]
 
         with patch.dict(os.environ, {"CORTEXFLOW_JOB_ID": "job-uuid-1"}):
-            from cortexflow.mlflow_util import mlflow_run
             with mlflow_run("test-exp", run_name="v1"):
                 pass
 
@@ -145,7 +97,6 @@ class TestMlflowRunAutoResume(unittest.TestCase):
         mock_client.get_experiment_by_name.return_value = None
 
         with patch.dict(os.environ, {"CORTEXFLOW_JOB_ID": "job-uuid-2"}):
-            from cortexflow.mlflow_util import mlflow_run
             with mlflow_run("test-exp", run_name="v1"):
                 pass
 
@@ -157,7 +108,6 @@ class TestMlflowRunAutoResume(unittest.TestCase):
 
     def test_no_job_id_behaves_normally(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            from cortexflow.mlflow_util import mlflow_run
             with mlflow_run("test-exp", run_name="v1"):
                 pass
 
@@ -188,28 +138,66 @@ class TestLogFunctions(unittest.TestCase):
             del sys.modules["cortexflow.mlflow_util"]
 
     def test_log_metric(self) -> None:
-        from cortexflow.mlflow_util import log_metric
         log_metric("loss", 0.5, step=3)
         self.mock_mlflow.log_metric.assert_called_once_with("loss", 0.5, step=3)
 
     def test_log_metrics(self) -> None:
-        from cortexflow.mlflow_util import log_metrics
         log_metrics({"loss": 0.5, "acc": 0.9}, step=1)
         self.mock_mlflow.log_metrics.assert_called_once_with(
             {"loss": 0.5, "acc": 0.9}, step=1
         )
 
     def test_log_params(self) -> None:
-        from cortexflow.mlflow_util import log_params
         log_params({"lr": 0.001, "epochs": 10})
         self.mock_mlflow.log_params.assert_called_once_with({"lr": 0.001, "epochs": 10})
 
     def test_log_artifact(self) -> None:
-        from cortexflow.mlflow_util import log_artifact
         log_artifact("/tmp/model.pt", artifact_path="models")
         self.mock_mlflow.log_artifact.assert_called_once_with(
             "/tmp/model.pt", artifact_path="models"
         )
+
+
+class TestTryCreateExperimentAndRun(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = MagicMock()
+        self.patcher = patch(
+            "cortexflow.mlflow_util.get_mlflow_client",
+            return_value=self.client,
+        )
+        self.patcher.start()
+
+    def tearDown(self) -> None:
+        self.patcher.stop()
+
+    def test_creates_experiment_when_none_exists(self) -> None:
+        self.client.get_experiment_by_name.return_value = None
+        self.client.create_experiment.return_value = "exp-42"
+
+        try_create_experiment_and_run("my-experiment")
+
+        self.client.get_experiment_by_name.assert_called_once_with(name="my-experiment")
+        self.client.create_experiment.assert_called_once_with(name="my-experiment")
+        self.client.create_run.assert_called_once()
+        kwargs = self.client.create_run.call_args.kwargs
+        self.assertEqual(kwargs["experiment_id"], "exp-42")
+        self.assertIsInstance(kwargs["run_name"], str)
+        self.assertTrue(kwargs["run_name"])
+
+    def test_creates_run_in_existing_experiment(self) -> None:
+        existing = MagicMock()
+        existing.experiment_id = "exp-7"
+        self.client.get_experiment_by_name.return_value = existing
+
+        try_create_experiment_and_run("my-experiment")
+
+        self.client.get_experiment_by_name.assert_called_once_with(name="my-experiment")
+        self.client.create_experiment.assert_not_called()
+        self.client.create_run.assert_called_once()
+        kwargs = self.client.create_run.call_args.kwargs
+        self.assertEqual(kwargs["experiment_id"], "exp-7")
+        self.assertIsInstance(kwargs["run_name"], str)
+        self.assertTrue(kwargs["run_name"])
 
 
 if __name__ == "__main__":

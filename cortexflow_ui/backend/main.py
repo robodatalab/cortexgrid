@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from cortexflow.secrets import get_secret
 
-from config import settings
+from cortexflow_ui.backend.config import settings
 
 app = FastAPI(title="CortexFlow UI", version="0.1.0")
 

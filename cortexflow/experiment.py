@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import os
 
 from cortexflow.config import CortexConfig, set_config
+from cortexflow import mlflow_util
 
 
 def init(experiment: str | None = None) -> None:
@@ -18,5 +18,6 @@ def init(experiment: str | None = None) -> None:
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
     config = CortexConfig.from_secrets_manager()
-
     set_config(config)
+
+    mlflow_util.try_create_experiment_and_run(experiment=experiment)

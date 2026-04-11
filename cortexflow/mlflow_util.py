@@ -12,27 +12,16 @@ from contextlib import contextmanager
 from typing import Any, Generator
 
 from cortexflow.config import get_config
+from haikunator import Haikunator  # type: ignore
 import mlflow
 import mlflow.artifacts
-import mlflow.tracking
+from mlflow.tracking import MlflowClient
 import torch
-
-
-def _ensure_configured() -> None:
-    config = get_config()
-    if config.mlflow_tracking_uri:
-        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
-    if config.mlflow_s3_endpoint_url:
-        os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", config.mlflow_s3_endpoint_url)
-    if config.s3_access_key:
-        os.environ.setdefault("AWS_ACCESS_KEY_ID", config.s3_access_key)
-    if config.s3_secret_key:
-        os.environ.setdefault("AWS_SECRET_ACCESS_KEY", config.s3_secret_key)
 
 
 def _find_run_by_job_id(experiment: str, cortexflow_job_id: str) -> str | None:
     """Search for an existing MLflow run tagged with the given cortexflow job ID."""
-    client = mlflow.tracking.MlflowClient()
+    client = get_mlflow_client()
     exp = client.get_experiment_by_name(experiment)
     if exp is None:
         return None
@@ -63,7 +52,7 @@ def mlflow_run(
         with cortexflow.mlflow_run("my-experiment", run_name="v3") as run:
             cortexflow.log_metric("loss", 0.5, step=1)
     """
-    _ensure_configured()
+    client = get_mlflow_client()
     mlflow.set_experiment(experiment)
 
     cortexflow_job_id = os.environ.get("CORTEXFLOW_JOB_ID")
@@ -150,8 +139,7 @@ def load_checkpoint(
     Returns:
         Dict with 'epoch', 'model_state_dict', 'optimizer_state_dict' (if saved), etc.
     """
-    _ensure_configured()
-    client = mlflow.tracking.MlflowClient()
+    client = get_mlflow_client()
 
     artifacts = client.list_artifacts(run_id, "checkpoints")
     if not artifacts:
@@ -171,7 +159,23 @@ def load_checkpoint(
     return torch.load(local_path, map_location="cpu")
 
 
-def get_mlflow_client() -> mlflow.tracking.MlflowClient:
+def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
-    _ensure_configured()
-    return mlflow.tracking.MlflowClient()
+    config = get_config()
+    return MlflowClient(tracking_uri=config.mlflow_tracking_uri)
+
+
+def try_create_experiment_and_run(experiment: str | None) -> None:
+    name_gen = Haikunator()
+    if experiment is None:
+        experiment = name_gen.haikunate(token_length=2, token_chars="0123456789")
+
+    client = get_mlflow_client()
+    experiment_obj = client.get_experiment_by_name(name=experiment)
+    if experiment_obj:
+        experiment_id = experiment_obj.experiment_id
+    else:
+        experiment_id = client.create_experiment(name=experiment)
+
+    run_name = name_gen.haikunate(token_length=2, token_chars="0123456789")
+    client.create_run(experiment_id=experiment_id, run_name=run_name)

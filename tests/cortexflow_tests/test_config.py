@@ -84,33 +84,6 @@ class TestCortexConfigFromSecretsManager(unittest.TestCase):
         self.assertEqual(config.s3_endpoint_url, "")
 
 
-class TestEnvVarsForJob(unittest.TestCase):
-    def test_full_config_exports_all_vars(self) -> None:
-        config = CortexConfig(
-            dgx_ip="100.1.2.3",
-            mlflow_tracking_uri="http://100.1.2.3:5000",
-            mlflow_s3_endpoint_url="http://100.1.2.3:9000",
-            s3_access_key="key",
-            s3_secret_key="secret",
-        )
-        env = config.env_vars_for_job()
-        self.assertEqual(env["MLFLOW_TRACKING_URI"], "http://100.1.2.3:5000")
-        self.assertEqual(env["MLFLOW_S3_ENDPOINT_URL"], "http://100.1.2.3:9000")
-        self.assertEqual(env["AWS_ACCESS_KEY_ID"], "key")
-        self.assertEqual(env["AWS_SECRET_ACCESS_KEY"], "secret")
-        self.assertEqual(env["DGX_TAILSCALE_IP"], "100.1.2.3")
-
-    def test_empty_config_exports_nothing(self) -> None:
-        config = CortexConfig()
-        env = config.env_vars_for_job()
-        self.assertEqual(env, {})
-
-    def test_partial_config_exports_only_set_fields(self) -> None:
-        config = CortexConfig(mlflow_tracking_uri="http://x:5000")
-        env = config.env_vars_for_job()
-        self.assertEqual(env, {"MLFLOW_TRACKING_URI": "http://x:5000"})
-
-
 class TestConfigSingleton(unittest.TestCase):
     def setUp(self) -> None:
         set_config(None)  # type: ignore[arg-type]

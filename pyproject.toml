@@ -11,6 +11,8 @@ dependencies = [
     "tqdm>=4.60",
     "cloudpickle>=3.0",
     "torch>=2.0.0",
+    "haikunator>=2.1.0",
+    "pydantic-settings>=2.13.1",
 ]
 
 [build-system]

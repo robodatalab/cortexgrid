@@ -46,9 +46,9 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8265:8265"   # Ray Dashboard + Jobs API
-      - "6380:6379"   # Ray GCS port (mapped to 6380 on host to avoid redis conflict)
-      - "8080:8080"   # Prometheus metrics
+      - "8265:8265" # Ray Dashboard + Jobs API
+      - "6380:6379" # Ray GCS port (mapped to 6380 on host to avoid redis conflict)
+      - "8080:8080" # Prometheus metrics
     environment:
       - RAY_REDIS_ADDRESS=redis:6379
       - RAY_GRAFANA_HOST=http://grafana:3000
@@ -112,8 +112,8 @@ services:
     container_name: robolab-minio
     restart: unless-stopped
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -173,7 +173,8 @@ services:
         --host 0.0.0.0
         --port 5000
         --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-        --default-artifact-root s3://${ARTIFACT_STORE_BUCKET}/
+        --default-artifact-root mlflow-artifacts:/
+        --serve-artifacts
         --artifacts-destination s3://${ARTIFACT_STORE_BUCKET}/
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -203,7 +204,15 @@ services:
       - "--path.rootfs=/rootfs"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9100/metrics",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -226,7 +235,15 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/healthy",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -256,7 +273,15 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ray-tmp:/tmp/ray:ro
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/api/health",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
