@@ -8,9 +8,25 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import cortexflow
-import cortexflow.config
-from cortexflow.config import CortexConfig, set_config
+from cortexflow.experiment import Experiment, clear_instance, set_instance
 from cortexflow._ray_job_driver import main as ray_job_driver_main
+
+
+def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Experiment:
+    return Experiment(
+        experiment_name=experiment_name,
+        run_id=run_id,
+        ray_address="http://test:8265",
+        dgx_ip="",
+        mlflow_tracking_uri="",
+        mlflow_s3_endpoint_url="",
+        s3_endpoint_url="",
+        s3_access_key="",
+        s3_secret_key="",
+        s3_default_bucket="",
+        github_token="",
+    )
+
 
 class FakeJobSubmissionClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -30,11 +46,11 @@ class FakeJobSubmissionClient:
 
 class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
-        set_config(None)
+        clear_instance()
         self.fake_jsc = FakeJobSubmissionClient()
         patchers = [
             patch("boto3.client"),
-            patch("cortexflow.mlflow_util.MlflowClient"),
+            patch("cortexflow.experiment.MlflowClient"),
             patch(
                 "cortexflow.ray_util.subprocess.run",
                 return_value=MagicMock(stdout=""),
@@ -47,10 +63,13 @@ class TestRemote(unittest.TestCase):
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
-        self.addCleanup(set_config, None)
+
+    def tearDown(self) -> None:
+        clear_instance()
+        return super().tearDown()
 
     def test_submitted_job_executes(self) -> None:
-        set_config(CortexConfig(ray_address="http://test:8265"))
+        set_instance(_make_experiment())
         marker = str(Path(tempfile.mkdtemp()) / "marker")
 
         def write_marker() -> None:
@@ -64,28 +83,24 @@ class TestRemote(unittest.TestCase):
         self.assertTrue(Path(marker).exists())
         self.assertEqual(Path(marker).read_text(), "ran")
 
-    def test_submitted_job_uses_config_active_at_submit_time(self) -> None:
-        set_config(
-            CortexConfig(experiment_name="exp-a", ray_address="http://test:8265")
-        )
+    def test_submitted_job_uses_experiment_active_at_submit_time(self) -> None:
+        set_instance(_make_experiment(experiment_name="exp-a"))
         out = str(Path(tempfile.mkdtemp()) / "exp")
 
         def capture_experiment() -> None:
-            cfg = cortexflow.config.get_config()
-            Path(out).write_text(cfg.experiment_name if cfg else "")
+            exp = Experiment.get_instance()
+            Path(out).write_text(exp.experiment_name)
 
         cortexflow.remote(capture_experiment)
 
-        set_config(
-            CortexConfig(experiment_name="exp-b", ray_address="http://test:8265")
-        )
+        set_instance(_make_experiment(experiment_name="exp-b"))
 
         self.fake_jsc.run_all()
 
         self.assertEqual(Path(out).read_text(), "exp-a")
 
     def test_default_log_level_inside_job_is_info(self) -> None:
-        set_config(CortexConfig(ray_address="http://test:8265"))
+        set_instance(_make_experiment())
 
         with patch("logging.basicConfig") as mock_basic:
             cortexflow.remote(lambda: None)

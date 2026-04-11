@@ -3,50 +3,52 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from cortexflow.config import CortexConfig, get_config, set_config
-from cortexflow.experiment import init
+from cortexflow.experiment import Experiment, set_instance
 
 
-class TestInit(unittest.TestCase):
+class TestExperiment(unittest.TestCase):
     def setUp(self) -> None:
-        set_config(None)
-        self.boto3_patcher = patch("boto3.client")
-        self.mlflow_patcher = patch("cortexflow.mlflow_util.MlflowClient")
-        self.boto3_patcher.start()
-        self.mlflow_patcher.start()
+        set_instance(None)
+        for p in (
+            patch("boto3.client"),
+            patch("cortexflow.experiment.MlflowClient"),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(set_instance, None)
 
-    def tearDown(self) -> None:
-        self.boto3_patcher.stop()
-        self.mlflow_patcher.stop()
-        set_config(None)
-
-    def test_get_config_returns_none_before_init(self) -> None:
-        self.assertIsNone(get_config())
+    def test_get_instance_raises_before_init(self) -> None:
+        with self.assertRaises(ValueError):
+            Experiment.get_instance()
 
     def test_init_creates_experiment_and_run(self) -> None:
-        init()
+        exp = Experiment.init()
 
-        cfg = get_config()
-        self.assertIsNotNone(cfg)
-        self.assertTrue(cfg.experiment_name)
-        self.assertTrue(cfg.run_id)
+        self.assertTrue(exp.experiment_name)
+        self.assertTrue(exp.run_id)
+        self.assertIs(Experiment.get_instance(), exp)
 
-    def test_init_skips_when_already_initialized(self) -> None:
-        existing = CortexConfig(
-            experiment_name="my-exp",
-            run_id="run-123",
-        )
-        set_config(existing)
+    def test_init_returns_existing_instance_on_second_call(self) -> None:
+        first = Experiment.init()
+        second = Experiment.init()
+        self.assertIs(first, second)
 
-        init()
+    def test_init_raises_when_called_with_different_name(self) -> None:
+        Experiment.init("my-exp")
+        with self.assertRaises(ValueError):
+            Experiment.init("other-exp")
 
-        self.assertIs(get_config(), existing)
+    def test_from_experiment_binds_to_existing_run(self) -> None:
+        exp = Experiment.from_experiment("my-exp", "run-xyz")
 
-    def test_from_experiment_overrides_experiment_and_run_id(self) -> None:
-        cfg = CortexConfig.from_experiment("my-exp", "run-xyz")
+        self.assertEqual(exp.experiment_name, "my-exp")
+        self.assertEqual(exp.run_id, "run-xyz")
+        self.assertIs(Experiment.get_instance(), exp)
 
-        self.assertEqual(cfg.experiment_name, "my-exp")
-        self.assertEqual(cfg.run_id, "run-xyz")
+    def test_from_experiment_raises_when_singleton_mismatches(self) -> None:
+        Experiment.from_experiment("my-exp", "run-xyz")
+        with self.assertRaises(ValueError):
+            Experiment.from_experiment("other-exp", "other-run")
 
 
 if __name__ == "__main__":

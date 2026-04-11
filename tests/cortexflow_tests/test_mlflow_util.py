@@ -3,13 +3,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.config import CortexConfig, set_config
+from cortexflow.experiment import Experiment, clear_instance, set_instance
 from cortexflow.mlflow_util import (
     log_metric,
     log_metrics,
     log_params,
     log_artifact,
-    try_create_experiment_and_run,
     get_experiment_list,
 )
 
@@ -19,10 +18,21 @@ RUN_ID = "test-run-123"
 
 class TestMlflowUtil(unittest.TestCase):
     def setUp(self) -> None:
-        set_config(CortexConfig(
-            mlflow_tracking_uri="http://test:5000",
-            run_id=RUN_ID,
-        ))
+        set_instance(
+            Experiment(
+                experiment_name="experiment",
+                run_id=RUN_ID,
+                ray_address="",
+                dgx_ip="",
+                mlflow_tracking_uri="http://test:5000",
+                mlflow_s3_endpoint_url="",
+                s3_endpoint_url="",
+                s3_access_key="",
+                s3_secret_key="",
+                s3_default_bucket="",
+                github_token="",
+            )
+        )
         self.client = MagicMock()
         self.patcher = patch(
             "cortexflow.mlflow_util.get_mlflow_client",
@@ -32,7 +42,7 @@ class TestMlflowUtil(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.patcher.stop()
-        set_config(None)  # type: ignore[arg-type]
+        clear_instance()
 
     def test_log_metric_hits_configured_run(self) -> None:
         log_metric("loss", 0.5, step=3)
@@ -61,35 +71,6 @@ class TestMlflowUtil(unittest.TestCase):
         self.client.log_artifact.assert_called_once_with(
             RUN_ID, "/tmp/model.pt", artifact_path="models"
         )
-
-    def test_creates_experiment_when_none_exists(self) -> None:
-        self.client.get_experiment_by_name.return_value = None
-        self.client.create_experiment.return_value = "exp-42"
-
-        try_create_experiment_and_run("my-experiment")
-
-        self.client.get_experiment_by_name.assert_called_once_with(name="my-experiment")
-        self.client.create_experiment.assert_called_once_with(name="my-experiment")
-        self.client.create_run.assert_called_once()
-        kwargs = self.client.create_run.call_args.kwargs
-        self.assertEqual(kwargs["experiment_id"], "exp-42")
-        self.assertIsInstance(kwargs["run_name"], str)
-        self.assertTrue(kwargs["run_name"])
-
-    def test_creates_run_in_existing_experiment(self) -> None:
-        existing = MagicMock()
-        existing.experiment_id = "exp-7"
-        self.client.get_experiment_by_name.return_value = existing
-
-        try_create_experiment_and_run("my-experiment")
-
-        self.client.get_experiment_by_name.assert_called_once_with(name="my-experiment")
-        self.client.create_experiment.assert_not_called()
-        self.client.create_run.assert_called_once()
-        kwargs = self.client.create_run.call_args.kwargs
-        self.assertEqual(kwargs["experiment_id"], "exp-7")
-        self.assertIsInstance(kwargs["run_name"], str)
-        self.assertTrue(kwargs["run_name"])
 
     def test_get_experiment_list_maps_names_to_run_ids(self) -> None:
         exp_a = MagicMock(experiment_id="1", name="alpha")

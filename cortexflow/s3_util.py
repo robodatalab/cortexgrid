@@ -12,19 +12,19 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.config import get_config
+from cortexflow.experiment import Experiment
 
 
 def get_s3_client() -> Any:
     """Return a boto3 S3 client configured for MinIO or AWS S3."""
-    config = get_config()
+    experiment = Experiment.get_instance()
     kwargs: dict[str, Any] = {}
-    if config.s3_endpoint_url:
-        kwargs["endpoint_url"] = config.s3_endpoint_url
-    if config.s3_access_key:
-        kwargs["aws_access_key_id"] = config.s3_access_key
-    if config.s3_secret_key:
-        kwargs["aws_secret_access_key"] = config.s3_secret_key
+    if experiment.s3_endpoint_url:
+        kwargs["endpoint_url"] = experiment.s3_endpoint_url
+    if experiment.s3_access_key:
+        kwargs["aws_access_key_id"] = experiment.s3_access_key
+    if experiment.s3_secret_key:
+        kwargs["aws_secret_access_key"] = experiment.s3_secret_key
     return boto3.client("s3", **kwargs)
 
 
@@ -43,8 +43,8 @@ def upload(
     Returns:
         The s3://bucket/key URI of the uploaded object.
     """
-    config = get_config()
-    bucket = bucket or config.s3_default_bucket
+    experiment = Experiment.get_instance()
+    bucket = bucket or experiment.s3_default_bucket
     key = key or os.path.basename(local_path)
 
     client = get_s3_client()
@@ -80,8 +80,8 @@ def upload_dir(
     Returns:
         List of s3://bucket/key URIs for uploaded objects.
     """
-    config = get_config()
-    bucket = bucket or config.s3_default_bucket
+    experiment = Experiment.get_instance()
+    bucket = bucket or experiment.s3_default_bucket
 
     client = get_s3_client()
     try:

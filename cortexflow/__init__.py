@@ -26,7 +26,7 @@ if ckpt:
 from __future__ import annotations
 
 from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_job_id
-from cortexflow.experiment import init
+from cortexflow.experiment import Experiment
 from cortexflow.mlflow_util import (
     log_metric,
     log_metrics,
@@ -40,12 +40,11 @@ from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
 
 __all__ = [
-    "init",
+    "Experiment",
     # Ray / jobs
     "remote",
     "Job",
     # MLflow
-    "mlflow_run",
     "log_metric",
     "log_metrics",
     "log_params",

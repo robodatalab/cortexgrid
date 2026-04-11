@@ -13,7 +13,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.config import CortexConfig, get_config
+from cortexflow.experiment import Experiment
 
 
 class Payload(BaseModel):
@@ -22,7 +22,7 @@ class Payload(BaseModel):
     fn: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
-    config: CortexConfig | None
+    experiment: Experiment
 
 
 @dataclass
@@ -32,10 +32,8 @@ class Job:
 
 
 def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
-    config = get_config()
-    if config is None:
-        raise RuntimeError("Call cortexflow.init() first")
-    payload = Payload(fn=fn, args=args, kwargs=kwargs, config=config)
+    experiment = Experiment.get_instance()
+    payload = Payload(fn=fn, args=args, kwargs=kwargs, experiment=experiment)
 
     workdir = Path(tempfile.mkdtemp(prefix="cortexflow-"))
     (workdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
@@ -47,7 +45,7 @@ def remote(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Job:
         check=True,
     ).stdout.splitlines()
 
-    client = JobSubmissionClient(config.ray_address)
+    client = JobSubmissionClient(experiment.ray_address)
     job_id = client.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
         runtime_env={"working_dir": str(workdir), "pip": pip},
