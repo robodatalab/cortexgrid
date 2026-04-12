@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
@@ -25,6 +26,23 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+@dataclass
+class JobLifecycle:
+    status: JobStatus = JobStatus.PENDING
+    error: str | None = None
+    retry: bool = False
+    ray_job_id: str | None = None
+
+    def to_json(self) -> str:
+        return json.dumps({"status": self.status.value, **{k: v for k, v in asdict(self).items() if k != "status"}})
+
+    @classmethod
+    def from_json(cls, text: str) -> "JobLifecycle":
+        data = json.loads(text)
+        data["status"] = JobStatus(data["status"])
+        return cls(**data)
+
+
 class Payload(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -34,7 +52,6 @@ class Payload(BaseModel):
     experiment: Experiment
     num_gpus: int = 0
     num_cpus: int = 1
-    retry: bool = False
     pip_requirements: str = ""
 
 
@@ -63,29 +80,26 @@ def remote(
         experiment=experiment,
         num_gpus=num_gpus,
         num_cpus=num_cpus,
-        retry=retry,
         pip_requirements=pip_requirements,
     )
 
+    lifecycle = JobLifecycle(retry=retry)
+
     job_id = str(uuid.uuid4())
     tmpdir = Path(tempfile.mkdtemp())
-
     (tmpdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
-    (tmpdir / "status.json").write_text(
-        json.dumps({"status": JobStatus.PENDING.value, "error": None})
-    )
+    (tmpdir / "lifecycle.json").write_text(lifecycle.to_json())
 
     artifact_path = f"job/{job_id}"
     client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
     client.log_artifact(experiment.run_id, str(tmpdir / "payload.pkl"), artifact_path=artifact_path)
-    client.log_artifact(experiment.run_id, str(tmpdir / "status.json"), artifact_path=artifact_path)
+    client.log_artifact(experiment.run_id, str(tmpdir / "lifecycle.json"), artifact_path=artifact_path)
 
     return job_id
 
 
-def get_job_status(experiment: Experiment, job_id: str) -> tuple[JobStatus, str | None]:
-    """Read the job's status.json from MLflow artifacts."""
+def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
+    """Read the job's lifecycle from MLflow artifacts."""
     client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
-    local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/status.json")
-    data = json.loads(Path(local_path).read_text())
-    return (JobStatus(data["status"]), data.get("error"))
+    local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
+    return JobLifecycle.from_json(Path(local_path).read_text())

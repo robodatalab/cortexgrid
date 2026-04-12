@@ -9,7 +9,7 @@ import cloudpickle  # type: ignore
 
 import cortexflow
 from cortexflow.experiment import Experiment, clear_instance, set_instance
-from cortexflow.jobs import JobStatus, Payload
+from cortexflow.jobs import JobLifecycle, JobStatus, Payload
 
 
 def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Experiment:
@@ -68,7 +68,7 @@ class TestRemote(unittest.TestCase):
         self.assertIsInstance(job_id, str)
         self.assertTrue(len(job_id) > 0)
 
-    def test_remote_uploads_payload_and_status(self) -> None:
+    def test_remote_uploads_payload_and_lifecycle(self) -> None:
         set_instance(_make_experiment(run_id="run-xyz"))
 
         job_id = cortexflow.remote(lambda: None)
@@ -78,19 +78,29 @@ class TestRemote(unittest.TestCase):
         self.assertEqual(payload_args[0], "run-xyz")
         self.assertEqual(payload_kwargs["artifact_path"], f"job/{job_id}")
 
-        status_args, status_kwargs = _get_artifact_call(self.fake_mlflow, "status.json")
-        self.assertEqual(status_args[0], "run-xyz")
-        self.assertEqual(status_kwargs["artifact_path"], f"job/{job_id}")
+        lifecycle_args, lifecycle_kwargs = _get_artifact_call(self.fake_mlflow, "lifecycle.json")
+        self.assertEqual(lifecycle_args[0], "run-xyz")
+        self.assertEqual(lifecycle_kwargs["artifact_path"], f"job/{job_id}")
 
-    def test_initial_status_is_pending(self) -> None:
+    def test_initial_lifecycle_is_pending(self) -> None:
         set_instance(_make_experiment())
 
         cortexflow.remote(lambda: None)
 
-        status_args, _ = _get_artifact_call(self.fake_mlflow, "status.json")
-        data = json.loads(Path(status_args[1]).read_text())
-        self.assertEqual(data["status"], "pending")
-        self.assertIsNone(data["error"])
+        lifecycle_args, _ = _get_artifact_call(self.fake_mlflow, "lifecycle.json")
+        lifecycle = JobLifecycle.from_json(Path(lifecycle_args[1]).read_text())
+        self.assertEqual(lifecycle.status, JobStatus.PENDING)
+        self.assertIsNone(lifecycle.error)
+        self.assertFalse(lifecycle.retry)
+
+    def test_lifecycle_includes_retry_flag(self) -> None:
+        set_instance(_make_experiment())
+
+        cortexflow.remote(lambda: None, retry=True)
+
+        lifecycle_args, _ = _get_artifact_call(self.fake_mlflow, "lifecycle.json")
+        lifecycle = JobLifecycle.from_json(Path(lifecycle_args[1]).read_text())
+        self.assertTrue(lifecycle.retry)
 
     def test_uploaded_payload_round_trips_through_cloudpickle(self) -> None:
         set_instance(_make_experiment())
@@ -112,15 +122,6 @@ class TestRemote(unittest.TestCase):
         self.assertEqual(payload.num_gpus, 2)
         self.assertEqual(payload.num_cpus, 4)
 
-    def test_payload_includes_retry_flag(self) -> None:
-        set_instance(_make_experiment())
-
-        cortexflow.remote(lambda: None, retry=True)
-
-        args, _ = _get_artifact_call(self.fake_mlflow, "payload.pkl")
-        payload: Payload = cloudpickle.loads(Path(args[1]).read_bytes())
-        self.assertTrue(payload.retry)
-
     def test_payload_includes_pip_requirements(self) -> None:
         set_instance(_make_experiment())
 
@@ -131,31 +132,32 @@ class TestRemote(unittest.TestCase):
         self.assertIn("numpy==1.26", payload.pip_requirements)
         self.assertIn("torch==2.5", payload.pip_requirements)
 
-    def test_get_job_status_reads_status_json(self) -> None:
+    def test_get_job_status_returns_lifecycle(self) -> None:
         exp = _make_experiment()
         set_instance(exp)
-        status_data = json.dumps({"status": "running", "error": None})
+        lifecycle = JobLifecycle(status=JobStatus.RUNNING, retry=True)
         self.fake_mlflow.download_artifacts.return_value = str(
-            self._write_temp("status.json", status_data)
+            self._write_temp("lifecycle.json", lifecycle.to_json())
         )
 
-        status, error = cortexflow.get_job_status(exp, "job-123")
+        result = cortexflow.get_job_status(exp, "job-123")
 
-        self.assertEqual(status, JobStatus.RUNNING)
-        self.assertIsNone(error)
+        self.assertIsInstance(result, JobLifecycle)
+        self.assertEqual(result.status, JobStatus.RUNNING)
+        self.assertTrue(result.retry)
 
     def test_get_job_status_returns_error_on_failure(self) -> None:
         exp = _make_experiment()
         set_instance(exp)
-        status_data = json.dumps({"status": "failed", "error": "OOM killed"})
+        lifecycle = JobLifecycle(status=JobStatus.FAILED, error="OOM killed")
         self.fake_mlflow.download_artifacts.return_value = str(
-            self._write_temp("status.json", status_data)
+            self._write_temp("lifecycle.json", lifecycle.to_json())
         )
 
-        status, error = cortexflow.get_job_status(exp, "job-456")
+        result = cortexflow.get_job_status(exp, "job-456")
 
-        self.assertEqual(status, JobStatus.FAILED)
-        self.assertEqual(error, "OOM killed")
+        self.assertEqual(result.status, JobStatus.FAILED)
+        self.assertEqual(result.error, "OOM killed")
 
     def _write_temp(self, name: str, content: str) -> Path:
         import tempfile
