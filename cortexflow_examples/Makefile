@@ -14,12 +14,12 @@ PYTHON ?= python
 .PHONY: first-experiment jobs checkpoints all
 
 first-experiment:
-	$(PYTHON) first_experiment/main.py
+	cd first_experiment && $(PYTHON) main.py
 
 jobs:
-	$(PYTHON) jobs/main.py
+	cd jobs && $(PYTHON) main.py
 
 checkpoints:
-	$(PYTHON) checkpoints/main.py
+	cd checkpoints && $(PYTHON) main.py
 
 all: first-experiment jobs checkpoints
