@@ -82,10 +82,8 @@ scp $SSH_OPTS -q "$REPO_ROOT/.env" "${DGX_HOST}:${DGX_DIR}/.env"
 echo "  Files synced (including .env)"
 
 echo "[4/6] Logging into ECR on DGX..."
-ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_ECR
-set -euo pipefail
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 517906913330.dkr.ecr.us-east-1.amazonaws.com
-REMOTE_ECR
+ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1)
+echo "$ECR_PASSWORD" | ssh $SSH_OPTS "$DGX_HOST" "docker login --username AWS --password-stdin 517906913330.dkr.ecr.us-east-1.amazonaws.com"
 echo "  ECR login OK"
 
 echo "[5/6] Starting services on DGX..."
