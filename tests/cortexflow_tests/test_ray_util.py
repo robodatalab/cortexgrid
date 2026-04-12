@@ -42,6 +42,11 @@ class TestRayUtil(unittest.TestCase):
             cortexflow.get_ray_logs("job-1"), "hello from the cluster"
         )
 
+    @patch("cortexflow.experiment.get_secret", return_value="100.80.27.32")
+    def test_get_ray_job_url_builds_dashboard_url(self, _mock: Any) -> None:
+        url = cortexflow.get_ray_job_url("ray_abc123")
+        self.assertEqual(url, "http://100.80.27.32:8265/#/jobs/ray_abc123")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,7 +26,7 @@ if ckpt:
 from __future__ import annotations
 
 from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_cortexflow_job_id
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri, get_ray_address, get_s3_endpoint_url, list_experiments
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri, get_ray_address, get_s3_endpoint_url, list_experiments, get_mlflow_run_url
 from cortexflow.mlflow_util import (
     log_metric,
     log_metrics,
@@ -39,7 +39,7 @@ from cortexflow.mlflow_util import (
     list_run_artifacts,
 )
 from cortexflow.jobs import remote, get_job_status, list_experiment_jobs, JobStatus, JobLifecycle
-from cortexflow.ray_util import get_ray_status, get_ray_logs
+from cortexflow.ray_util import get_ray_status, get_ray_logs, get_ray_job_url
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
 
@@ -56,6 +56,8 @@ __all__ = [
     "JobLifecycle",
     "get_ray_status",
     "get_ray_logs",
+    "get_ray_job_url",
+    "get_mlflow_run_url",
     # MLflow
     "log_metric",
     "log_metrics",

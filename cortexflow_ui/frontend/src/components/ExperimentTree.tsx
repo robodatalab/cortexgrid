@@ -44,6 +44,7 @@ function groupByExperiment(items: ExperimentRun[]): TreeNode[] {
 export type Selection =
   | { kind: 'experiment'; experiment_name: string }
   | { kind: 'run'; experiment_name: string; run_id: string; run_name: string }
+  | { kind: 'job'; experiment_name: string; run_id: string; job_id: string }
 
 type ExperimentTreeProps = {
   onSelect: (selection: Selection) => void
@@ -127,7 +128,15 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
                 </div>
                 {run.expanded &&
                   run.jobs.map((job) => (
-                    <div key={job.job_id} className="experiment-tree__job">
+                    <div
+                      key={job.job_id}
+                      className={`experiment-tree__job${selected === job.job_id ? ' experiment-tree--selected' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSelected(job.job_id)
+                        onSelect({ kind: 'job', experiment_name: node.experiment_name, run_id: run.run_id, job_id: job.job_id })
+                      }}
+                    >
                       <Cog size={12} /> {job.job_id}
                       <span className={`experiment-tree__job-status experiment-tree__job-status--${job.status}`}>
                         {job.status}

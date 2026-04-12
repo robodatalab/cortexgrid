@@ -122,7 +122,6 @@ def _check_job(
         logs = ray.get_job_logs(lifecycle.ray_job_id)
         lifecycle.status = JobStatus.FAILED
         lifecycle.error = logs[-2000:] if logs else "Unknown error"
-        lifecycle.ray_job_id = None
         lifecycle.save_to_mlflow()
         log.warning("Job %s failed: %s", lifecycle.job_id, lifecycle.error[:200])
 

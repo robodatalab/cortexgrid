@@ -5,14 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import Experiment, list_experiments
-from cortexflow.jobs import list_experiment_jobs
+from cortexflow.experiment import (
+    Experiment,
+    get_mlflow_run_url,
+    list_experiments,
+)
+from cortexflow.jobs import get_job_status, list_experiment_jobs
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
     list_run_metrics,
     list_run_params,
 )
+from cortexflow.ray_util import get_ray_job_url, get_ray_status
 from cortexflow.secrets import get_secret
 
 from cortexflow_ui.backend.config import settings
@@ -80,6 +85,28 @@ def run_params(run_id: str) -> dict[str, str]:
 @app.get("/api/runs/{run_id}/artifacts")
 def run_artifacts(run_id: str) -> list[str]:
     return list_run_artifacts(run_id)
+
+
+@app.get("/api/runs/{run_id}/url")
+def run_url(run_id: str) -> dict[str, str]:
+    return {"url": get_mlflow_run_url(run_id)}
+
+
+@app.get("/api/experiments/{experiment_name}/runs/{run_id}/jobs/{job_id}")
+def job_detail(experiment_name: str, run_id: str, job_id: str) -> dict:
+    exp = Experiment(experiment_name=experiment_name, run_id=run_id)
+    lifecycle = get_job_status(exp, job_id)
+    ray_status = get_ray_status(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
+    ray_url = get_ray_job_url(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
+    return {
+        "job_id": lifecycle.job_id,
+        "status": lifecycle.status.value,
+        "error": lifecycle.error,
+        "retry": lifecycle.retry,
+        "ray_job_id": lifecycle.ray_job_id,
+        "ray_status": ray_status,
+        "ray_url": ray_url,
+    }
 
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

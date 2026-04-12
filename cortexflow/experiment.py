@@ -180,3 +180,11 @@ def list_experiments() -> list[Experiment]:
             result.append(Experiment(exp.name, run_id=run.info.run_id))
     return result
 
+
+def get_mlflow_run_url(run_id: str) -> str:
+    """Build the URL to view a run in the MLflow UI (always via DGX tailscale IP)."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    run = client.get_run(run_id)
+    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+    return f"http://{dgx_ip}:5000/#/experiments/{run.info.experiment_id}/runs/{run_id}"
+

@@ -62,6 +62,13 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.experiment-tree__job:hover {
+  background: #f0f0f0;
 }
 
 .experiment-tree__job-status {

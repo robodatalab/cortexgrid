@@ -1,11 +1,11 @@
-.run-dashboard {
+.job-dashboard {
   padding: 24px;
   overflow-y: auto;
   height: 100%;
   box-sizing: border-box;
 }
 
-.run-dashboard__header {
+.job-dashboard__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -13,12 +13,12 @@
   gap: 16px;
 }
 
-.run-dashboard__title {
+.job-dashboard__title {
   font-size: 18px;
   font-weight: 500;
 }
 
-.run-dashboard__open-button {
+.job-dashboard__open-button {
   display: inline-block;
   padding: 6px 16px;
   border: 2px solid #000;
@@ -30,62 +30,48 @@
   white-space: nowrap;
 }
 
-.run-dashboard__open-button:hover {
+.job-dashboard__open-button:hover {
   background: #000;
   color: #fff;
 }
 
-.run-dashboard__section {
+.job-dashboard__section {
   margin-bottom: 24px;
 }
 
-.run-dashboard__section-title {
+.job-dashboard__section-title {
   font-size: 14px;
   font-weight: 500;
   margin-bottom: 8px;
 }
 
-.run-dashboard__table {
+.job-dashboard__table {
   font-size: 13px;
   border-collapse: collapse;
-  width: 100%;
 }
 
-.run-dashboard__table td {
+.job-dashboard__table td {
   padding: 4px 16px 4px 0;
   vertical-align: top;
 }
 
-.run-dashboard__table td:first-child {
+.job-dashboard__table td:first-child {
   font-weight: 500;
   white-space: nowrap;
 }
 
-.run-dashboard__chart {
-  margin-bottom: 16px;
-}
-
-.run-dashboard__chart-title {
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.run-dashboard__status {
+.job-dashboard__status {
   padding: 24px;
   font-size: 13px;
   color: #666;
 }
 
-.run-dashboard__artifacts {
-  font-size: 13px;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.run-dashboard__artifacts li {
-  padding: 2px 0;
+.job-dashboard__error {
   font-family: monospace;
   font-size: 12px;
+  background: #f0f0f0;
+  padding: 12px;
+  border-left: 3px solid #cc0000;
+  white-space: pre-wrap;
+  word-break: break-all;
 }

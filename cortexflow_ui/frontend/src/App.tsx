@@ -7,6 +7,7 @@ import { ExperimentTree } from './components/ExperimentTree'
 import type { Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
+import { JobDashboard } from './components/JobDashboard'
 
 type Dashboard = {
   id: string
@@ -80,6 +81,8 @@ function App() {
                 <ExperimentDashboard experimentName={selection.experiment_name} />
               ) : selection?.kind === 'run' ? (
                 <RunDashboard runId={selection.run_id} runName={selection.run_name} experimentName={selection.experiment_name} />
+              ) : selection?.kind === 'job' ? (
+                <JobDashboard experimentName={selection.experiment_name} runId={selection.run_id} jobId={selection.job_id} />
               ) : (
                 <main className="main" />
               )}

@@ -15,6 +15,7 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
   const [metricKeys, setMetricKeys] = useState<string[]>([])
   const [metricData, setMetricData] = useState<Record<string, MetricPoint[]>>({})
   const [artifacts, setArtifacts] = useState<string[]>([])
+  const [mlflowUrl, setMlflowUrl] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
@@ -26,11 +27,13 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
       fetch(`/api/runs/${runId}/params`, opts).then((r) => r.json() as Promise<Record<string, string>>),
       fetch(`/api/runs/${runId}/metrics`, opts).then((r) => r.json() as Promise<string[]>),
       fetch(`/api/runs/${runId}/artifacts`, opts).then((r) => r.json() as Promise<string[]>),
+      fetch(`/api/runs/${runId}/url`, opts).then((r) => r.json() as Promise<{ url: string }>),
     ])
-      .then(([p, m, a]) => {
+      .then(([p, m, a, u]) => {
         setParams(p)
         setMetricKeys(m)
         setArtifacts(a)
+        setMlflowUrl(u.url)
         return Promise.all(
           m.map((key) =>
             fetch(`/api/runs/${runId}/metrics/${encodeURIComponent(key)}`, opts)
@@ -56,7 +59,19 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
 
   return (
     <div className="run-dashboard">
-      <div className="run-dashboard__title">{experimentName} / {runName}</div>
+      <div className="run-dashboard__header">
+        <div className="run-dashboard__title">{experimentName} / {runName}</div>
+        {mlflowUrl && (
+          <a
+            className="run-dashboard__open-button"
+            href={mlflowUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open in MLflow
+          </a>
+        )}
+      </div>
 
       {Object.keys(params).length > 0 && (
         <div className="run-dashboard__section">
