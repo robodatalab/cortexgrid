@@ -1,23 +1,42 @@
-name: jobs-control-plane CD
+name: jobs-control-plane
 
 on:
-  workflow_run:
-    workflows: ["jobs-control-plane tests"]
-    types: [completed]
-    branches: [main]
+  push:
+    paths:
+      - "jobs_control_plane/**"
+      - "tests/jobs_control_plane_tests/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "jobs_control_plane/**"
+      - "tests/jobs_control_plane_tests/**"
+      - "pyproject.toml"
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: uv run python -m unittest discover -s tests/jobs_control_plane_tests -v
+
   build-and-push:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     env:
       ECR_REPO: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/jobs-control-plane
-      AWS_REGION: us-east-1
 
     steps:
       - uses: actions/checkout@v4
