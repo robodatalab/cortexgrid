@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from cortexflow.experiment import list_experiments
 from cortexflow.secrets import get_secret
 
 from cortexflow_ui.backend.config import settings
@@ -37,6 +38,14 @@ def dashboards() -> list[Dashboard]:
         Dashboard(id="mlflow", url=f"http://{host}:{get_secret('robolab/infra/MLFLOW_PORT')}"),
         Dashboard(id="ray", url=f"http://{host}:{get_secret('robolab/infra/RAY_DASHBOARD_PORT')}"),
         Dashboard(id="minio", url=f"http://{host}:{get_secret('robolab/infra/MINIO_CONSOLE_PORT')}"),
+    ]
+
+
+@app.get("/api/experiments")
+def experiments() -> list[dict[str, str]]:
+    return [
+        {"experiment_name": exp.experiment_name, "run_id": exp.run_id, "run_name": exp.run_name()}
+        for exp in list_experiments()
     ]
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { ExperimentsSidebar } from './components/ExperimentsSidebar'
 
 type Dashboard = {
   id: string
@@ -59,7 +60,10 @@ function App() {
             ))}
         </nav>
       </header>
-      <main className="main" />
+      <div className="layout">
+        <ExperimentsSidebar />
+        <main className="main" />
+      </div>
     </>
   )
 }

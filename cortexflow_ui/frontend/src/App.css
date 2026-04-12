@@ -50,6 +50,12 @@
   color: #000;
 }
 
+.layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .main {
   flex-grow: 1;
   background: #fff;

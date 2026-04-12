@@ -65,6 +65,10 @@ class Experiment:
     experiment_name: str
     run_id: str
 
+    def run_name(self) -> str:
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        return client.get_run(self.run_id).info.run_name or self.run_id
+
     @classmethod
     def init(cls, name: str | None = None) -> "Experiment":
         """Create a new MLflow experiment+run. Once per process."""
