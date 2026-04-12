@@ -12,7 +12,7 @@ from pathlib import Path
 import cloudpickle  # type: ignore
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import Experiment, list_experiments, get_ray_address
+from cortexflow.experiment import Experiment, list_experiments, get_ray_address, set_runs_on_dgx
 from cortexflow.jobs import JobLifecycle, JobStatus, Payload, list_experiment_jobs
 
 
@@ -130,6 +130,7 @@ def _build_workdir(payload: Payload) -> Path:
 
 
 def main() -> None:
+    set_runs_on_dgx(True)
     while True:
         try:
             poll_once()
