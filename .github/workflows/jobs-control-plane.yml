@@ -6,11 +6,13 @@ on:
       - "jobs_control_plane/**"
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
+      - ".github/workflows/jobs-control-plane.yml"
   pull_request:
     paths:
       - "jobs_control_plane/**"
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
+      - ".github/workflows/jobs-control-plane.yml"
 
 permissions:
   id-token: write
