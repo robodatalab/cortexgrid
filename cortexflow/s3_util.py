@@ -12,15 +12,16 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.experiment import Experiment
+from cortexflow.experiment import Experiment, get_s3_endpoint_url
 
 
 def get_s3_client() -> Any:
     """Return a boto3 S3 client configured for MinIO or AWS S3."""
     experiment = Experiment.get_instance()
     kwargs: dict[str, Any] = {}
-    if experiment.s3_endpoint_url:
-        kwargs["endpoint_url"] = experiment.s3_endpoint_url
+    endpoint_url = get_s3_endpoint_url()
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
     if experiment.s3_access_key:
         kwargs["aws_access_key_id"] = experiment.s3_access_key
     if experiment.s3_secret_key:

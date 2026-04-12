@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 
-from cortexflow.experiment import Experiment, set_instance
+from cortexflow.experiment import Experiment, set_instance, set_runs_on_dgx
 from jobs_control_plane.server import run
 
 
@@ -29,12 +29,10 @@ def main() -> None:
         )
         sys.exit(1)
 
+    set_runs_on_dgx(True)
     experiment = Experiment(
         experiment_name=experiment_name,
         run_id=run_id,
-        ray_address=os.environ.get("RAY_ADDRESS", "http://ray-head:8265"),
-        dgx_ip="",
-        s3_endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL", ""),
         s3_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
         s3_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
         s3_default_bucket=os.environ.get("ARTIFACT_STORE_BUCKET", "ray-checkpoints"),

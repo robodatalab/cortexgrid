@@ -16,11 +16,6 @@ class TestS3Client(unittest.TestCase):
             Experiment(
                 experiment_name="",
                 run_id="",
-                ray_address="",
-                dgx_ip="",
-                mlflow_tracking_uri="",
-                mlflow_s3_endpoint_url="",
-                s3_endpoint_url="http://localhost:9000",
                 s3_access_key="testkey",
                 s3_secret_key="testsecret",
                 s3_default_bucket="my-bucket",

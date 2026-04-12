@@ -6,23 +6,6 @@ from typing import Any
 from unittest.mock import patch
 
 import cortexflow
-from cortexflow.experiment import Experiment, clear_instance, set_instance
-
-
-def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Experiment:
-    return Experiment(
-        experiment_name=experiment_name,
-        run_id=run_id,
-        ray_address="http://test:8265",
-        dgx_ip="",
-        mlflow_tracking_uri="",
-        mlflow_s3_endpoint_url="",
-        s3_endpoint_url="",
-        s3_access_key="",
-        s3_secret_key="",
-        s3_default_bucket="",
-        github_token="",
-    )
 
 
 class FakeJobSubmissionClient:
@@ -39,7 +22,6 @@ class FakeJobSubmissionClient:
 
 class TestRayUtil(unittest.TestCase):
     def setUp(self) -> None:
-        clear_instance()
         self.fake_jsc = FakeJobSubmissionClient()
         patcher = patch(
             "cortexflow.ray_util.JobSubmissionClient",
@@ -48,23 +30,16 @@ class TestRayUtil(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def tearDown(self) -> None:
-        clear_instance()
-
     def test_get_ray_status_returns_status_string(self) -> None:
-        exp = _make_experiment()
-        set_instance(exp)
         self.fake_jsc.statuses["job-1"] = "RUNNING"
 
-        self.assertEqual(cortexflow.get_ray_status(exp, "job-1"), "RUNNING")
+        self.assertEqual(cortexflow.get_ray_status("job-1"), "RUNNING")
 
     def test_get_ray_logs_returns_log_text(self) -> None:
-        exp = _make_experiment()
-        set_instance(exp)
         self.fake_jsc.logs_by_id["job-1"] = "hello from the cluster"
 
         self.assertEqual(
-            cortexflow.get_ray_logs(exp, "job-1"), "hello from the cluster"
+            cortexflow.get_ray_logs("job-1"), "hello from the cluster"
         )
 
 

@@ -23,7 +23,9 @@
       "Bash(terraform apply:*)",
       "Bash(aws ecr:*)",
       "Bash(docker login:*)",
-      "Bash(docker push:*)"
+      "Bash(docker push:*)",
+      "Bash(python -m unittest discover -s tests/cortexflow_tests -v)",
+      "Bash(python -m unittest discover -s tests/jobs_control_plane_tests -v)"
     ]
   }
 }

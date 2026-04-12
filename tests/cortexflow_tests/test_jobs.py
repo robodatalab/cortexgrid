@@ -16,11 +16,6 @@ def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Exper
     return Experiment(
         experiment_name=experiment_name,
         run_id=run_id,
-        ray_address="http://test:8265",
-        dgx_ip="",
-        mlflow_tracking_uri="http://test:5000",
-        mlflow_s3_endpoint_url="",
-        s3_endpoint_url="",
         s3_access_key="",
         s3_secret_key="",
         s3_default_bucket="",

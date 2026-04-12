@@ -27,19 +27,31 @@ def runs_on_dgx() -> bool:
 def get_mlflow_tracking_uri() -> str:
     """Build the MLflow tracking URI from secrets."""
     if runs_on_dgx():
-        dgx_ip = "mlflow"
-    else:
-        dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+        return "http://mlflow:5000"
+    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
     return f"http://{dgx_ip}:5000" if dgx_ip else ""
+
+
+def get_ray_address() -> str:
+    """Build the Ray address from secrets."""
+    if runs_on_dgx():
+        return "http://ray-head:8265"
+    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+    return f"http://{dgx_ip}:8265" if dgx_ip else ""
+
+
+def get_s3_endpoint_url() -> str:
+    """Build the S3/MinIO endpoint URL from secrets."""
+    if runs_on_dgx():
+        return "http://minio:9000"
+    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+    return f"http://{dgx_ip}:9000" if dgx_ip else ""
 
 
 @dataclass
 class Experiment:
     experiment_name: str
     run_id: str
-    ray_address: str
-    dgx_ip: str
-    s3_endpoint_url: str
     s3_access_key: str
     s3_secret_key: str
     s3_default_bucket: str
@@ -152,16 +164,10 @@ def _try_create_experiment_and_run(
 
 def _pull_secrets() -> dict[str, str]:
     """Pull connection info from AWS Secrets Manager."""
-    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
     s3_secret_key = get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
     github_token = get_secret(f"{SM_PREFIX}/GH_TOKEN")
-    s3_endpoint = f"http://{dgx_ip}:9000" if dgx_ip else ""
 
     return dict(
-        ray_address=f"http://{dgx_ip}:8265" if dgx_ip else "",
-        dgx_ip=dgx_ip,
-        mlflow_s3_endpoint_url=s3_endpoint,
-        s3_endpoint_url=s3_endpoint,
         s3_access_key="minioadmin",
         s3_secret_key=s3_secret_key,
         s3_default_bucket="ray-checkpoints",

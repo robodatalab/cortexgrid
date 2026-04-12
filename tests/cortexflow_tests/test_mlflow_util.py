@@ -22,11 +22,6 @@ class TestMlflowUtil(unittest.TestCase):
             Experiment(
                 experiment_name="experiment",
                 run_id=RUN_ID,
-                ray_address="",
-                dgx_ip="",
-                mlflow_tracking_uri="http://test:5000",
-                mlflow_s3_endpoint_url="",
-                s3_endpoint_url="",
                 s3_access_key="",
                 s3_secret_key="",
                 s3_default_bucket="",

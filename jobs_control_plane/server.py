@@ -13,7 +13,7 @@ import cloudpickle  # type: ignore
 from mlflow.tracking import MlflowClient
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri, get_ray_address
 from cortexflow.jobs import JobLifecycle, JobStatus, Payload
 
 
@@ -78,7 +78,7 @@ def _start_job(
     payload = _read_payload(mlflow, experiment.run_id, job_id)
     workdir = _build_workdir(payload)
 
-    ray = JobSubmissionClient(experiment.ray_address)
+    ray = JobSubmissionClient(get_ray_address())
     ray_job_id = ray.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
         runtime_env={"working_dir": str(workdir), "pip": str(workdir / "requirements.txt")},
@@ -102,7 +102,7 @@ def _check_job(
     if lifecycle.ray_job_id is None:
         return
 
-    ray = JobSubmissionClient(experiment.ray_address)
+    ray = JobSubmissionClient(get_ray_address())
     ray_status = ray.get_job_status(lifecycle.ray_job_id).value
 
     if ray_status == "SUCCEEDED":
