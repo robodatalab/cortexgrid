@@ -185,6 +185,39 @@ services:
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
+  # Jobs Control Plane — polls MLflow for new jobs, schedules them on Ray
+  # ---------------------------------------------------------------------------
+  jobs-control-plane:
+    build:
+      context: ../../..
+      dockerfile: terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile
+    container_name: robolab-jobs-control-plane
+    restart: unless-stopped
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      ray-head:
+        condition: service_healthy
+    environment:
+      CORTEXFLOW_EXPERIMENT: ${CORTEXFLOW_EXPERIMENT}
+      CORTEXFLOW_RUN_ID: ${CORTEXFLOW_RUN_ID}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: ${ARTIFACT_STORE_ENDPOINT}
+      AWS_ACCESS_KEY_ID: ${ARTIFACT_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${ARTIFACT_STORE_SECRET_KEY}
+      RAY_ADDRESS: http://ray-head:8265
+      CORTEXFLOW_POLL_INTERVAL: "5"
+    volumes:
+      - /opt/robolab/project:/project:ro
+    working_dir: /project
+    healthcheck:
+      test: ["CMD", "python", "-c", "import jobs_control_plane"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
   # Monitoring — Prometheus, Grafana, Node Exporter
   # ---------------------------------------------------------------------------
   node-exporter:
