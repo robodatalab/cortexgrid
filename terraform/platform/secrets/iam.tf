@@ -32,6 +32,28 @@ resource "aws_iam_user_policy" "dgx_secrets_read" {
   policy = data.aws_iam_policy_document.dgx_secrets_read.json
 }
 
+data "aws_iam_policy_document" "dgx_ecr_pull" {
+  statement {
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+    ]
+    resources = ["arn:aws:ecr:${var.aws_region}:*:repository/robolab/*"]
+  }
+}
+
+resource "aws_iam_user_policy" "dgx_ecr_pull" {
+  name   = "ecr-pull"
+  user   = aws_iam_user.dgx.name
+  policy = data.aws_iam_policy_document.dgx_ecr_pull.json
+}
+
 # ── GitHub Actions OIDC ──────────────────────────────────────────────────────
 # Allows CI pipelines to assume a role and read secrets — no static keys in GH.
 
@@ -81,4 +103,34 @@ resource "aws_iam_role_policy" "github_actions_secrets_read" {
   name   = "secrets-read"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_secrets_read.json
+}
+
+# ── ECR Push (for CD pipelines) ─────────────────────────────────────────────
+
+data "aws_iam_policy_document" "github_actions_ecr_push" {
+  statement {
+    actions = [
+      "ecr:GetAuthorizationToken",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:PutImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+    ]
+    resources = ["arn:aws:ecr:${var.aws_region}:*:repository/robolab/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_ecr_push" {
+  name   = "ecr-push"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.github_actions_ecr_push.json
 }

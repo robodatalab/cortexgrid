@@ -37,9 +37,7 @@ services:
   # Ray Head Node — execution engine
   # ---------------------------------------------------------------------------
   ray-head:
-    build:
-      context: ./ray
-      dockerfile: Dockerfile
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/ray-head:latest
     container_name: robolab-ray-head
     restart: unless-stopped
     depends_on:
@@ -150,9 +148,7 @@ services:
   # MLflow — experiment tracking & model registry
   # ---------------------------------------------------------------------------
   mlflow:
-    build:
-      context: ./mlflow
-      dockerfile: Dockerfile
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/mlflow:latest
     container_name: robolab-mlflow
     restart: unless-stopped
     depends_on:
@@ -188,9 +184,7 @@ services:
   # Jobs Control Plane — polls MLflow for new jobs, schedules them on Ray
   # ---------------------------------------------------------------------------
   jobs-control-plane:
-    build:
-      context: ../../..
-      dockerfile: terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/jobs-control-plane:latest
     container_name: robolab-jobs-control-plane
     restart: unless-stopped
     depends_on:
