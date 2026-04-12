@@ -25,6 +25,7 @@
   font-size: 13px;
   font-weight: 500;
   color: #000;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -42,11 +43,38 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .experiment-tree__run:hover {
   background: #f0f0f0;
 }
+
+.experiment-tree__job {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px 4px 48px;
+  font-size: 11px;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.experiment-tree__job-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+.experiment-tree__job-status--pending { color: #666; }
+.experiment-tree__job-status--running { color: #0066cc; }
+.experiment-tree__job-status--finished { color: #228b22; }
+.experiment-tree__job-status--failed { color: #cc0000; }
 
 .experiment-tree--selected {
   border: 1px dashed #000;

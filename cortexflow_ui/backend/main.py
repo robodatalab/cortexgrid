@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import list_experiments
+from cortexflow.experiment import Experiment, list_experiments
+from cortexflow.jobs import list_experiment_jobs
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
@@ -48,11 +49,17 @@ def dashboards() -> list[Dashboard]:
 
 
 @app.get("/api/experiments")
-def experiments() -> list[dict[str, str]]:
-    return [
-        {"experiment_name": exp.experiment_name, "run_id": exp.run_id, "run_name": exp.run_name()}
-        for exp in list_experiments()
-    ]
+def experiments() -> list[dict]:
+    result = []
+    for exp in list_experiments():
+        jobs = list_experiment_jobs(exp)
+        result.append({
+            "experiment_name": exp.experiment_name,
+            "run_id": exp.run_id,
+            "run_name": exp.run_name(),
+            "jobs": [{"job_id": j.job_id, "status": j.status.value} for j in jobs],
+        })
+    return result
 
 
 @app.get("/api/runs/{run_id}/metrics")

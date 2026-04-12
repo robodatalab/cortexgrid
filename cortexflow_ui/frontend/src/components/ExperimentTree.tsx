@@ -1,16 +1,24 @@
 import { useEffect, useState } from 'react'
-import { FlaskConical, Play } from 'lucide-react'
+import { FlaskConical, Play, Cog } from 'lucide-react'
 import './ExperimentTree.css'
+
+type Job = {
+  job_id: string
+  status: string
+}
 
 type ExperimentRun = {
   experiment_name: string
   run_id: string
   run_name: string
+  jobs: Job[]
 }
 
 type Run = {
   run_id: string
   run_name: string
+  jobs: Job[]
+  expanded: boolean
 }
 
 type TreeNode = {
@@ -23,7 +31,7 @@ function groupByExperiment(items: ExperimentRun[]): TreeNode[] {
   const map = new Map<string, Run[]>()
   for (const r of items) {
     const list = map.get(r.experiment_name) ?? []
-    list.push({ run_id: r.run_id, run_name: r.run_name })
+    list.push({ run_id: r.run_id, run_name: r.run_name, jobs: r.jobs, expanded: false })
     map.set(r.experiment_name, list)
   }
   return Array.from(map, ([experiment_name, runs]) => ({
@@ -53,8 +61,8 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json() as Promise<ExperimentRun[]>
       })
-      .then((runs) => {
-        setNodes(groupByExperiment(runs))
+      .then((items) => {
+        setNodes(groupByExperiment(items))
         setStatus('ready')
       })
       .catch((err: unknown) => {
@@ -64,9 +72,19 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
     return () => controller.abort()
   }, [])
 
-  function toggle(index: number) {
+  function toggleExperiment(index: number) {
     setNodes((prev) =>
       prev.map((n, i) => (i === index ? { ...n, expanded: !n.expanded } : n))
+    )
+  }
+
+  function toggleRun(expIndex: number, runIndex: number) {
+    setNodes((prev) =>
+      prev.map((n, i) =>
+        i === expIndex
+          ? { ...n, runs: n.runs.map((r, j) => (j === runIndex ? { ...r, expanded: !r.expanded } : r)) }
+          : n
+      )
     )
   }
 
@@ -82,12 +100,12 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
       {status === 'ready' && nodes.length === 0 && (
         <div className="experiment-tree__status">No experiments</div>
       )}
-      {nodes.map((node, i) => (
+      {nodes.map((node, ei) => (
         <div key={node.experiment_name}>
           <div
             className={`experiment-tree__experiment${selected === node.experiment_name ? ' experiment-tree--selected' : ''}`}
             onClick={() => {
-              toggle(i)
+              toggleExperiment(ei)
               setSelected(node.experiment_name)
               onSelect({ kind: 'experiment', experiment_name: node.experiment_name })
             }}
@@ -95,16 +113,27 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
             <FlaskConical size={14} /> {node.experiment_name}
           </div>
           {node.expanded &&
-            node.runs.map((run) => (
-              <div
-                key={run.run_id}
-                className={`experiment-tree__run${selected === run.run_id ? ' experiment-tree--selected' : ''}`}
-                onClick={() => {
-                  setSelected(run.run_id)
-                  onSelect({ kind: 'run', experiment_name: node.experiment_name, run_id: run.run_id, run_name: run.run_name })
-                }}
-              >
-                <Play size={12} /> {run.run_name}
+            node.runs.map((run, ri) => (
+              <div key={run.run_id}>
+                <div
+                  className={`experiment-tree__run${selected === run.run_id ? ' experiment-tree--selected' : ''}`}
+                  onClick={() => {
+                    if (run.jobs.length > 0) toggleRun(ei, ri)
+                    setSelected(run.run_id)
+                    onSelect({ kind: 'run', experiment_name: node.experiment_name, run_id: run.run_id, run_name: run.run_name })
+                  }}
+                >
+                  <Play size={12} /> {run.run_name}
+                </div>
+                {run.expanded &&
+                  run.jobs.map((job) => (
+                    <div key={job.job_id} className="experiment-tree__job">
+                      <Cog size={12} /> {job.job_id}
+                      <span className={`experiment-tree__job-status experiment-tree__job-status--${job.status}`}>
+                        {job.status}
+                      </span>
+                    </div>
+                  ))}
               </div>
             ))}
         </div>
