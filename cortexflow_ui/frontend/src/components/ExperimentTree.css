@@ -1,24 +1,22 @@
-.sidebar {
-  width: 280px;
-  border-right: 1px solid #000;
+.experiment-tree {
   overflow-y: auto;
-  background: #fff;
+  height: 100%;
 }
 
-.sidebar__title {
+.experiment-tree__title {
   padding: 16px 16px 8px;
   font-size: 14px;
   font-weight: 500;
   color: #000;
 }
 
-.sidebar__status {
+.experiment-tree__status {
   padding: 8px 16px;
   font-size: 13px;
   color: #666;
 }
 
-.sidebar__experiment {
+.experiment-tree__experiment {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -30,11 +28,11 @@
   user-select: none;
 }
 
-.sidebar__experiment:hover {
+.experiment-tree__experiment:hover {
   background: #f0f0f0;
 }
 
-.sidebar__run {
+.experiment-tree__run {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -46,6 +44,6 @@
   text-overflow: ellipsis;
 }
 
-.sidebar__run:hover {
+.experiment-tree__run:hover {
   background: #f0f0f0;
 }

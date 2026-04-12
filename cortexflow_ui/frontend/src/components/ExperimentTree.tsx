@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { FlaskConical, Play } from 'lucide-react'
-import './ExperimentsSidebar.css'
+import './ExperimentTree.css'
 
 type ExperimentRun = {
   experiment_name: string
@@ -33,7 +33,7 @@ function groupByExperiment(items: ExperimentRun[]): TreeNode[] {
   }))
 }
 
-export function ExperimentsSidebar() {
+export function ExperimentTree() {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
@@ -62,30 +62,30 @@ export function ExperimentsSidebar() {
   }
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar__title">Experiments</div>
+    <div className="experiment-tree">
+      <div className="experiment-tree__title">Experiments</div>
       {status === 'loading' && (
-        <div className="sidebar__status">Loading...</div>
+        <div className="experiment-tree__status">Loading...</div>
       )}
       {status === 'error' && (
-        <div className="sidebar__status">Failed to load</div>
+        <div className="experiment-tree__status">Failed to load</div>
       )}
       {status === 'ready' && nodes.length === 0 && (
-        <div className="sidebar__status">No experiments</div>
+        <div className="experiment-tree__status">No experiments</div>
       )}
       {nodes.map((node, i) => (
         <div key={node.experiment_name}>
-          <div className="sidebar__experiment" onClick={() => toggle(i)}>
+          <div className="experiment-tree__experiment" onClick={() => toggle(i)}>
             <FlaskConical size={14} /> {node.experiment_name}
           </div>
           {node.expanded &&
             node.runs.map((run) => (
-              <div key={run.run_id} className="sidebar__run">
+              <div key={run.run_id} className="experiment-tree__run">
                 <Play size={12} /> {run.run_name}
               </div>
             ))}
         </div>
       ))}
-    </aside>
+    </div>
   )
 }

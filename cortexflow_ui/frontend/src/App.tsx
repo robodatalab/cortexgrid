@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Allotment } from 'allotment'
+import 'allotment/dist/style.css'
 import './App.css'
-import { ExperimentsSidebar } from './components/ExperimentsSidebar'
+import { Panel } from './components/Panel'
+import { ExperimentTree } from './components/ExperimentTree'
 
 type Dashboard = {
   id: string
@@ -61,8 +64,16 @@ function App() {
         </nav>
       </header>
       <div className="layout">
-        <ExperimentsSidebar />
-        <main className="main" />
+        <Allotment>
+          <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
+            <Panel>
+              <ExperimentTree />
+            </Panel>
+          </Allotment.Pane>
+          <Allotment.Pane>
+            <main className="main" />
+          </Allotment.Pane>
+        </Allotment>
       </div>
     </>
   )
