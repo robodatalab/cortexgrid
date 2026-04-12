@@ -1,0 +1,36 @@
+name: jobs-control-plane CD
+
+on:
+  workflow_run:
+    workflows: ["jobs-control-plane tests"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    env:
+      ECR_REPO: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/jobs-control-plane
+      AWS_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::517906913330:role/robolab-github-actions
+          aws-region: us-east-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        run: |
+          docker build -f terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} .
+          docker push $ECR_REPO:latest
+          docker push $ECR_REPO:${{ github.sha }}

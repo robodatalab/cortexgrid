@@ -37,18 +37,16 @@ services:
   # Ray Head Node — execution engine
   # ---------------------------------------------------------------------------
   ray-head:
-    build:
-      context: ./ray
-      dockerfile: Dockerfile
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/ray-head:latest
     container_name: robolab-ray-head
     restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
     ports:
-      - "8265:8265"   # Ray Dashboard + Jobs API
-      - "6380:6379"   # Ray GCS port (mapped to 6380 on host to avoid redis conflict)
-      - "8080:8080"   # Prometheus metrics
+      - "8265:8265" # Ray Dashboard + Jobs API
+      - "6380:6379" # Ray GCS port (mapped to 6380 on host to avoid redis conflict)
+      - "8080:8080" # Prometheus metrics
     environment:
       - RAY_REDIS_ADDRESS=redis:6379
       - RAY_GRAFANA_HOST=http://grafana:3000
@@ -112,8 +110,8 @@ services:
     container_name: robolab-minio
     restart: unless-stopped
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -150,9 +148,7 @@ services:
   # MLflow — experiment tracking & model registry
   # ---------------------------------------------------------------------------
   mlflow:
-    build:
-      context: ./mlflow
-      dockerfile: Dockerfile
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/mlflow:latest
     container_name: robolab-mlflow
     restart: unless-stopped
     depends_on:
@@ -173,7 +169,8 @@ services:
         --host 0.0.0.0
         --port 5000
         --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-        --default-artifact-root s3://${ARTIFACT_STORE_BUCKET}/
+        --default-artifact-root mlflow-artifacts:/
+        --serve-artifacts
         --artifacts-destination s3://${ARTIFACT_STORE_BUCKET}/
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -181,6 +178,37 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    logging: *default-logging
+
+  # ---------------------------------------------------------------------------
+  # Jobs Control Plane — polls MLflow for new jobs, schedules them on Ray
+  # ---------------------------------------------------------------------------
+  jobs-control-plane:
+    image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/jobs-control-plane:latest
+    container_name: robolab-jobs-control-plane
+    restart: unless-stopped
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      ray-head:
+        condition: service_healthy
+    environment:
+      CORTEXFLOW_EXPERIMENT: ${CORTEXFLOW_EXPERIMENT}
+      CORTEXFLOW_RUN_ID: ${CORTEXFLOW_RUN_ID}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: ${ARTIFACT_STORE_ENDPOINT}
+      AWS_ACCESS_KEY_ID: ${ARTIFACT_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${ARTIFACT_STORE_SECRET_KEY}
+      RAY_ADDRESS: http://ray-head:8265
+      CORTEXFLOW_POLL_INTERVAL: "5"
+    volumes:
+      - /opt/robolab/project:/project:ro
+    working_dir: /project
+    healthcheck:
+      test: ["CMD", "python", "-c", "import jobs_control_plane"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging: *default-logging
 
   # ---------------------------------------------------------------------------
@@ -203,7 +231,15 @@ services:
       - "--path.rootfs=/rootfs"
       - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9100/metrics",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -226,7 +262,15 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=30d"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/healthy",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -256,7 +300,15 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ray-tmp:/tmp/ray:ro
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/api/health",
+        ]
       interval: 15s
       timeout: 5s
       retries: 3

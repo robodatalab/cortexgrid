@@ -81,7 +81,14 @@ rsync -az -e "ssh $SSH_OPTS" --exclude='.env' --exclude='__pycache__' --exclude=
 scp $SSH_OPTS -q "$REPO_ROOT/.env" "${DGX_HOST}:${DGX_DIR}/.env"
 echo "  Files synced (including .env)"
 
-echo "[4/5] Starting services on DGX..."
+echo "[4/6] Logging into ECR on DGX..."
+ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_ECR
+set -euo pipefail
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 517906913330.dkr.ecr.us-east-1.amazonaws.com
+REMOTE_ECR
+echo "  ECR login OK"
+
+echo "[5/6] Starting services on DGX..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
 cd "${DGX_DIR}"
@@ -89,12 +96,11 @@ cd "${DGX_DIR}"
 docker compose --profile monitoring down 2>/dev/null || true
 # Also clean up containers from the old 'robolab-workspace' project if present
 docker rm -f robolab-redis robolab-ray-head robolab-postgres robolab-minio robolab-minio-init robolab-mlflow robolab-node-exporter robolab-prometheus robolab-grafana 2>/dev/null || true
-docker compose --profile monitoring pull --ignore-pull-failures 2>/dev/null || true
-docker compose --profile monitoring build --no-cache
+docker compose --profile monitoring pull
 docker compose --profile monitoring up -d
 REMOTE_UP
 
-echo "[5/5] Waiting for Ray Dashboard..."
+echo "[6/6] Waiting for Ray Dashboard..."
 MAX_WAIT=120
 ELAPSED=0
 while ! curl -sf "http://${DGX_IP}:8265" &>/dev/null; do

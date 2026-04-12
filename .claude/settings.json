@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(ls cortexflow/*.md)",
+      "Bash(ls *.md cortexflow/*.md)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py -v)",
+      "Bash(python -c \"import cortexflow; print\\('OK'\\)\")",
+      "Bash(python -m pytest tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_ray_util.py -v)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py -v)",
+      "Bash(python -m pytest tests/jobs_control_plane/test_server.py tests/cortexflow_tests/test_jobs.py -v)",
+      "Bash(python -m pytest tests/jobs_control_plane/test_server.py -v)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py tests/jobs_control_plane/test_server.py -v)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py tests/jobs_control_plane_tests/test_server.py -v)",
+      "Bash(python -c \"import cortexflow; print\\('OK:', cortexflow.get_all_jobs\\)\")",
+      "Bash(python -m pytest tests/cortexflow_tests/ tests/jobs_control_plane_tests/)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_checkpoint.py -v)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_checkpoint.py::TestCheckpointPrefix::test_prefix_is_global_when_no_job_id -v -s)",
+      "Bash(python -m pytest tests/cortexflow_tests/test_checkpoint.py::TestCheckpointPrefix -v -s)",
+      "Bash(git remote:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform apply:*)",
+      "Bash(aws ecr:*)",
+      "Bash(docker login:*)",
+      "Bash(docker push:*)"
+    ]
+  }
+}

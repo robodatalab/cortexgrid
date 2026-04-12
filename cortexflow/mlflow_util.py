@@ -6,172 +6,66 @@ then exposes convenience functions for common operations.
 
 from __future__ import annotations
 
-import os
-import tempfile
-from contextlib import contextmanager
-from typing import Any, Generator
+from dataclasses import dataclass
+import time
+from typing import Any
 
-from cortexflow.config import get_config
-import mlflow
-import mlflow.artifacts
-import mlflow.tracking
-import torch
-
-
-def _ensure_configured() -> None:
-    config = get_config()
-    if config.mlflow_tracking_uri:
-        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
-    if config.mlflow_s3_endpoint_url:
-        os.environ.setdefault("MLFLOW_S3_ENDPOINT_URL", config.mlflow_s3_endpoint_url)
-    if config.s3_access_key:
-        os.environ.setdefault("AWS_ACCESS_KEY_ID", config.s3_access_key)
-    if config.s3_secret_key:
-        os.environ.setdefault("AWS_SECRET_ACCESS_KEY", config.s3_secret_key)
-
-
-def _find_run_by_job_id(experiment: str, cortexflow_job_id: str) -> str | None:
-    """Search for an existing MLflow run tagged with the given cortexflow job ID."""
-    client = mlflow.tracking.MlflowClient()
-    exp = client.get_experiment_by_name(experiment)
-    if exp is None:
-        return None
-    runs = client.search_runs(
-        experiment_ids=[exp.experiment_id],
-        filter_string=f"tags.`cortexflow.job_id` = '{cortexflow_job_id}'",
-        max_results=1,
-    )
-    if runs:
-        return runs[0].info.run_id
-    return None
-
-
-@contextmanager
-def mlflow_run(
-    experiment: str,
-    run_name: str | None = None,
-    run_id: str | None = None,
-    tags: dict[str, str] | None = None,
-) -> Generator[mlflow.ActiveRun, None, None]:
-    """Context manager for an MLflow run with auto-configured tracking.
-
-    On retry within a cortexflow job (same ``CORTEXFLOW_JOB_ID``), this
-    automatically resumes the MLflow run from the previous attempt
-    instead of creating a new one.
-
-    Usage:
-        with cortexflow.mlflow_run("my-experiment", run_name="v3") as run:
-            cortexflow.log_metric("loss", 0.5, step=1)
-    """
-    _ensure_configured()
-    mlflow.set_experiment(experiment)
-
-    cortexflow_job_id = os.environ.get("CORTEXFLOW_JOB_ID")
-
-    if cortexflow_job_id and run_id is None:
-        existing = _find_run_by_job_id(experiment, cortexflow_job_id)
-        if existing:
-            run_id = existing
-
-    all_tags = dict(tags or {})
-    if cortexflow_job_id:
-        all_tags["cortexflow.job_id"] = cortexflow_job_id
-
-    with mlflow.start_run(run_id=run_id, run_name=run_name, tags=all_tags) as run:
-        yield run
+from cortexflow.experiment import Experiment
+from mlflow.entities import Metric
+from mlflow.tracking import MlflowClient
 
 
 def log_metric(key: str, value: float, step: int | None = None) -> None:
     """Log a metric to the current active MLflow run."""
-    mlflow.log_metric(key, value, step=step)
+    experiment = Experiment.get_instance()
+    
+    client = get_mlflow_client()
+    client.log_metric(experiment.run_id, key, value, step=step)
 
 
 def log_metrics(metrics: dict[str, float], step: int | None = None) -> None:
     """Log multiple metrics to the current active MLflow run."""
-    mlflow.log_metrics(metrics, step=step)
+    experiment = Experiment.get_instance()
+
+    client = get_mlflow_client()
+    timestamp = int(time.time() * 1000)
+    metric_entities = [
+        Metric(key=k, value=v, timestamp=timestamp, step=step or 0)
+        for k, v in metrics.items()
+    ]
+    client.log_batch(experiment.run_id, metrics=metric_entities)
 
 
 def log_params(params: dict[str, Any]) -> None:
     """Log parameters to the current active MLflow run."""
-    mlflow.log_params(params)
+    experiment = Experiment.get_instance()
+    
+    client = get_mlflow_client()
+    for key, value in params.items():
+        client.log_param(experiment.run_id, key, value)
 
 
 def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
     """Log a file as an artifact to the current active MLflow run."""
-    mlflow.log_artifact(local_path, artifact_path=artifact_path)
+    experiment = Experiment.get_instance()
+    
+    client = get_mlflow_client()
+    client.log_artifact(experiment.run_id, local_path, artifact_path=artifact_path)
 
 
-def save_checkpoint(
-    model: Any,
-    optimizer: Any | None = None,
-    epoch: int = 0,
-    extra: dict[str, Any] | None = None,
-) -> str:
-    """Save a training checkpoint to the current MLflow run's artifacts.
-
-    Args:
-        model: PyTorch model (or any object with state_dict()).
-        optimizer: Optional optimizer with state_dict().
-        epoch: Current epoch number.
-        extra: Additional data to include in the checkpoint.
-
-    Returns:
-        The artifact path of the saved checkpoint.
-    """
-    state: dict[str, Any] = {
-        "epoch": epoch,
-        "model_state_dict": model.state_dict(),
-    }
-    if optimizer is not None:
-        state["optimizer_state_dict"] = optimizer.state_dict()
-    if extra:
-        state.update(extra)
-
-    artifact_path = f"checkpoints/epoch_{epoch}"
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "checkpoint.pt")
-        torch.save(state, path)
-        mlflow.log_artifact(path, artifact_path=artifact_path)
-
-    return artifact_path
-
-
-def load_checkpoint(
-    run_id: str,
-    epoch: int | None = None,
-) -> dict[str, Any]:
-    """Load a checkpoint from an MLflow run's artifacts.
-
-    Args:
-        run_id: MLflow run ID to load from.
-        epoch: Specific epoch to load. If None, loads the latest.
-
-    Returns:
-        Dict with 'epoch', 'model_state_dict', 'optimizer_state_dict' (if saved), etc.
-    """
-    _ensure_configured()
-    client = mlflow.tracking.MlflowClient()
-
-    artifacts = client.list_artifacts(run_id, "checkpoints")
-    if not artifacts:
-        raise FileNotFoundError(f"No checkpoints found for run {run_id}")
-
-    if epoch is not None:
-        artifact_path = f"checkpoints/epoch_{epoch}/checkpoint.pt"
-    else:
-        latest = sorted(artifacts, key=lambda a: a.path)[-1]
-        artifact_path = f"{latest.path}/checkpoint.pt"
-
-    local_path = mlflow.artifacts.download_artifacts(
-        run_id=run_id,
-        artifact_path=artifact_path,
-    )
-
-    return torch.load(local_path, map_location="cpu")
-
-
-def get_mlflow_client() -> mlflow.tracking.MlflowClient:
+def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
-    _ensure_configured()
-    return mlflow.tracking.MlflowClient()
+    experiment = Experiment.get_instance()
+
+    return MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+
+
+def get_experiment_list() -> dict[str, list[str]]:
+    """Map MLflow experiment names to their run IDs."""
+    client = get_mlflow_client()
+    result: dict[str, list[str]] = {}
+    for exp in client.search_experiments():
+        runs = client.search_runs(experiment_ids=[exp.experiment_id])
+        result[exp.name] = [run.info.run_id for run in runs]
+    return result
+
