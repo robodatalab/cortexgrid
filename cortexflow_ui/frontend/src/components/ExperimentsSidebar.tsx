@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FlaskConical, Play } from 'lucide-react'
 import './ExperimentsSidebar.css'
 
 type ExperimentRun = {
@@ -75,12 +76,12 @@ export function ExperimentsSidebar() {
       {nodes.map((node, i) => (
         <div key={node.experiment_name}>
           <div className="sidebar__experiment" onClick={() => toggle(i)}>
-            {node.expanded ? '\u25BE' : '\u25B8'} {node.experiment_name}
+            <FlaskConical size={14} /> {node.experiment_name}
           </div>
           {node.expanded &&
             node.runs.map((run) => (
               <div key={run.run_id} className="sidebar__run">
-                {run.run_name}
+                <Play size={12} /> {run.run_name}
               </div>
             ))}
         </div>
