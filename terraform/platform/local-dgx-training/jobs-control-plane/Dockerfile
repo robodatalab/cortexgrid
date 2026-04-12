@@ -16,4 +16,4 @@ COPY jobs_control_plane/ ./jobs_control_plane/
 
 RUN uv sync
 
-CMD [".venv/bin/python", "-m", "jobs_control_plane.server"]
+CMD ["/app/.venv/bin/python", "-m", "jobs_control_plane.server"]
