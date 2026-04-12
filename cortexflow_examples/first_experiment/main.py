@@ -10,7 +10,6 @@ def main():
     exp = cortexflow.Experiment.init("Examples-FirstExperiment")
     print(f"Experiment: {exp.experiment_name}")
     print(f"Run ID:     {exp.run_id}")
-    print(f"MLflow UI:  {exp.mlflow_tracking_uri}")
 
     cortexflow.log_params({
         "learning_rate": 0.001,

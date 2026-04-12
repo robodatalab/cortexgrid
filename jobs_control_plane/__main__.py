@@ -34,8 +34,6 @@ def main() -> None:
         run_id=run_id,
         ray_address=os.environ.get("RAY_ADDRESS", "http://ray-head:8265"),
         dgx_ip="",
-        mlflow_tracking_uri=os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
-        mlflow_s3_endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL", ""),
         s3_endpoint_url=os.environ.get("MLFLOW_S3_ENDPOINT_URL", ""),
         s3_access_key=os.environ.get("AWS_ACCESS_KEY_ID", ""),
         s3_secret_key=os.environ.get("AWS_SECRET_ACCESS_KEY", ""),

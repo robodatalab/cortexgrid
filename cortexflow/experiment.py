@@ -11,6 +11,26 @@ from mlflow.tracking import MlflowClient
 
 SM_PREFIX = "robolab/infra"
 _SINGLETON_EXPERIMENT: "Experiment | None" = None
+_RUNS_ON_DGX = False
+
+
+def set_runs_on_dgx(flag: bool) -> None:
+    global _RUNS_ON_DGX
+    _RUNS_ON_DGX = flag
+
+
+def runs_on_dgx() -> bool:
+    global _RUNS_ON_DGX
+    return _RUNS_ON_DGX
+
+
+def get_mlflow_tracking_uri() -> str:
+    """Build the MLflow tracking URI from secrets."""
+    if runs_on_dgx():
+        dgx_ip = "mlflow"
+    else:
+        dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
+    return f"http://{dgx_ip}:5000" if dgx_ip else ""
 
 
 @dataclass
@@ -19,8 +39,6 @@ class Experiment:
     run_id: str
     ray_address: str
     dgx_ip: str
-    mlflow_tracking_uri: str
-    mlflow_s3_endpoint_url: str
     s3_endpoint_url: str
     s3_access_key: str
     s3_secret_key: str
@@ -45,7 +63,7 @@ class Experiment:
         secrets = _pull_secrets()
         experiment_name, run_id = _try_create_experiment_and_run(
             experiment=name,
-            mlflow_tracking_uri=secrets["mlflow_tracking_uri"],
+            mlflow_tracking_uri=get_mlflow_tracking_uri(),
         )
         instance = cls(
             experiment_name=experiment_name,
@@ -85,7 +103,7 @@ class Experiment:
 
     def get_jobs(self) -> list[str]:
         """Return cortexflow job IDs submitted against this experiment+run."""
-        client = MlflowClient(tracking_uri=self.mlflow_tracking_uri)
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         return [
             Path(f.path).name
             for f in client.list_artifacts(self.run_id, path="job")
@@ -142,7 +160,6 @@ def _pull_secrets() -> dict[str, str]:
     return dict(
         ray_address=f"http://{dgx_ip}:8265" if dgx_ip else "",
         dgx_ip=dgx_ip,
-        mlflow_tracking_uri=f"http://{dgx_ip}:5000" if dgx_ip else "",
         mlflow_s3_endpoint_url=s3_endpoint,
         s3_endpoint_url=s3_endpoint,
         s3_access_key="minioadmin",

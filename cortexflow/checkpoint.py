@@ -31,7 +31,7 @@ import cloudpickle  # type: ignore
 import torch
 from mlflow.tracking import MlflowClient
 
-from cortexflow.experiment import Experiment
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 
 log = logging.getLogger(__name__)
 _CORTEXFLOW_JOB_ID: str | None = None
@@ -145,7 +145,7 @@ class Checkpoint:
     def _persist(self) -> None:
         """Serialize each attribute and upload via MLflow artifacts."""
         exp = Experiment.get_instance()
-        client = MlflowClient(tracking_uri=exp.mlflow_tracking_uri)
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         tmpdir = Path(tempfile.mkdtemp())
 
         manifest: dict[str, Any] = {"attrs": {}}
@@ -165,7 +165,7 @@ class Checkpoint:
     def _load(cls, prefix: str) -> Checkpoint | None:
         """Download and deserialize a checkpoint from MLflow artifacts."""
         exp = Experiment.get_instance()
-        client = MlflowClient(tracking_uri=exp.mlflow_tracking_uri)
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
         try:
             manifest_path = client.download_artifacts(exp.run_id, f"{prefix}/manifest.json")

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
-from cortexflow.experiment import Experiment
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 from mlflow.entities import Metric
 from mlflow.tracking import MlflowClient
 
@@ -55,9 +55,7 @@ def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
 
 def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
-    experiment = Experiment.get_instance()
-
-    return MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    return MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
 
 def get_experiment_list() -> dict[str, list[str]]:

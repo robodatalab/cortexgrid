@@ -13,7 +13,7 @@ import cloudpickle  # type: ignore
 from mlflow.tracking import MlflowClient
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import Experiment
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 from cortexflow.jobs import JobLifecycle, JobStatus, Payload
 
 
@@ -51,7 +51,7 @@ def run(experiment: Experiment) -> None:
 
 def poll_once(experiment: Experiment) -> None:
     """Single poll cycle: scan all jobs, act on each based on lifecycle state."""
-    mlflow = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    mlflow = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     job_dirs = mlflow.list_artifacts(experiment.run_id, path="job")
 
     for entry in job_dirs:

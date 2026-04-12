@@ -13,8 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from cortexflow.checkpoint import set_cortexflow_job_id
-from cortexflow.experiment import Experiment
+from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
@@ -95,7 +94,7 @@ def remote(
     (tmpdir / "lifecycle.json").write_text(lifecycle.to_json())
 
     artifact_path = f"job/{job_id}"
-    client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     client.log_artifact(experiment.run_id, str(tmpdir / "payload.pkl"), artifact_path=artifact_path)
     client.log_artifact(experiment.run_id, str(tmpdir / "lifecycle.json"), artifact_path=artifact_path)
 
@@ -104,14 +103,14 @@ def remote(
 
 def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
     """Read the job's lifecycle from MLflow artifacts."""
-    client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
     return JobLifecycle.from_json(Path(local_path).read_text())
 
 
 def get_all_jobs(experiment: Experiment) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
-    client = MlflowClient(tracking_uri=experiment.mlflow_tracking_uri)
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     entries = client.list_artifacts(experiment.run_id, path="job")
     result: list[JobLifecycle] = []
     for entry in entries:
