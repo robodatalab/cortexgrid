@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cortexflow.experiment import set_instance
-from cortexflow.ray_util import Payload
+from cortexflow.jobs import Payload
 
 
 def main(payload_path: str) -> None:

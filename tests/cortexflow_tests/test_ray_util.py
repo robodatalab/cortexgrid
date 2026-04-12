@@ -76,12 +76,16 @@ class TestRemote(unittest.TestCase):
             patch("boto3.client"),
             patch("cortexflow.experiment.MlflowClient"),
             patch(
-                "cortexflow.ray_util.MlflowClient",
+                "cortexflow.jobs.MlflowClient",
                 return_value=self.fake_mlflow,
             ),
             patch(
-                "cortexflow.ray_util.subprocess.run",
+                "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(stdout=""),
+            ),
+            patch(
+                "cortexflow.jobs.JobSubmissionClient",
+                return_value=self.fake_jsc,
             ),
             patch(
                 "cortexflow.ray_util.JobSubmissionClient",
