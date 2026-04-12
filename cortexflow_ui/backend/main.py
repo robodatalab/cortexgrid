@@ -5,9 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri, list_experiments
+from cortexflow.experiment import list_experiments
+from cortexflow.mlflow_util import (
+    get_metric_history,
+    list_run_artifacts,
+    list_run_metrics,
+    list_run_params,
+)
 from cortexflow.secrets import get_secret
-from mlflow.tracking import MlflowClient
 
 from cortexflow_ui.backend.config import settings
 
@@ -50,22 +55,24 @@ def experiments() -> list[dict[str, str]]:
     ]
 
 
-@app.get("/api/experiments/{experiment_name}")
-def experiment_detail(experiment_name: str) -> dict:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    exp = client.get_experiment_by_name(experiment_name)
-    if exp is None:
-        return {"error": "not found"}
-    runs = client.search_runs(experiment_ids=[exp.experiment_id])
-    return {
-        "experiment_name": exp.name,
-        "experiment_id": exp.experiment_id,
-        "lifecycle_stage": exp.lifecycle_stage,
-        "creation_time": exp.creation_time,
-        "last_update_time": exp.last_update_time,
-        "run_count": len(runs),
-        "tags": dict(exp.tags) if exp.tags else {},
-    }
+@app.get("/api/runs/{run_id}/metrics")
+def run_metrics(run_id: str) -> list[str]:
+    return list_run_metrics(run_id)
+
+
+@app.get("/api/runs/{run_id}/metrics/{key}")
+def run_metric_history(run_id: str, key: str) -> list[dict]:
+    return get_metric_history(run_id, key)
+
+
+@app.get("/api/runs/{run_id}/params")
+def run_params(run_id: str) -> dict[str, str]:
+    return list_run_params(run_id)
+
+
+@app.get("/api/runs/{run_id}/artifacts")
+def run_artifacts(run_id: str) -> list[str]:
+    return list_run_artifacts(run_id)
 
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

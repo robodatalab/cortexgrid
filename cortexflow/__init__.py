@@ -33,6 +33,10 @@ from cortexflow.mlflow_util import (
     log_params,
     log_artifact,
     get_mlflow_client,
+    list_run_metrics,
+    get_metric_history,
+    list_run_params,
+    list_run_artifacts,
 )
 from cortexflow.jobs import remote, get_job_status, list_experiment_jobs, JobStatus, JobLifecycle
 from cortexflow.ray_util import get_ray_status, get_ray_logs
@@ -58,6 +62,10 @@ __all__ = [
     "log_params",
     "log_artifact",
     "get_mlflow_client",
+    "list_run_metrics",
+    "get_metric_history",
+    "list_run_params",
+    "list_run_artifacts",
     "list_experiments",
     # S3
     "upload",

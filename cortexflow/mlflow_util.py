@@ -56,3 +56,30 @@ def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
 def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
     return MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+
+
+def list_run_metrics(run_id: str) -> list[str]:
+    """Return the metric key names logged for a run."""
+    client = get_mlflow_client()
+    run = client.get_run(run_id)
+    return list(run.data.metrics.keys())
+
+
+def get_metric_history(run_id: str, key: str) -> list[dict[str, Any]]:
+    """Return the full history of a metric as [{step, value, timestamp}, ...]."""
+    client = get_mlflow_client()
+    history = client.get_metric_history(run_id, key)
+    return [{"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history]
+
+
+def list_run_params(run_id: str) -> dict[str, str]:
+    """Return all parameter key/value pairs for a run."""
+    client = get_mlflow_client()
+    run = client.get_run(run_id)
+    return dict(run.data.params)
+
+
+def list_run_artifacts(run_id: str, path: str = "") -> list[str]:
+    """Return artifact paths for a run."""
+    client = get_mlflow_client()
+    return [a.path for a in client.list_artifacts(run_id, path=path)]
