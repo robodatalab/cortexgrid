@@ -1,7 +1,7 @@
 """Durable checkpointing for cortexflow jobs.
 
-Save arbitrary state (primitives, torch tensors, state_dicts) to MinIO
-and resume from the latest checkpoint on retry.
+Save arbitrary state (primitives, torch tensors, state_dicts) via MLflow
+artifacts and resume from the latest checkpoint on retry.
 
 Usage (save)::
 
@@ -23,17 +23,18 @@ from __future__ import annotations
 import io
 import json
 import logging
-import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import cloudpickle  # type: ignore
 import torch
+from mlflow.tracking import MlflowClient
 
-from cortexflow.s3_util import get_s3_client
+from cortexflow.experiment import Experiment
 
 log = logging.getLogger(__name__)
-
-CHECKPOINT_BUCKET = "cortexflow-checkpoints"
+_CORTEXFLOW_JOB_ID: str | None = None
 
 
 def _is_torch_serializable(value: Any) -> bool:
@@ -67,7 +68,7 @@ def _ext_for(fmt: str) -> str:
 
 
 class Checkpoint:
-    """Attribute-based checkpoint persisted to MinIO.
+    """Attribute-based checkpoint persisted via MLflow artifacts.
 
     Assign any cloudpickle-compatible or torch-serializable value to an
     attribute and it will be saved when the context manager exits::
@@ -83,10 +84,10 @@ class Checkpoint:
             model.load_state_dict(ckpt.model_state)
     """
 
-    _INTERNAL = frozenset(("_job_id", "_data"))
+    _INTERNAL = frozenset(("_prefix", "_data"))
 
-    def __init__(self, job_id: str, *, _data: dict[str, Any] | None = None) -> None:
-        object.__setattr__(self, "_job_id", job_id)
+    def __init__(self, prefix: str, *, _data: dict[str, Any] | None = None) -> None:
+        object.__setattr__(self, "_prefix", prefix)
         object.__setattr__(self, "_data", _data if _data is not None else {})
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -96,7 +97,7 @@ class Checkpoint:
             self._data[name] = value
 
     def __getattr__(self, name: str) -> Any:
-        if name in ("_job_id", "_data", "_INTERNAL"):
+        if name in ("_prefix", "_data", "_INTERNAL"):
             return object.__getattribute__(self, name)
         try:
             return self._data[name]
@@ -108,7 +109,7 @@ class Checkpoint:
 
     def __repr__(self) -> str:
         keys = ", ".join(sorted(self._data))
-        return f"Checkpoint(job_id={self._job_id!r}, attrs=[{keys}])"
+        return f"Checkpoint(prefix={self._prefix!r}, attrs=[{keys}])"
 
     def save_training_state(
         self,
@@ -142,102 +143,67 @@ class Checkpoint:
             self._persist()
 
     def _persist(self) -> None:
-        """Serialize each attribute and upload to MinIO."""
-        client = get_s3_client()
-        prefix = self._job_id
-
-        _ensure_bucket(client, CHECKPOINT_BUCKET)
+        """Serialize each attribute and upload via MLflow artifacts."""
+        exp = Experiment.get_instance()
+        client = MlflowClient(tracking_uri=exp.mlflow_tracking_uri)
+        tmpdir = Path(tempfile.mkdtemp())
 
         manifest: dict[str, Any] = {"attrs": {}}
 
         for name, value in self._data.items():
             data, fmt = _serialize(value)
             filename = f"{name}{_ext_for(fmt)}"
-            key = f"{prefix}/{filename}"
-            client.put_object(
-                Bucket=CHECKPOINT_BUCKET,
-                Key=key,
-                Body=data,
-            )
+            (tmpdir / filename).write_bytes(data)
+            client.log_artifact(exp.run_id, str(tmpdir / filename), artifact_path=self._prefix)
             manifest["attrs"][name] = {"file": filename, "format": fmt}
 
-        manifest_key = f"{prefix}/manifest.json"
-        client.put_object(
-            Bucket=CHECKPOINT_BUCKET,
-            Key=manifest_key,
-            Body=json.dumps(manifest).encode(),
-        )
-        log.info("Checkpoint saved: %s (%d attrs)", self._job_id, len(self._data))
+        (tmpdir / "manifest.json").write_text(json.dumps(manifest))
+        client.log_artifact(exp.run_id, str(tmpdir / "manifest.json"), artifact_path=self._prefix)
+        log.info("Checkpoint saved: %s (%d attrs)", self._prefix, len(self._data))
 
     @classmethod
-    def _load(cls, job_id: str) -> Checkpoint | None:
-        """Download and deserialize a checkpoint from MinIO. Returns None if not found."""
-        client = get_s3_client()
-        manifest_key = f"{job_id}/manifest.json"
+    def _load(cls, prefix: str) -> Checkpoint | None:
+        """Download and deserialize a checkpoint from MLflow artifacts."""
+        exp = Experiment.get_instance()
+        client = MlflowClient(tracking_uri=exp.mlflow_tracking_uri)
 
         try:
-            resp = client.get_object(Bucket=CHECKPOINT_BUCKET, Key=manifest_key)
-            manifest = json.loads(resp["Body"].read())
-        except client.exceptions.NoSuchKey:
-            return None
+            manifest_path = client.download_artifacts(exp.run_id, f"{prefix}/manifest.json")
+            manifest = json.loads(Path(manifest_path).read_text())
         except Exception:
             return None
 
         data: dict[str, Any] = {}
         for name, info in manifest["attrs"].items():
-            key = f"{job_id}/{info['file']}"
             try:
-                resp = client.get_object(Bucket=CHECKPOINT_BUCKET, Key=key)
-                raw = resp["Body"].read()
+                file_path = client.download_artifacts(exp.run_id, f"{prefix}/{info['file']}")
+                raw = Path(file_path).read_bytes()
                 data[name] = _deserialize(raw, info["format"])
             except Exception:
-                log.warning("Failed to load checkpoint attribute %r, skipping", name)
+                log.warning("Failed to load checkpoint attribute %r", name)
                 return None
 
-        log.info("Checkpoint loaded: %s (%d attrs)", job_id, len(data))
-        return cls(job_id, _data=data)
+        log.info("Checkpoint loaded: %s (%d attrs)", prefix, len(data))
+        return cls(prefix, _data=data)
 
 
-def _ensure_bucket(client: Any, bucket: str) -> None:
-    """Create the bucket if it doesn't exist."""
-    try:
-        client.head_bucket(Bucket=bucket)
-    except client.exceptions.NoSuchBucket:
-        client.create_bucket(Bucket=bucket)
-    except Exception:
-        try:
-            client.create_bucket(Bucket=bucket)
-        except Exception:
-            pass
+def set_cortexflow_job_id(job_id: str) -> None:
+    global _CORTEXFLOW_JOB_ID
+    _CORTEXFLOW_JOB_ID = job_id
 
 
-def get_job_id() -> str:
-    """Return the current CORTEXFLOW_JOB_ID. Raises if not set."""
-    job_id = os.environ.get("CORTEXFLOW_JOB_ID")
-    if not job_id:
-        raise RuntimeError(
-            "CORTEXFLOW_JOB_ID not set. Are you inside a cortexflow job?"
-        )
-    return job_id
+def get_cortexflow_job_id() -> str | None:
+    """Return the current job ID, or None if not running inside a job."""
+    global _CORTEXFLOW_JOB_ID
+    return _CORTEXFLOW_JOB_ID
 
 
-class _NoOpCheckpoint:
-    """Checkpoint that silently discards all writes. Used outside cortexflow jobs."""
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        pass
-
-    def __enter__(self) -> _NoOpCheckpoint:
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        pass
-
-    def save_training_state(self, *args: Any, **kwargs: Any) -> None:
-        pass
+def _checkpoint_prefix() -> str:
+    job_id = get_cortexflow_job_id() or "global"
+    return f"checkpoint/{job_id}"
 
 
-def checkpoint() -> Checkpoint | _NoOpCheckpoint:
+def checkpoint() -> Checkpoint:
     """Create a checkpoint for the current job. Use as a context manager.
 
     Returns a no-op checkpoint if not running inside a cortexflow job,
@@ -249,10 +215,8 @@ def checkpoint() -> Checkpoint | _NoOpCheckpoint:
             ckpt.epoch = epoch
             ckpt.save_training_state(model, optimizer, scheduler)
     """
-    job_id = os.environ.get("CORTEXFLOW_JOB_ID")
-    if not job_id:
-        return _NoOpCheckpoint()
-    return Checkpoint(job_id)
+    prefix = _checkpoint_prefix()
+    return Checkpoint(prefix)
 
 
 def resume() -> Checkpoint | None:
@@ -268,7 +232,5 @@ def resume() -> Checkpoint | None:
             ckpt.restore_training_state(model, optimizer, scheduler)
             start_epoch = ckpt.epoch + 1
     """
-    job_id = os.environ.get("CORTEXFLOW_JOB_ID")
-    if not job_id:
-        return None
-    return Checkpoint._load(job_id)
+    prefix = _checkpoint_prefix()
+    return Checkpoint._load(prefix)

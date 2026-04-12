@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cortexflow.experiment import set_instance
-from cortexflow.jobs import Payload
+from cortexflow.jobs import Payload, set_cortexflow_job_id
 
 
 def main(payload_path: str) -> None:
@@ -17,7 +17,8 @@ def main(payload_path: str) -> None:
     )
 
     payload: Payload = cloudpickle.loads(Path(payload_path).read_bytes())
-    set_instance(payload.experiment) 
+    set_cortexflow_job_id(payload.job_id)
+    set_instance(payload.experiment)
     payload.fn(*payload.args, **payload.kwargs)
 
 

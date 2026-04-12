@@ -83,12 +83,13 @@ class Experiment:
         set_instance(instance)
         return instance
 
-    def get_ray_jobs(self) -> list[str]:
-        """Return ray_job_ids previously submitted against this experiment+run."""
+    def get_jobs(self) -> list[str]:
+        """Return cortexflow job IDs submitted against this experiment+run."""
         client = MlflowClient(tracking_uri=self.mlflow_tracking_uri)
         return [
             Path(f.path).name
-            for f in client.list_artifacts(self.run_id, path="ray-job")
+            for f in client.list_artifacts(self.run_id, path="job")
+            if f.is_dir
         ]
 
     @classmethod

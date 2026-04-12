@@ -113,7 +113,7 @@ class TestPollOnce(unittest.TestCase):
 
     def _make_payload_bytes(self) -> bytes:
         return cloudpickle.dumps(
-            Payload(fn=lambda: None, args=(), kwargs={}, experiment=self.exp, pip_requirements="")
+            Payload(job_id="job-1", fn=lambda: None, args=(), kwargs={}, experiment=self.exp, pip_requirements="")
         )
 
     def test_pending_job_gets_submitted_to_ray(self) -> None:
