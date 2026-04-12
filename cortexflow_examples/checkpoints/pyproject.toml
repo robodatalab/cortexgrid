@@ -1,0 +1,15 @@
+[project]
+name = "cortexflow-example-checkpoints"
+version = "0.1.0"
+description = "Example: checkpoint and retry with cortexflow"
+requires-python = ">=3.11"
+dependencies = [
+    "cortexflow",
+]
+
+[tool.uv.sources]
+cortexflow = { git = "https://github.com/paksas/robolab-infra.git" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -8,7 +8,12 @@ import time
 
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import Experiment, list_experiments, get_ray_address, set_runs_on_dgx
+from cortexflow.experiment import (
+    Experiment,
+    list_experiments,
+    get_ray_address,
+    set_runs_on_dgx,
+)
 from cortexflow.jobs import JobLifecycle, JobStatus, Payload, list_experiment_jobs
 
 
@@ -20,8 +25,15 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXFLOW_POLL_INTERVAL", "5"))
 def poll_once() -> None:
     """Single poll cycle: scan all jobs, act on each based on lifecycle state."""
     experiments = list_experiments()
+    log.info("Poll: found %d experiment(s)", len(experiments))
     for experiment in experiments:
         jobs = list_experiment_jobs(experiment)
+        log.info(
+            "  %s/%s: %d job(s)",
+            experiment.experiment_name,
+            experiment.run_id,
+            len(jobs),
+        )
         for job in jobs:
             if job.status == JobStatus.PENDING:
                 _start_job(experiment, job)
@@ -36,7 +48,21 @@ def _start_job(
     experiment: Experiment,
     job: JobLifecycle,
 ) -> None:
+    log.info(
+        "Starting a job %s from experiment %s/%s",
+        job.job_id,
+        experiment.experiment_name,
+        experiment.run_name,
+    )
+
     payload = Payload.load_from_mlflow(experiment, job.job_id)
+
+    log.info(
+        "Payload for job %s from experiment %s/%s loaded",
+        job.job_id,
+        experiment.experiment_name,
+        experiment.run_name,
+    )
 
     ray = JobSubmissionClient(get_ray_address())
     ray_job_id = ray.submit_job(
@@ -50,6 +76,13 @@ def _start_job(
     lifecycle.status = JobStatus.RUNNING
     lifecycle.ray_job_id = ray_job_id
     lifecycle.error = None
+
+    log.info(
+        "Saving job %s from experiment %s/%s lifecycle",
+        job.job_id,
+        experiment.experiment_name,
+        experiment.run_name,
+    )
     lifecycle.save_to_mlflow()
     log.info("Started job %s as ray_job_id=%s", job.job_id, ray_job_id)
 
@@ -58,10 +91,25 @@ def _check_job(
     experiment: Experiment,
     job: JobLifecycle,
 ) -> None:
+    log.info(
+        "Checking a job %s from experiment %s/%s",
+        job.job_id,
+        experiment.experiment_name,
+        experiment.run_name,
+    )
+
     lifecycle = JobLifecycle.load_from_mlflow(experiment, job.job_id)
     if lifecycle.ray_job_id is None:
         # the job hasn't been scheduled yet - this case should not be entered
-        raise AssertionError(f"The job {job} hasn't been scheduled yet - this case should not be entered")
+        log.info(
+            "The job %s, experiment %s/%s hasn't been scheduled yet - this case should not be entered",
+            job.job_id,
+            experiment.experiment_name,
+            experiment.run_name,
+        )
+        raise AssertionError(
+            f"The job {job} hasn't been scheduled yet - this case should not be entered"
+        )
 
     ray = JobSubmissionClient(get_ray_address())
     ray_status = ray.get_job_status(lifecycle.ray_job_id).value
@@ -94,4 +142,3 @@ if __name__ == "__main__":
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
     main()
-

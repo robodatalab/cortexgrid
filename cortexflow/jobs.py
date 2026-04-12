@@ -6,6 +6,7 @@ import cloudpickle  # type: ignore
 from dataclasses import asdict, dataclass
 from enum import Enum
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -17,6 +18,8 @@ from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
+log = logging.getLogger(__name__)
+
 
 DEFAULT_EXCLUDES = [
     ".venv",
@@ -27,6 +30,8 @@ DEFAULT_EXCLUDES = [
     ".pytest_cache",
     ".ruff_cache",
     "node_modules",
+    ".DS_Store",
+    "*.egg-info",
 ]
 
 PIP_EXTRA_INDEX_URL = os.environ.get(
@@ -64,6 +69,7 @@ class JobLifecycle:
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        log.info("Saving lifecycle for job %s (status=%s)", self.job_id, self.status.value)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             local_path = Path(tmp_dir, "lifecycle.json")
@@ -92,6 +98,7 @@ class Payload(BaseModel):
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        log.info("Uploading payload for job %s from %s", self.job_id, self.project_code_root)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             Path(tmp_dir, "payload.pkl").write_bytes(cloudpickle.dumps(self))
@@ -102,13 +109,16 @@ class Payload(BaseModel):
                 ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
             )
             client.log_artifacts(self.experiment.run_id, tmp_dir, artifact_path=artifact_path)
+            log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
     def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        log.info("Downloading payload for job %s", job_id)
         payload_local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/payload.pkl")
         payload = cloudpickle.loads(Path(payload_local_path).read_bytes())
         payload.project_code_root = client.download_artifacts(experiment.run_id, f"job/{job_id}/project_code_root")
+        log.info("Payload downloaded for job %s, project_code_root=%s", job_id, payload.project_code_root)
 
         return payload
 
@@ -127,6 +137,7 @@ def remote(
     name_gen = Haikunator()
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
     project_code_path = _find_pyproject().parent
+    log.info("Submitting job %s (project=%s)", job_id, project_code_path)
     payload = Payload(
         experiment=experiment,
         job_id=job_id,
@@ -168,6 +179,9 @@ def list_experiment_jobs(experiment: Experiment) -> list[JobLifecycle]:
         if not entry.is_dir:
             continue
         job_id = Path(entry.path).name
-        result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
+        try:
+            result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
+        except Exception:
+            logging.getLogger(__name__).warning("Skipping job %s: missing lifecycle", job_id)
     return result
 
