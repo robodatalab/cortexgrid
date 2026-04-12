@@ -16,6 +16,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
+from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
@@ -128,6 +129,7 @@ class Payload(BaseModel):
                 text=True,
                 check=True,
             ).stdout
+            pip_requirements = _inject_github_token(pip_requirements)
             (project_dest / "requirements.txt").write_text(
                 f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
             )
@@ -194,6 +196,15 @@ def _find_pyproject() -> Path:
         if candidate.exists():
             return candidate
     raise FileNotFoundError("No pyproject.toml found in any parent directory")
+
+
+def _inject_github_token(pip_requirements: str) -> str:
+    """Rewrite github.com git URLs in pip freeze output to include the auth token."""
+    token = get_secret("robolab/infra/GH_TOKEN")
+    return pip_requirements.replace(
+        "git+https://github.com/",
+        f"git+https://x-access-token:{token}@github.com/",
+    )
 
 
 def _upload_dir(

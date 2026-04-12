@@ -57,7 +57,8 @@ class TestRemote(unittest.TestCase):
         patchers = [
             patch("cortexflow.experiment.MlflowClient"),
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.subprocess.run", return_value=MagicMock(stdout="numpy==1.26\ntorch==2.5\n")),
+            patch("cortexflow.jobs.subprocess.run", return_value=MagicMock(stdout="numpy==1.26\ntorch==2.5\ncortexflow @ git+https://github.com/paksas/robolab-infra.git@abc123\n")),
+            patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
         ]
         for p in patchers:
             p.start()
@@ -103,6 +104,16 @@ class TestRemote(unittest.TestCase):
         self.assertTrue(requirements.exists())
         self.assertIn("numpy==1.26", requirements.read_text())
         self.assertIn("torch==2.5", requirements.read_text())
+
+    def test_remote_injects_github_token_into_git_urls(self) -> None:
+        set_instance(_make_experiment())
+
+        job_id = cortexflow.remote(lambda: None)
+
+        requirements = self.fake_mlflow.root / "job" / job_id / "project_code_root" / "requirements.txt"
+        content = requirements.read_text()
+        self.assertIn("git+https://x-access-token:ghp_faketoken@github.com/paksas/robolab-infra.git", content)
+        self.assertNotIn("git+https://github.com/paksas/robolab-infra.git", content)
 
     def test_remote_excludes_venv_and_git(self) -> None:
         (self.project_dir / ".venv").mkdir()
