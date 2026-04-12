@@ -28,7 +28,8 @@
       "Bash(python -m unittest discover -s tests/jobs_control_plane_tests -v)",
       "Bash(python -m unittest tests.cortexflow_tests.test_jobs -v)",
       "Bash(python -m unittest tests.cortexflow_tests.test_mlflow_util -v)",
-      "Bash(python -m unittest tests.cortexflow_ui_tests.backend.test_run_endpoints -v)"
+      "Bash(python -m unittest tests.cortexflow_ui_tests.backend.test_run_endpoints -v)",
+      "Bash(.venv/bin/python -m pip freeze)"
     ]
   }
 }

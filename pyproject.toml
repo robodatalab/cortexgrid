@@ -12,6 +12,7 @@ dependencies = [
     "cloudpickle>=3.0",
     "torch>=2.0.0",
     "haikunator>=2.1.0",
+    "pip>=23.0",
     "pydantic-settings>=2.13.1",
 ]
 
