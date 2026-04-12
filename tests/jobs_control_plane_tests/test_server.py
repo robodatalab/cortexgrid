@@ -90,6 +90,7 @@ class TestPollOnce(unittest.TestCase):
         patchers = [
             patch("jobs_control_plane.server.list_experiments", return_value=[self.exp]),
             patch("jobs_control_plane.server.JobSubmissionClient", return_value=self.fake_ray),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
         ]
         for p in patchers:
