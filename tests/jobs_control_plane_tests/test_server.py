@@ -43,15 +43,23 @@ class FakeMLflow:
     def log_artifact(self, run_id: str, local_path: str, artifact_path: str = "") -> None:
         dest_dir = self.artifact_root / artifact_path
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / Path(local_path).name
-        shutil.copy2(local_path, dest)
+        shutil.copy2(local_path, dest_dir / Path(local_path).name)
 
-    def add_job(self, experiment: Experiment, job_id: str, lifecycle: JobLifecycle, payload_bytes: bytes = b"") -> None:
+    def log_artifacts(self, run_id: str, local_dir: str, artifact_path: str = "") -> None:
+        dest = self.artifact_root / artifact_path
+        shutil.copytree(local_dir, str(dest), dirs_exist_ok=True)
+
+    def add_job(self, experiment: Experiment, job_id: str, lifecycle: JobLifecycle, payload: Payload | None = None) -> None:
         job_dir = self.artifact_root / "job" / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "lifecycle.json").write_text(lifecycle.to_json())
-        if payload_bytes:
-            (job_dir / "payload.pkl").write_bytes(payload_bytes)
+        if payload is not None:
+            (job_dir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
+            shutil.copytree(
+                payload.project_code_root,
+                str(job_dir / "project_code_root"),
+                dirs_exist_ok=True,
+            )
 
 
 class FakeRay:
@@ -100,14 +108,19 @@ class TestPollOnce(unittest.TestCase):
         self.addCleanup(os.chdir, self.original_cwd)
         self.addCleanup(shutil.rmtree, self.project_root, True)
 
-    def _make_payload_bytes(self) -> bytes:
-        return cloudpickle.dumps(
-            Payload(job_id="job-1", fn=lambda: None, args=(), kwargs={}, experiment=self.exp, pip_requirements="")
+    def _make_payload(self) -> Payload:
+        return Payload(
+            experiment=self.exp,
+            job_id="job-1",
+            fn=lambda: None,
+            args=(),
+            kwargs={},
+            project_code_root=str(self.project_root),
         )
 
     def test_pending_job_gets_submitted_to_ray(self) -> None:
         lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.PENDING)
-        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload_bytes())
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload())
 
         poll_once()
 
@@ -146,7 +159,7 @@ class TestPollOnce(unittest.TestCase):
 
     def test_failed_job_with_retry_gets_resubmitted(self) -> None:
         lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.FAILED, retry=True, error="OOM")
-        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload_bytes())
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload())
 
         poll_once()
 
@@ -175,6 +188,26 @@ class TestPollOnce(unittest.TestCase):
         poll_once()
 
         self.assertEqual(len(self.fake_ray.submitted), 0)
+
+    def test_submitted_job_has_project_as_working_dir(self) -> None:
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.PENDING)
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload())
+
+        poll_once()
+
+        submitted = self.fake_ray.submitted[0]
+        working_dir = submitted["runtime_env"]["working_dir"]
+        self.assertTrue(Path(working_dir).is_dir())
+        self.assertTrue((Path(working_dir) / "pyproject.toml").exists())
+
+    def test_submitted_job_uses_pip_install_dot(self) -> None:
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.PENDING)
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload())
+
+        poll_once()
+
+        submitted = self.fake_ray.submitted[0]
+        self.assertEqual(submitted["runtime_env"]["pip"], ["."])
 
 
 if __name__ == "__main__":

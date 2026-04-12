@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
-import tempfile
 import time
-from pathlib import Path
 
-import cloudpickle  # type: ignore
 from ray.job_submission import JobSubmissionClient
 
 from cortexflow.experiment import Experiment, list_experiments, get_ray_address, set_runs_on_dgx
@@ -19,22 +15,6 @@ from cortexflow.jobs import JobLifecycle, JobStatus, Payload, list_experiment_jo
 log = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXFLOW_POLL_INTERVAL", "5"))
-
-PIP_EXTRA_INDEX_URL = os.environ.get(
-    "CORTEXFLOW_PIP_EXTRA_INDEX_URL",
-    "https://download.pytorch.org/whl/cu128",
-)
-
-DEFAULT_EXCLUDES = [
-    ".venv",
-    ".git",
-    "__pycache__",
-    "*.pyc",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "node_modules",
-]
 
 
 def poll_once() -> None:
@@ -57,12 +37,11 @@ def _start_job(
     job: JobLifecycle,
 ) -> None:
     payload = Payload.load_from_mlflow(experiment, job.job_id)
-    workdir = _build_workdir(payload)
 
     ray = JobSubmissionClient(get_ray_address())
     ray_job_id = ray.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
-        runtime_env={"working_dir": str(workdir), "pip": str(workdir / "requirements.txt")},
+        runtime_env={"working_dir": payload.project_code_root, "pip": ["."]},
         entrypoint_num_gpus=payload.num_gpus,
         entrypoint_num_cpus=payload.num_cpus,
     )
@@ -98,35 +77,6 @@ def _check_job(
         lifecycle.ray_job_id = None
         lifecycle.save_to_mlflow()
         log.warning("Job %s failed: %s", lifecycle.job_id, lifecycle.error[:200])
-
-
-
-def _find_pyproject() -> Path:
-    """Walk up from cwd() to find pyproject.toml."""
-    for parent in [Path.cwd(), *Path.cwd().parents]:
-        candidate = parent / "pyproject.toml"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError("No pyproject.toml found in any parent directory")
-
-
-def _build_workdir(payload: Payload) -> Path:
-    """Copy project files into a tempdir and add payload + requirements."""
-    project_root = _find_pyproject().parent
-    workdir = Path(tempfile.mkdtemp(prefix="cortexflow-"))
-    shutil.copytree(
-        project_root,
-        workdir,
-        dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
-    )
-    (workdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
-
-    requirements = workdir / "requirements.txt"
-    requirements.write_text(
-        f"--extra-index-url {PIP_EXTRA_INDEX_URL}\n{payload.pip_requirements}"
-    )
-    return workdir
 
 
 def main() -> None:

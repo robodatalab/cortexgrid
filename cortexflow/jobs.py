@@ -3,19 +3,36 @@
 from __future__ import annotations
 
 import cloudpickle  # type: ignore
-import json
-import subprocess
-import sys
-import tempfile
 from dataclasses import asdict, dataclass
 from enum import Enum
+import json
+import os
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
+
+
+DEFAULT_EXCLUDES = [
+    ".venv",
+    ".git",
+    "__pycache__",
+    "*.pyc",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+]
+
+PIP_EXTRA_INDEX_URL = os.environ.get(
+    "CORTEXFLOW_PIP_EXTRA_INDEX_URL",
+    "https://download.pytorch.org/whl/cu128",
+)
 
 
 class JobStatus(str, Enum):
@@ -68,24 +85,32 @@ class Payload(BaseModel):
     fn: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
+    project_code_root: str
     num_gpus: int = 0
     num_cpus: int = 1
-    pip_requirements: str = ""
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            local_path = Path(tmp_dir, "payload.pkl")
-            local_path.write_bytes(cloudpickle.dumps(self))
-            client.log_artifact(self.experiment.run_id, str(local_path), artifact_path=artifact_path)
+            Path(tmp_dir, "payload.pkl").write_bytes(cloudpickle.dumps(self))
+            shutil.copytree(
+                self.project_code_root,
+                str(Path(tmp_dir, "project_code_root")),
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
+            )
+            client.log_artifacts(self.experiment.run_id, tmp_dir, artifact_path=artifact_path)
 
     @classmethod
     def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/payload.pkl")
-        return cloudpickle.loads(Path(local_path).read_bytes())
+        payload_local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/payload.pkl")
+        payload = cloudpickle.loads(Path(payload_local_path).read_bytes())
+        payload.project_code_root = client.download_artifacts(experiment.run_id, f"job/{job_id}/project_code_root")
+
+        return payload
 
 
 def remote(
@@ -99,25 +124,18 @@ def remote(
     """Submit a function to the control plane. Returns a job ID."""
     experiment = Experiment.get_instance()
 
-    pip_requirements = subprocess.run(
-        [sys.executable, "-m", "pip", "freeze"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
     name_gen = Haikunator()
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
-
+    project_code_path = _find_pyproject().parent
     payload = Payload(
         experiment=experiment,
         job_id=job_id,
         fn=fn,
         args=args,
         kwargs=kwargs,
+        project_code_root=str(project_code_path),
         num_gpus=num_gpus,
         num_cpus=num_cpus,
-        pip_requirements=pip_requirements,
     )
     payload.save_to_mlflow()
 
@@ -125,6 +143,15 @@ def remote(
     lifecycle.save_to_mlflow()
 
     return job_id
+
+
+def _find_pyproject() -> Path:
+    """Walk up from cwd() to find pyproject.toml."""
+    for parent in [Path.cwd(), *Path.cwd().parents]:
+        candidate = parent / "pyproject.toml"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError("No pyproject.toml found in any parent directory")
 
 
 def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
@@ -143,3 +170,4 @@ def list_experiment_jobs(experiment: Experiment) -> list[JobLifecycle]:
         job_id = Path(entry.path).name
         result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
     return result
+
