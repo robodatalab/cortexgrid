@@ -193,13 +193,9 @@ services:
       ray-head:
         condition: service_healthy
     environment:
-      CORTEXFLOW_EXPERIMENT: ${CORTEXFLOW_EXPERIMENT}
-      CORTEXFLOW_RUN_ID: ${CORTEXFLOW_RUN_ID}
-      MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: ${ARTIFACT_STORE_ENDPOINT}
       AWS_ACCESS_KEY_ID: ${ARTIFACT_STORE_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${ARTIFACT_STORE_SECRET_KEY}
-      RAY_ADDRESS: http://ray-head:8265
       CORTEXFLOW_POLL_INTERVAL: "5"
     volumes:
       - /opt/robolab/project:/project:ro
