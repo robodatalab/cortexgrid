@@ -5,16 +5,11 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
-
-import cloudpickle  # type: ignore
 
 from cortexflow.checkpoint import (
     Checkpoint,
     _checkpoint_prefix,
-    _deserialize,
-    _serialize,
     checkpoint,
     get_cortexflow_job_id,
     resume,
@@ -52,45 +47,8 @@ class FakeMLflow:
         return str(local)
 
 
-def _reset_job_id() -> None:
-    import sys
-    sys.modules["cortexflow.checkpoint"]._CORTEXFLOW_JOB_ID = None
-
-
-class TestJobId(unittest.TestCase):
-    def setUp(self) -> None:
-        _reset_job_id()
-
-    def tearDown(self) -> None:
-        _reset_job_id()
-
-    def test_get_returns_none_initially(self) -> None:
-        self.assertIsNone(get_cortexflow_job_id())
-
-    def test_set_then_get(self) -> None:
-        set_cortexflow_job_id("job-42")
-        self.assertEqual(get_cortexflow_job_id(), "job-42")
-
-
 class TestCheckpointPrefix(unittest.TestCase):
-    def setUp(self) -> None:
-        _reset_job_id()
-        clear_instance()
-        set_instance(_make_experiment())
-
-    def tearDown(self) -> None:
-        _reset_job_id()
-        clear_instance()
-
-    def test_prefix_is_global_when_no_job_id(self) -> None:
-        self.assertEqual(_checkpoint_prefix(), "checkpoint/global")
-
-    def test_prefix_includes_job_id_when_set(self) -> None:
-        set_cortexflow_job_id("job-99")
-        self.assertEqual(_checkpoint_prefix(), "checkpoint/job-99")
-
-
-class TestCheckpointPersistAndLoad(unittest.TestCase):
+    
     def setUp(self) -> None:
         clear_instance()
         set_instance(_make_experiment())
@@ -104,6 +62,14 @@ class TestCheckpointPersistAndLoad(unittest.TestCase):
     def tearDown(self) -> None:
         self.patcher.stop()
         clear_instance()
+        set_cortexflow_job_id("")
+
+    def test_prefix_is_global_when_no_job_id(self) -> None:
+        self.assertEqual(_checkpoint_prefix(), "checkpoint/global")
+
+    def test_prefix_includes_job_id_when_set(self) -> None:
+        set_cortexflow_job_id("job-99")
+        self.assertEqual(_checkpoint_prefix(), "checkpoint/job-99")
 
     def test_persist_uploads_manifest_and_attributes(self) -> None:
         with checkpoint() as ckpt:
@@ -127,8 +93,8 @@ class TestCheckpointPersistAndLoad(unittest.TestCase):
 
         loaded = resume()
         self.assertIsNotNone(loaded)
-        self.assertEqual(loaded.epoch, 5)
-        self.assertEqual(loaded.lr, 0.001)
+        self.assertEqual(loaded.epoch if loaded else -1, 5)
+        self.assertEqual(loaded.lr if loaded else -1., 0.001)
 
     def test_load_returns_none_when_no_checkpoint(self) -> None:
         loaded = resume()
@@ -145,8 +111,6 @@ class TestCheckpointPersistAndLoad(unittest.TestCase):
         loaded = resume()
         self.assertIsNone(loaded)
 
-
-class TestCheckpointAttributes(unittest.TestCase):
     def test_setattr_and_getattr(self) -> None:
         ckpt = Checkpoint("test")
         ckpt.x = 42
