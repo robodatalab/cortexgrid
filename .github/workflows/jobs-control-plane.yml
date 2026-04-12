@@ -48,8 +48,11 @@ jobs:
 
       - uses: aws-actions/amazon-ecr-login@v2
 
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
       - name: Build and push
         run: |
-          docker build -f terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} .
-          docker push $ECR_REPO:latest
-          docker push $ECR_REPO:${{ github.sha }}
+          docker buildx build --platform linux/arm64 -f terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} --push .
+
