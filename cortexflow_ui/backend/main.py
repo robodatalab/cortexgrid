@@ -17,7 +17,7 @@ from cortexflow.mlflow_util import (
     list_run_metrics,
     list_run_params,
 )
-from cortexflow.ray_util import get_ray_job_url, get_ray_status
+from cortexflow.ray_util import get_ray_job_url, get_ray_logs, get_ray_status
 from cortexflow.secrets import get_secret
 
 from cortexflow_ui.backend.config import settings
@@ -107,6 +107,11 @@ def job_detail(experiment_name: str, run_id: str, job_id: str) -> dict:
         "ray_status": ray_status,
         "ray_url": ray_url,
     }
+
+
+@app.get("/api/ray/jobs/{ray_job_id}/logs")
+def ray_job_logs(ray_job_id: str) -> dict[str, str]:
+    return {"logs": get_ray_logs(ray_job_id)}
 
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

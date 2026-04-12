@@ -75,3 +75,15 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+.job-dashboard__logs {
+  font-family: monospace;
+  font-size: 11px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  margin: 0;
+  max-height: 500px;
+  overflow: auto;
+  white-space: pre;
+}

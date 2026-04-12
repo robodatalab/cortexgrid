@@ -73,6 +73,12 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data["ray_status"], "RUNNING")
         self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
 
+    @patch("cortexflow_ui.backend.main.get_ray_logs", return_value="installing torch...\nDone\n")
+    def test_ray_job_logs_returns_logs(self, _mock: MagicMock) -> None:
+        response = self.client.get("/api/ray/jobs/ray-1/logs")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"logs": "installing torch...\nDone\n"})
+
     @patch("cortexflow_ui.backend.main.get_job_status")
     def test_job_detail_handles_missing_ray_job(self, mock_get_job_status: MagicMock) -> None:
         from cortexflow.jobs import JobLifecycle, JobStatus

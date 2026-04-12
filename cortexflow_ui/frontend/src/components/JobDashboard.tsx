@@ -19,6 +19,7 @@ type Props = {
 
 export function JobDashboard({ experimentName, runId, jobId }: Props) {
   const [detail, setDetail] = useState<JobDetail | null>(null)
+  const [logs, setLogs] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
@@ -35,6 +36,14 @@ export function JobDashboard({ experimentName, runId, jobId }: Props) {
       .then((data) => {
         setDetail(data)
         setStatus('ready')
+        if (data.ray_job_id) {
+          fetch(`/api/ray/jobs/${data.ray_job_id}/logs`, { signal: controller.signal })
+            .then((r) => (r.ok ? r.json() as Promise<{ logs: string }> : null))
+            .then((j) => { if (j) setLogs(j.logs) })
+            .catch((err: unknown) => {
+              if (err instanceof DOMException && err.name === 'AbortError') return
+            })
+        }
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return
@@ -86,6 +95,13 @@ export function JobDashboard({ experimentName, runId, jobId }: Props) {
         <div className="job-dashboard__section">
           <div className="job-dashboard__section-title">Error</div>
           <div className="job-dashboard__error">{detail.error}</div>
+        </div>
+      )}
+
+      {logs !== null && (
+        <div className="job-dashboard__section">
+          <div className="job-dashboard__section-title">Ray logs</div>
+          <pre className="job-dashboard__logs">{logs || '(no logs yet)'}</pre>
         </div>
       )}
     </div>
