@@ -54,17 +54,17 @@ class TestExperiment(unittest.TestCase):
         with self.assertRaises(ValueError):
             Experiment.from_experiment("other-exp", "other-run")
 
-    def test_get_ray_jobs_lists_registered_ids(self) -> None:
+    def test_get_jobs_lists_cortexflow_job_ids(self) -> None:
         self.fake_mlflow.list_artifacts.return_value = [
-            MagicMock(path="ray-job/job-1"),
-            MagicMock(path="ray-job/job-2"),
+            MagicMock(path="job/job-1", is_dir=True),
+            MagicMock(path="job/job-2", is_dir=True),
         ]
 
         exp = Experiment.from_experiment("my-exp", "run-xyz")
-        result = exp.get_ray_jobs()
+        result = exp.get_jobs()
 
         self.fake_mlflow.list_artifacts.assert_called_once_with(
-            "run-xyz", path="ray-job"
+            "run-xyz", path="job"
         )
         self.assertEqual(result, ["job-1", "job-2"])
 
