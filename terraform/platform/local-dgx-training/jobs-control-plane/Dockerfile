@@ -14,6 +14,6 @@ COPY pyproject.toml ./
 COPY cortexflow/ ./cortexflow/
 COPY jobs_control_plane/ ./jobs_control_plane/
 
-RUN uv pip install --system .
+RUN uv sync
 
-CMD ["python", "-m", "jobs_control_plane.server"]
+CMD [".venv/bin/python", "-m", "jobs_control_plane.server"]
