@@ -7,7 +7,6 @@ import json
 import subprocess
 import sys
 import tempfile
-import uuid
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -28,6 +27,8 @@ class JobStatus(str, Enum):
 
 @dataclass
 class JobLifecycle:
+    experiment: Experiment
+    job_id: str
     status: JobStatus = JobStatus.PENDING
     error: str | None = None
     retry: bool = False
@@ -40,20 +41,51 @@ class JobLifecycle:
     def from_json(cls, text: str) -> "JobLifecycle":
         data = json.loads(text)
         data["status"] = JobStatus(data["status"])
+        data["experiment"] = Experiment(**data["experiment"])
         return cls(**data)
+    
+    def save_to_mlflow(self) -> None:
+        artifact_path = f"job/{self.job_id}"
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir, "lifecycle.json")
+            local_path.write_text(self.to_json())
+            client.log_artifact(self.experiment.run_id, str(local_path), artifact_path=artifact_path)
+
+    @classmethod
+    def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "JobLifecycle":
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
+        return cls.from_json(Path(local_path).read_text())
 
 
 class Payload(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    experiment: Experiment
     job_id: str
     fn: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
-    experiment: Experiment
     num_gpus: int = 0
     num_cpus: int = 1
     pip_requirements: str = ""
+
+    def save_to_mlflow(self) -> None:
+        artifact_path = f"job/{self.job_id}"
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            local_path = Path(tmp_dir, "payload.pkl")
+            local_path.write_bytes(cloudpickle.dumps(self))
+            client.log_artifact(self.experiment.run_id, str(local_path), artifact_path=artifact_path)
+
+    @classmethod
+    def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "Payload":
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/payload.pkl")
+        return cloudpickle.loads(Path(local_path).read_bytes())
 
 
 def remote(
@@ -78,37 +110,29 @@ def remote(
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
 
     payload = Payload(
+        experiment=experiment,
         job_id=job_id,
         fn=fn,
         args=args,
         kwargs=kwargs,
-        experiment=experiment,
         num_gpus=num_gpus,
         num_cpus=num_cpus,
         pip_requirements=pip_requirements,
     )
+    payload.save_to_mlflow()
 
-    lifecycle = JobLifecycle(retry=retry)
-    tmpdir = Path(tempfile.mkdtemp())
-    (tmpdir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
-    (tmpdir / "lifecycle.json").write_text(lifecycle.to_json())
-
-    artifact_path = f"job/{job_id}"
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    client.log_artifact(experiment.run_id, str(tmpdir / "payload.pkl"), artifact_path=artifact_path)
-    client.log_artifact(experiment.run_id, str(tmpdir / "lifecycle.json"), artifact_path=artifact_path)
+    lifecycle = JobLifecycle(experiment=experiment, job_id=job_id, retry=retry)
+    lifecycle.save_to_mlflow()
 
     return job_id
 
 
 def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
     """Read the job's lifecycle from MLflow artifacts."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
-    return JobLifecycle.from_json(Path(local_path).read_text())
+    return JobLifecycle.load_from_mlflow(experiment, job_id)
 
 
-def get_all_jobs(experiment: Experiment) -> list[JobLifecycle]:
+def list_experiment_jobs(experiment: Experiment) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     entries = client.list_artifacts(experiment.run_id, path="job")
@@ -117,6 +141,5 @@ def get_all_jobs(experiment: Experiment) -> list[JobLifecycle]:
         if not entry.is_dir:
             continue
         job_id = Path(entry.path).name
-        local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
-        result.append(JobLifecycle.from_json(Path(local_path).read_text()))
+        result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
     return result

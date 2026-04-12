@@ -13,7 +13,7 @@
       "Bash(python -m pytest tests/jobs_control_plane/test_server.py -v)",
       "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py tests/jobs_control_plane/test_server.py -v)",
       "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py tests/jobs_control_plane_tests/test_server.py -v)",
-      "Bash(python -c \"import cortexflow; print\\('OK:', cortexflow.get_all_jobs\\)\")",
+      "Bash(python -c \"import cortexflow; print\\('OK:', cortexflow.list_experiment_jobs\\)\")",
       "Bash(python -m pytest tests/cortexflow_tests/ tests/jobs_control_plane_tests/)",
       "Bash(python -m pytest tests/cortexflow_tests/test_checkpoint.py -v)",
       "Bash(python -m pytest tests/cortexflow_tests/test_checkpoint.py::TestCheckpointPrefix::test_prefix_is_global_when_no_job_id -v -s)",
@@ -25,7 +25,8 @@
       "Bash(docker login:*)",
       "Bash(docker push:*)",
       "Bash(python -m unittest discover -s tests/cortexflow_tests -v)",
-      "Bash(python -m unittest discover -s tests/jobs_control_plane_tests -v)"
+      "Bash(python -m unittest discover -s tests/jobs_control_plane_tests -v)",
+      "Bash(python -m unittest tests.cortexflow_tests.test_jobs -v)"
     ]
   }
 }

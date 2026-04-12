@@ -6,25 +6,10 @@ import unittest
 from unittest.mock import ANY, MagicMock, patch
 
 from botocore.exceptions import ClientError  # type: ignore
-from cortexflow.experiment import Experiment, clear_instance, set_instance
 from cortexflow.s3_util import download, upload, upload_dir
 
 
 class TestS3Client(unittest.TestCase):
-    def setUp(self) -> None:
-        set_instance(
-            Experiment(
-                experiment_name="",
-                run_id="",
-                s3_access_key="testkey",
-                s3_secret_key="testsecret",
-                s3_default_bucket="my-bucket",
-                github_token="",
-            )
-        )
-
-    def tearDown(self) -> None:
-        clear_instance()
 
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
@@ -36,11 +21,11 @@ class TestS3Client(unittest.TestCase):
 
         result = upload("/tmp/data.parquet")
 
-        mock_client.head_bucket.assert_called_once_with(Bucket="my-bucket")
+        mock_client.head_bucket.assert_called_once_with(Bucket="ray-checkpoints")
         mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "my-bucket", "data.parquet", Callback=ANY
+            "/tmp/data.parquet", "ray-checkpoints", "data.parquet", Callback=ANY
         )
-        self.assertEqual(result, "s3://my-bucket/data.parquet")
+        self.assertEqual(result, "s3://ray-checkpoints/data.parquet")
 
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
@@ -131,7 +116,7 @@ class TestS3Client(unittest.TestCase):
 
             result = upload_dir(tmpdir)
 
-        self.assertEqual(result, ["s3://my-bucket/f.txt"])
+        self.assertEqual(result, ["s3://ray-checkpoints/f.txt"])
 
     @patch("cortexflow.s3_util.get_s3_client")
     def test_download_default_local_path(self, mock_client_fn: MagicMock) -> None:

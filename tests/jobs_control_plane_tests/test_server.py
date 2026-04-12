@@ -10,7 +10,7 @@ from typing import Any
 from unittest.mock import patch
 
 import cloudpickle  # type: ignore
-from cortexflow.experiment import Experiment, clear_instance, set_instance
+from cortexflow.experiment import Experiment
 from cortexflow.jobs import JobLifecycle, JobStatus, Payload
 from jobs_control_plane.server import poll_once
 
@@ -19,10 +19,6 @@ def _make_experiment() -> Experiment:
     return Experiment(
         experiment_name="exp",
         run_id="run-1",
-        s3_access_key="",
-        s3_secret_key="",
-        s3_default_bucket="",
-        github_token="",
     )
 
 
@@ -50,7 +46,7 @@ class FakeMLflow:
         dest = dest_dir / Path(local_path).name
         shutil.copy2(local_path, dest)
 
-    def add_job(self, job_id: str, lifecycle: JobLifecycle, payload_bytes: bytes = b"") -> None:
+    def add_job(self, experiment: Experiment, job_id: str, lifecycle: JobLifecycle, payload_bytes: bytes = b"") -> None:
         job_dir = self.artifact_root / "job" / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "lifecycle.json").write_text(lifecycle.to_json())
@@ -81,9 +77,7 @@ class FakeRay:
 
 class TestPollOnce(unittest.TestCase):
     def setUp(self) -> None:
-        clear_instance()
         self.exp = _make_experiment()
-        set_instance(self.exp)
 
         self.fake_mlflow = FakeMLflow()
         self.fake_ray = FakeRay()
@@ -94,8 +88,9 @@ class TestPollOnce(unittest.TestCase):
         os.chdir(self.project_root)
 
         patchers = [
-            patch("jobs_control_plane.server.MlflowClient", return_value=self.fake_mlflow),
+            patch("jobs_control_plane.server.list_experiments", return_value=[self.exp]),
             patch("jobs_control_plane.server.JobSubmissionClient", return_value=self.fake_ray),
+            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
         ]
         for p in patchers:
             p.start()
@@ -103,19 +98,16 @@ class TestPollOnce(unittest.TestCase):
         self.addCleanup(os.chdir, self.original_cwd)
         self.addCleanup(shutil.rmtree, self.project_root, True)
 
-    def tearDown(self) -> None:
-        clear_instance()
-
     def _make_payload_bytes(self) -> bytes:
         return cloudpickle.dumps(
             Payload(job_id="job-1", fn=lambda: None, args=(), kwargs={}, experiment=self.exp, pip_requirements="")
         )
 
     def test_pending_job_gets_submitted_to_ray(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.PENDING)
-        self.fake_mlflow.add_job("job-1", lifecycle, self._make_payload_bytes())
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.PENDING)
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload_bytes())
 
-        poll_once(self.exp)
+        poll_once()
 
         self.assertEqual(len(self.fake_ray.submitted), 1)
         updated = JobLifecycle.from_json(
@@ -125,11 +117,11 @@ class TestPollOnce(unittest.TestCase):
         self.assertIsNotNone(updated.ray_job_id)
 
     def test_running_job_transitions_to_finished_on_success(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.RUNNING, ray_job_id="ray_0")
-        self.fake_mlflow.add_job("job-1", lifecycle)
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.RUNNING, ray_job_id="ray_0")
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle)
         self.fake_ray.statuses["ray_0"] = "SUCCEEDED"
 
-        poll_once(self.exp)
+        poll_once()
 
         updated = JobLifecycle.from_json(
             (self.fake_mlflow.artifact_root / "job" / "job-1" / "lifecycle.json").read_text()
@@ -137,12 +129,12 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(updated.status, JobStatus.FINISHED)
 
     def test_running_job_transitions_to_failed_on_failure(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.RUNNING, ray_job_id="ray_0")
-        self.fake_mlflow.add_job("job-1", lifecycle)
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.RUNNING, ray_job_id="ray_0")
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle)
         self.fake_ray.statuses["ray_0"] = "FAILED"
         self.fake_ray.logs_by_id["ray_0"] = "CUDA OOM"
 
-        poll_once(self.exp)
+        poll_once()
 
         updated = JobLifecycle.from_json(
             (self.fake_mlflow.artifact_root / "job" / "job-1" / "lifecycle.json").read_text()
@@ -151,10 +143,10 @@ class TestPollOnce(unittest.TestCase):
         self.assertIn("CUDA OOM", updated.error or "")
 
     def test_failed_job_with_retry_gets_resubmitted(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.FAILED, retry=True, error="OOM")
-        self.fake_mlflow.add_job("job-1", lifecycle, self._make_payload_bytes())
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.FAILED, retry=True, error="OOM")
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload_bytes())
 
-        poll_once(self.exp)
+        poll_once()
 
         self.assertEqual(len(self.fake_ray.submitted), 1)
         updated = JobLifecycle.from_json(
@@ -163,10 +155,10 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(updated.status, JobStatus.RUNNING)
 
     def test_failed_job_without_retry_stays_failed(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.FAILED, retry=False, error="OOM")
-        self.fake_mlflow.add_job("job-1", lifecycle)
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.FAILED, retry=False, error="OOM")
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle)
 
-        poll_once(self.exp)
+        poll_once()
 
         self.assertEqual(len(self.fake_ray.submitted), 0)
         updated = JobLifecycle.from_json(
@@ -175,10 +167,10 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(updated.status, JobStatus.FAILED)
 
     def test_finished_job_is_not_touched(self) -> None:
-        lifecycle = JobLifecycle(status=JobStatus.FINISHED, ray_job_id="ray_0")
-        self.fake_mlflow.add_job("job-1", lifecycle)
+        lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.FINISHED, ray_job_id="ray_0")
+        self.fake_mlflow.add_job(self.exp, "job-1", lifecycle)
 
-        poll_once(self.exp)
+        poll_once()
 
         self.assertEqual(len(self.fake_ray.submitted), 0)
 

@@ -22,10 +22,6 @@ def _make_experiment() -> Experiment:
     return Experiment(
         experiment_name="exp",
         run_id="run-1",
-        s3_access_key="",
-        s3_secret_key="",
-        s3_default_bucket="",
-        github_token="",
     )
 
 

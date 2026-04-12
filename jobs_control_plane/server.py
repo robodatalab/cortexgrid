@@ -10,11 +10,10 @@ import time
 from pathlib import Path
 
 import cloudpickle  # type: ignore
-from mlflow.tracking import MlflowClient
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri, get_ray_address
-from cortexflow.jobs import JobLifecycle, JobStatus, Payload
+from cortexflow.experiment import Experiment, list_experiments, get_ray_address
+from cortexflow.jobs import JobLifecycle, JobStatus, Payload, list_experiment_jobs
 
 
 log = logging.getLogger(__name__)
@@ -38,44 +37,26 @@ DEFAULT_EXCLUDES = [
 ]
 
 
-def run(experiment: Experiment) -> None:
-    """Main loop — poll MLflow, schedule pending jobs, monitor running ones."""
-    log.info("Control plane started for experiment=%s run=%s", experiment.experiment_name, experiment.run_id)
-    while True:
-        try:
-            poll_once(experiment)
-        except Exception:
-            log.exception("Error during poll cycle")
-        time.sleep(POLL_INTERVAL_SECONDS)
-
-
-def poll_once(experiment: Experiment) -> None:
+def poll_once() -> None:
     """Single poll cycle: scan all jobs, act on each based on lifecycle state."""
-    mlflow = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    job_dirs = mlflow.list_artifacts(experiment.run_id, path="job")
-
-    for entry in job_dirs:
-        if not entry.is_dir:
-            continue
-        job_id = Path(entry.path).name
-        lifecycle = _read_lifecycle(mlflow, experiment.run_id, job_id)
-
-        if lifecycle.status == JobStatus.PENDING:
-            _start_job(mlflow, experiment, job_id, lifecycle)
-        elif lifecycle.status == JobStatus.RUNNING:
-            _check_job(mlflow, experiment, job_id, lifecycle)
-        elif lifecycle.status == JobStatus.FAILED and lifecycle.retry:
-            log.info("Retrying failed job %s", job_id)
-            _start_job(mlflow, experiment, job_id, lifecycle)
+    experiments = list_experiments()
+    for experiment in experiments:
+        jobs = list_experiment_jobs(experiment)
+        for job in jobs:
+            if job.status == JobStatus.PENDING:
+                _start_job(experiment, job)
+            elif job.status == JobStatus.RUNNING:
+                _check_job(experiment, job)
+            elif job.status == JobStatus.FAILED and job.retry:
+                log.info("Retrying failed job %s", job.ray_job_id)
+                _start_job(experiment, job)
 
 
 def _start_job(
-    mlflow: MlflowClient,
     experiment: Experiment,
-    job_id: str,
-    lifecycle: JobLifecycle,
+    job: JobLifecycle,
 ) -> None:
-    payload = _read_payload(mlflow, experiment.run_id, job_id)
+    payload = Payload.load_from_mlflow(experiment, job.job_id)
     workdir = _build_workdir(payload)
 
     ray = JobSubmissionClient(get_ray_address())
@@ -86,53 +67,38 @@ def _start_job(
         entrypoint_num_cpus=payload.num_cpus,
     )
 
+    lifecycle = JobLifecycle.load_from_mlflow(experiment, job.job_id)
     lifecycle.status = JobStatus.RUNNING
     lifecycle.ray_job_id = ray_job_id
     lifecycle.error = None
-    _write_lifecycle(mlflow, experiment.run_id, job_id, lifecycle)
-    log.info("Started job %s as ray_job_id=%s", job_id, ray_job_id)
+    lifecycle.save_to_mlflow()
+    log.info("Started job %s as ray_job_id=%s", job.job_id, ray_job_id)
 
 
 def _check_job(
-    mlflow: MlflowClient,
     experiment: Experiment,
-    job_id: str,
-    lifecycle: JobLifecycle,
+    job: JobLifecycle,
 ) -> None:
+    lifecycle = JobLifecycle.load_from_mlflow(experiment, job.job_id)
     if lifecycle.ray_job_id is None:
-        return
+        # the job hasn't been scheduled yet - this case should not be entered
+        raise AssertionError(f"The job {job} hasn't been scheduled yet - this case should not be entered")
 
     ray = JobSubmissionClient(get_ray_address())
     ray_status = ray.get_job_status(lifecycle.ray_job_id).value
 
     if ray_status == "SUCCEEDED":
         lifecycle.status = JobStatus.FINISHED
-        _write_lifecycle(mlflow, experiment.run_id, job_id, lifecycle)
-        log.info("Job %s finished successfully", job_id)
+        lifecycle.save_to_mlflow()
+        log.info("Job %s finished successfully", lifecycle.job_id)
     elif ray_status in ("FAILED", "STOPPED"):
         logs = ray.get_job_logs(lifecycle.ray_job_id)
         lifecycle.status = JobStatus.FAILED
         lifecycle.error = logs[-2000:] if logs else "Unknown error"
         lifecycle.ray_job_id = None
-        _write_lifecycle(mlflow, experiment.run_id, job_id, lifecycle)
-        log.warning("Job %s failed: %s", job_id, lifecycle.error[:200])
+        lifecycle.save_to_mlflow()
+        log.warning("Job %s failed: %s", lifecycle.job_id, lifecycle.error[:200])
 
-
-def _read_lifecycle(mlflow: MlflowClient, run_id: str, job_id: str) -> JobLifecycle:
-    local_path = mlflow.download_artifacts(run_id, f"job/{job_id}/lifecycle.json")
-    return JobLifecycle.from_json(Path(local_path).read_text())
-
-
-def _write_lifecycle(mlflow: MlflowClient, run_id: str, job_id: str, lifecycle: JobLifecycle) -> None:
-    tmpdir = Path(tempfile.mkdtemp())
-    path = tmpdir / "lifecycle.json"
-    path.write_text(lifecycle.to_json())
-    mlflow.log_artifact(run_id, str(path), artifact_path=f"job/{job_id}")
-
-
-def _read_payload(mlflow: MlflowClient, run_id: str, job_id: str) -> Payload:
-    local_path = mlflow.download_artifacts(run_id, f"job/{job_id}/payload.pkl")
-    return cloudpickle.loads(Path(local_path).read_bytes())
 
 
 def _find_pyproject() -> Path:
@@ -161,3 +127,20 @@ def _build_workdir(payload: Payload) -> Path:
         f"--extra-index-url {PIP_EXTRA_INDEX_URL}\n{payload.pip_requirements}"
     )
     return workdir
+
+
+def main() -> None:
+    while True:
+        try:
+            poll_once()
+        except Exception:
+            log.exception("Error during poll cycle")
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
+    main()
+

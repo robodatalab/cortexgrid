@@ -56,14 +56,3 @@ def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
 def get_mlflow_client() -> MlflowClient:
     """Return a configured MlflowClient."""
     return MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-
-
-def get_experiment_list() -> dict[str, list[str]]:
-    """Map MLflow experiment names to their run IDs."""
-    client = get_mlflow_client()
-    result: dict[str, list[str]] = {}
-    for exp in client.search_experiments():
-        runs = client.search_runs(experiment_ids=[exp.experiment_id])
-        result[exp.name] = [run.info.run_id for run in runs]
-    return result
-

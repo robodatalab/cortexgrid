@@ -48,14 +48,22 @@ def get_s3_endpoint_url() -> str:
     return f"http://{dgx_ip}:9000" if dgx_ip else ""
 
 
+def get_s3_access_key() -> str:
+    return "minioadmin"
+
+
+def get_s3_secret_key() -> str:
+    return get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
+
+
+def get_s3_default_bucket() -> str:
+    return "ray-checkpoints"
+
+
 @dataclass
 class Experiment:
     experiment_name: str
     run_id: str
-    s3_access_key: str
-    s3_secret_key: str
-    s3_default_bucket: str
-    github_token: str
 
     @classmethod
     def init(cls, name: str | None = None) -> "Experiment":
@@ -72,7 +80,6 @@ class Experiment:
                 )
             return _SINGLETON_EXPERIMENT
 
-        secrets = _pull_secrets()
         experiment_name, run_id = _try_create_experiment_and_run(
             experiment=name,
             mlflow_tracking_uri=get_mlflow_tracking_uri(),
@@ -80,7 +87,6 @@ class Experiment:
         instance = cls(
             experiment_name=experiment_name,
             run_id=run_id,
-            **secrets,
         )
         set_instance(instance)
         return instance
@@ -104,11 +110,9 @@ class Experiment:
                 )
             return _SINGLETON_EXPERIMENT
 
-        secrets = _pull_secrets()
         instance = cls(
             experiment_name=experiment_name,
             run_id=run_id,
-            **secrets,
         )
         set_instance(instance)
         return instance
@@ -162,15 +166,13 @@ def _try_create_experiment_and_run(
     return (experiment, run.info.run_id)
 
 
-def _pull_secrets() -> dict[str, str]:
-    """Pull connection info from AWS Secrets Manager."""
-    s3_secret_key = get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
-    github_token = get_secret(f"{SM_PREFIX}/GH_TOKEN")
+def list_experiments() -> list[Experiment]:
+    """Map MLflow experiment names to their run IDs."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    result: list[Experiment] = []
+    for exp in client.search_experiments():
+        runs = client.search_runs(experiment_ids=[exp.experiment_id])
+        for run in runs:
+            result.append(Experiment(exp.name, run_id=run.info.run_id))
+    return result
 
-    return dict(
-        s3_access_key="minioadmin",
-        s3_secret_key=s3_secret_key,
-        s3_default_bucket="ray-checkpoints",
-        github_token=github_token,
-    )
-    
