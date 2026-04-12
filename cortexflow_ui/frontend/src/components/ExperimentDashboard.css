@@ -1,0 +1,33 @@
+.experiment-dashboard {
+  padding: 24px;
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.experiment-dashboard__title {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+.experiment-dashboard__table {
+  font-size: 13px;
+  border-collapse: collapse;
+}
+
+.experiment-dashboard__table td {
+  padding: 4px 16px 4px 0;
+  vertical-align: top;
+}
+
+.experiment-dashboard__table td:first-child {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.experiment-dashboard__status {
+  padding: 24px;
+  font-size: 13px;
+  color: #666;
+}

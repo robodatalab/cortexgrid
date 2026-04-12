@@ -4,6 +4,8 @@ import 'allotment/dist/style.css'
 import './App.css'
 import { Panel } from './components/Panel'
 import { ExperimentTree } from './components/ExperimentTree'
+import type { Selection } from './components/ExperimentTree'
+import { ExperimentDashboard } from './components/ExperimentDashboard'
 
 type Dashboard = {
   id: string
@@ -17,6 +19,7 @@ type LoadState =
 
 function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [selection, setSelection] = useState<Selection | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -67,11 +70,17 @@ function App() {
         <Allotment>
           <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
             <Panel>
-              <ExperimentTree />
+              <ExperimentTree onSelect={setSelection} />
             </Panel>
           </Allotment.Pane>
           <Allotment.Pane>
-            <main className="main" />
+            <Panel>
+              {selection?.kind === 'experiment' ? (
+                <ExperimentDashboard experimentName={selection.experiment_name} />
+              ) : (
+                <main className="main" />
+              )}
+            </Panel>
           </Allotment.Pane>
         </Allotment>
       </div>

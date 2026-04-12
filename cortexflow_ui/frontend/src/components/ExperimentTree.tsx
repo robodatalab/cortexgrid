@@ -33,9 +33,18 @@ function groupByExperiment(items: ExperimentRun[]): TreeNode[] {
   }))
 }
 
-export function ExperimentTree() {
+export type Selection =
+  | { kind: 'experiment'; experiment_name: string }
+  | { kind: 'run'; experiment_name: string; run_id: string; run_name: string }
+
+type ExperimentTreeProps = {
+  onSelect: (selection: Selection) => void
+}
+
+export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [selected, setSelected] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,12 +84,26 @@ export function ExperimentTree() {
       )}
       {nodes.map((node, i) => (
         <div key={node.experiment_name}>
-          <div className="experiment-tree__experiment" onClick={() => toggle(i)}>
+          <div
+            className={`experiment-tree__experiment${selected === node.experiment_name ? ' experiment-tree--selected' : ''}`}
+            onClick={() => {
+              toggle(i)
+              setSelected(node.experiment_name)
+              onSelect({ kind: 'experiment', experiment_name: node.experiment_name })
+            }}
+          >
             <FlaskConical size={14} /> {node.experiment_name}
           </div>
           {node.expanded &&
             node.runs.map((run) => (
-              <div key={run.run_id} className="experiment-tree__run">
+              <div
+                key={run.run_id}
+                className={`experiment-tree__run${selected === run.run_id ? ' experiment-tree--selected' : ''}`}
+                onClick={() => {
+                  setSelected(run.run_id)
+                  onSelect({ kind: 'run', experiment_name: node.experiment_name, run_id: run.run_id, run_name: run.run_name })
+                }}
+              >
                 <Play size={12} /> {run.run_name}
               </div>
             ))}

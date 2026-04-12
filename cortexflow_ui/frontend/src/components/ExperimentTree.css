@@ -47,3 +47,7 @@
 .experiment-tree__run:hover {
   background: #f0f0f0;
 }
+
+.experiment-tree--selected {
+  border: 1px dashed #000;
+}
