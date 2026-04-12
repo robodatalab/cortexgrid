@@ -8,7 +8,9 @@
       "Bash(python -c \"import cortexflow; print\\('OK'\\)\")",
       "Bash(python -m pytest tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py)",
       "Bash(python -m pytest tests/cortexflow_tests/test_ray_util.py -v)",
-      "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py -v)"
+      "Bash(python -m pytest tests/cortexflow_tests/test_jobs.py tests/cortexflow_tests/test_ray_util.py tests/cortexflow_tests/test_experiment.py -v)",
+      "Bash(python -m pytest tests/jobs_control_plane/test_server.py tests/cortexflow_tests/test_jobs.py -v)",
+      "Bash(python -m pytest tests/jobs_control_plane/test_server.py -v)"
     ]
   }
 }
