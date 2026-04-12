@@ -17,6 +17,7 @@ from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
+from tqdm import tqdm  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,12 @@ class JobLifecycle:
     ray_job_id: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps({"status": self.status.value, **{k: v for k, v in asdict(self).items() if k != "status"}})
+        return json.dumps(
+            {
+                "status": self.status.value,
+                **{k: v for k, v in asdict(self).items() if k != "status"},
+            }
+        )
 
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
@@ -65,21 +71,27 @@ class JobLifecycle:
         data["status"] = JobStatus(data["status"])
         data["experiment"] = Experiment(**data["experiment"])
         return cls(**data)
-    
+
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        log.info("Saving lifecycle for job %s (status=%s)", self.job_id, self.status.value)
+        log.info(
+            "Saving lifecycle for job %s (status=%s)", self.job_id, self.status.value
+        )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             local_path = Path(tmp_dir, "lifecycle.json")
             local_path.write_text(self.to_json())
-            client.log_artifact(self.experiment.run_id, str(local_path), artifact_path=artifact_path)
+            client.log_artifact(
+                self.experiment.run_id, str(local_path), artifact_path=artifact_path
+            )
 
     @classmethod
     def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "JobLifecycle":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/lifecycle.json")
+        local_path = client.download_artifacts(
+            experiment.run_id, f"job/{job_id}/lifecycle.json"
+        )
         return cls.from_json(Path(local_path).read_text())
 
 
@@ -98,7 +110,9 @@ class Payload(BaseModel):
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        log.info("Uploading payload for job %s from %s", self.job_id, self.project_code_root)
+        log.info(
+            "Uploading payload for job %s from %s", self.job_id, self.project_code_root
+        )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             Path(tmp_dir, "payload.pkl").write_bytes(cloudpickle.dumps(self))
@@ -108,17 +122,25 @@ class Payload(BaseModel):
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
             )
-            client.log_artifacts(self.experiment.run_id, tmp_dir, artifact_path=artifact_path)
+            _upload_dir(client, self.experiment.run_id, tmp_dir, artifact_path)
             log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
     def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
-        payload_local_path = client.download_artifacts(experiment.run_id, f"job/{job_id}/payload.pkl")
+        payload_local_path = client.download_artifacts(
+            experiment.run_id, f"job/{job_id}/payload.pkl"
+        )
         payload = cloudpickle.loads(Path(payload_local_path).read_bytes())
-        payload.project_code_root = client.download_artifacts(experiment.run_id, f"job/{job_id}/project_code_root")
-        log.info("Payload downloaded for job %s, project_code_root=%s", job_id, payload.project_code_root)
+        payload.project_code_root = client.download_artifacts(
+            experiment.run_id, f"job/{job_id}/project_code_root"
+        )
+        log.info(
+            "Payload downloaded for job %s, project_code_root=%s",
+            job_id,
+            payload.project_code_root,
+        )
 
         return payload
 
@@ -165,6 +187,21 @@ def _find_pyproject() -> Path:
     raise FileNotFoundError("No pyproject.toml found in any parent directory")
 
 
+def _upload_dir(
+    client: MlflowClient, run_id: str, local_dir: str, artifact_path: str
+) -> None:
+    """Upload a directory to MLflow with a per-file progress bar."""
+    files = [(root, f) for root, _, filenames in os.walk(local_dir) for f in filenames]
+    total_bytes = sum(os.path.getsize(os.path.join(r, f)) for r, f in files)
+    with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Uploading") as pbar:
+        for root, filename in files:
+            filepath = os.path.join(root, filename)
+            rel_dir = os.path.relpath(root, local_dir)
+            dest = f"{artifact_path}/{rel_dir}" if rel_dir != "." else artifact_path
+            client.log_artifact(run_id, filepath, artifact_path=dest)
+            pbar.update(os.path.getsize(filepath))
+
+
 def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
     """Read the job's lifecycle from MLflow artifacts."""
     return JobLifecycle.load_from_mlflow(experiment, job_id)
@@ -182,6 +219,7 @@ def list_experiment_jobs(experiment: Experiment) -> list[JobLifecycle]:
         try:
             result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
         except Exception:
-            logging.getLogger(__name__).warning("Skipping job %s: missing lifecycle", job_id)
+            logging.getLogger(__name__).warning(
+                "Skipping job %s: missing lifecycle", job_id
+            )
     return result
-
