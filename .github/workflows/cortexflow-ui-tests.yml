@@ -3,14 +3,14 @@ name: cortexflow-ui tests
 on:
   push:
     paths:
-      - "cortexflow-ui/**"
+      - "cortexflow_ui/**"
       - "tests/cortexflow_ui_tests/backend/**"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/cortexflow-ui-tests.yml"
   pull_request:
     paths:
-      - "cortexflow-ui/**"
+      - "cortexflow_ui/**"
       - "tests/cortexflow_ui_tests/backend/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -31,14 +31,14 @@ jobs:
 
       - name: Run backend tests
         env:
-          PYTHONPATH: cortexflow-ui/backend
+          PYTHONPATH: cortexflow_ui/backend
         run: uv run python -m unittest discover -s tests/cortexflow_ui_tests/backend -v
 
   frontend:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cortexflow-ui/frontend
+        working-directory: cortexflow_ui/frontend
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: cortexflow-ui/frontend/package-lock.json
+          cache-dependency-path: cortexflow_ui/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
