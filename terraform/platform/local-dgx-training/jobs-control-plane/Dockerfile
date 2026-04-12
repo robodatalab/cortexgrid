@@ -2,6 +2,8 @@
 
 FROM python:3.11-slim
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -12,6 +14,6 @@ COPY pyproject.toml ./
 COPY cortexflow/ ./cortexflow/
 COPY jobs_control_plane/ ./jobs_control_plane/
 
-RUN pip install --no-cache-dir .
+RUN uv pip install --system .
 
-CMD ["python", "-m", "jobs_control_plane"]
+CMD ["python", "-m", "jobs_control_plane.server"]
