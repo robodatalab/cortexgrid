@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 
 from ray.job_submission import JobSubmissionClient
 
@@ -67,7 +68,10 @@ def _start_job(
     ray = JobSubmissionClient(get_ray_address())
     ray_job_id = ray.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
-        runtime_env={"working_dir": payload.project_code_root, "pip": ["."]},
+        runtime_env={
+            "working_dir": payload.project_code_root,
+            "pip": str(Path(payload.project_code_root) / "requirements.txt"),
+        },
         entrypoint_num_gpus=payload.num_gpus,
         entrypoint_num_cpus=payload.num_cpus,
     )

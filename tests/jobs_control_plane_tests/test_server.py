@@ -200,14 +200,14 @@ class TestPollOnce(unittest.TestCase):
         self.assertTrue(Path(working_dir).is_dir())
         self.assertTrue((Path(working_dir) / "pyproject.toml").exists())
 
-    def test_submitted_job_uses_pip_install_dot(self) -> None:
+    def test_submitted_job_uses_requirements_txt(self) -> None:
         lifecycle = JobLifecycle(experiment=self.exp, job_id="job-1", status=JobStatus.PENDING)
         self.fake_mlflow.add_job(self.exp, "job-1", lifecycle, self._make_payload())
 
         poll_once()
 
         submitted = self.fake_ray.submitted[0]
-        self.assertEqual(submitted["runtime_env"]["pip"], ["."])
+        self.assertTrue(submitted["runtime_env"]["pip"].endswith("/requirements.txt"))
 
 
 if __name__ == "__main__":

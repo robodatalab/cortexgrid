@@ -10,6 +10,8 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 from typing import Any, Callable
 
@@ -35,10 +37,7 @@ DEFAULT_EXCLUDES = [
     "*.egg-info",
 ]
 
-PIP_EXTRA_INDEX_URL = os.environ.get(
-    "CORTEXFLOW_PIP_EXTRA_INDEX_URL",
-    "https://download.pytorch.org/whl/cu128",
-)
+ENABLE_CUDA_ON_RAY = "https://download.pytorch.org/whl/cu128"
 
 
 class JobStatus(str, Enum):
@@ -116,11 +115,21 @@ class Payload(BaseModel):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             Path(tmp_dir, "payload.pkl").write_bytes(cloudpickle.dumps(self))
+            project_dest = Path(tmp_dir, "project_code_root")
             shutil.copytree(
                 self.project_code_root,
-                str(Path(tmp_dir, "project_code_root")),
+                str(project_dest),
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
+            )
+            pip_requirements = subprocess.run(
+                [sys.executable, "-m", "pip", "freeze"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            (project_dest / "requirements.txt").write_text(
+                f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
             )
             _upload_dir(client, self.experiment.run_id, tmp_dir, artifact_path)
             log.info("Payload upload complete for job %s", self.job_id)

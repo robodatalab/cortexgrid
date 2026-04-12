@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import cloudpickle  # type: ignore
 
@@ -57,6 +57,7 @@ class TestRemote(unittest.TestCase):
         patchers = [
             patch("cortexflow.experiment.MlflowClient"),
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.jobs.subprocess.run", return_value=MagicMock(stdout="numpy==1.26\ntorch==2.5\n")),
         ]
         for p in patchers:
             p.start()
@@ -92,6 +93,16 @@ class TestRemote(unittest.TestCase):
         self.assertTrue(project_root.is_dir())
         self.assertTrue((project_root / "pyproject.toml").exists())
         self.assertTrue((project_root / "src" / "main.py").exists())
+
+    def test_remote_writes_requirements_txt(self) -> None:
+        set_instance(_make_experiment())
+
+        job_id = cortexflow.remote(lambda: None)
+
+        requirements = self.fake_mlflow.root / "job" / job_id / "project_code_root" / "requirements.txt"
+        self.assertTrue(requirements.exists())
+        self.assertIn("numpy==1.26", requirements.read_text())
+        self.assertIn("torch==2.5", requirements.read_text())
 
     def test_remote_excludes_venv_and_git(self) -> None:
         (self.project_dir / ".venv").mkdir()
