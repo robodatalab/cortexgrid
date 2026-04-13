@@ -36,7 +36,9 @@
       "Bash(python -m unittest tests.cortexflow_tests.test_s3_util -v)",
       "Bash(python -m unittest discover -s tests/jobs_control_plane_tests)",
       "Bash(python -m unittest discover -s tests/cortexflow_ui_tests)",
-      "Bash(python -m unittest discover -s tests)"
+      "Bash(python -m unittest discover -s tests)",
+      "Bash(python -m unittest tests.jobs_control_plane_tests.test_server -v)",
+      "Bash(python -m unittest tests.jobs_control_plane_tests.test_server tests.cortexflow_tests.test_jobs)"
     ]
   }
 }

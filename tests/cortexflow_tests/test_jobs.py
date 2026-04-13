@@ -102,7 +102,9 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        self.assertTrue((self.fake_mlflow.root / "job" / job_id / "payload.pkl").exists())
+        self.assertTrue(
+            (self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl").exists()
+        )
         self.assertTrue((self.fake_mlflow.root / "job" / job_id / "lifecycle.json").exists())
 
     def test_remote_uploads_project_code(self) -> None:
@@ -173,7 +175,9 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        raw = (self.fake_mlflow.root / "job" / job_id / "payload.pkl").read_bytes()
+        raw = (
+            self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl"
+        ).read_bytes()
         payload: Payload = cloudpickle.loads(raw)
         self.assertIsNotNone(payload.fn)
         self.assertEqual(payload.experiment_name, EXPERIMENT_NAME)
@@ -184,7 +188,9 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None, num_gpus=2, num_cpus=4)
 
-        raw = (self.fake_mlflow.root / "job" / job_id / "payload.pkl").read_bytes()
+        raw = (
+            self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl"
+        ).read_bytes()
         payload: Payload = cloudpickle.loads(raw)
         self.assertEqual(payload.num_gpus, 2)
         self.assertEqual(payload.num_cpus, 4)
@@ -229,7 +235,9 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        self.assertTrue((self.fake_mlflow.root / "job" / "job-1" / "payload.pkl").exists())
+        self.assertTrue(
+            (self.fake_mlflow.root / "job" / "job-1" / "project_code_root" / "payload.pkl").exists()
+        )
 
     def test_save_creates_project_code_root_dir(self) -> None:
         payload = self._make_payload()

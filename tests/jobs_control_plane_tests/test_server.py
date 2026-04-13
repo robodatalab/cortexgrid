@@ -63,12 +63,13 @@ class FakeMLflow:
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "lifecycle.json").write_text(lifecycle.to_json())
         if payload is not None:
-            (job_dir / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
+            project_dest = job_dir / "project_code_root"
             shutil.copytree(
                 payload.project_code_root,
-                str(job_dir / "project_code_root"),
+                str(project_dest),
                 dirs_exist_ok=True,
             )
+            (project_dest / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
 
 
 class FakeRay:
