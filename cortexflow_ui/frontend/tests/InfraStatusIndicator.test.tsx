@@ -49,22 +49,22 @@ describe('InfraStatusIndicator', () => {
     stubFetch({ overall: true, containers: [] })
     const onClick = vi.fn()
     render(<InfraStatusIndicator onClick={onClick} />)
-    const btn = await screen.findByRole('button', { name: /status: ok/i })
+    const btn = await screen.findByRole('button', { name: /infra: ok/i })
     await userEvent.click(btn)
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
-  it('sets the tooltip to "Status: OK" when healthy', async () => {
+  it('sets the tooltip to "Infra: OK" when healthy', async () => {
     stubFetch({ overall: true, containers: [] })
     render(<InfraStatusIndicator onClick={() => {}} />)
-    const btn = await screen.findByRole('button', { name: /status: ok/i })
-    expect(btn).toHaveAttribute('data-tooltip', 'Status: OK')
+    const btn = await screen.findByRole('button', { name: /infra: ok/i })
+    expect(btn).toHaveAttribute('data-tooltip', 'Infra: OK')
   })
 
-  it('sets the tooltip to "Status: Error" when unhealthy', async () => {
+  it('sets the tooltip to "Infra: Error" when unhealthy', async () => {
     stubFetch({ overall: false, containers: [] })
     render(<InfraStatusIndicator onClick={() => {}} />)
-    const btn = await screen.findByRole('button', { name: /status: error/i })
-    expect(btn).toHaveAttribute('data-tooltip', 'Status: Error')
+    const btn = await screen.findByRole('button', { name: /infra: error/i })
+    expect(btn).toHaveAttribute('data-tooltip', 'Infra: Error')
   })
 })
