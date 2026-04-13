@@ -1,4 +1,4 @@
-"""Submit tasks to the cortexflow control plane via MLflow."""
+"""Submit tasks to the cortexflow control plane."""
 
 from __future__ import annotations
 
