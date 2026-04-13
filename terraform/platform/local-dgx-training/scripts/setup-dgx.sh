@@ -45,8 +45,11 @@ echo "DGX Setup (running from Mac)"
 echo "  Target: ${DGX_HOST}:${DGX_DIR}"
 echo
 
+read -s -p "DGX password: " PW
+echo
+
 echo "[1/7] Checking SSH to DGX..."
-if ! ssh $SSH_OPTS "$DGX_HOST" "echo ok" >/dev/null; then
+if ! SSHPASS="$PW" sshpass -e ssh $SSH_OPTS "$DGX_HOST" "echo ok" >/dev/null; then
     echo "Error: Cannot SSH to ${DGX_HOST}"
     echo "  Check Tailscale: tailscale status"
     echo "  Check SSH:       ssh ${DGX_HOST}"
@@ -75,7 +78,7 @@ fi
 REMOTE_CHECK
 
 echo "[3/7] Configuring Docker daemon TCP listener on DGX..."
-ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_DOCKER_TCP
+ssh $SSH_OPTS "$DGX_HOST" "SUDO_PW='$PW' bash -s" <<REMOTE_DOCKER_TCP
 set -euo pipefail
 DAEMON_FILE=/etc/systemd/system/docker.service.d/docker-override.conf
 DESIRED='[Unit]
@@ -88,6 +91,7 @@ ExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://${DGX_IP}:237
 if [[ -f "\$DAEMON_FILE" ]] && [[ "\$(cat "\$DAEMON_FILE")" == "\$DESIRED" ]]; then
     echo "  Already configured"
 else
+    echo "\$SUDO_PW" | sudo -S -p '' -v
     sudo mkdir -p "\$(dirname "\$DAEMON_FILE")"
     echo "\$DESIRED" | sudo tee "\$DAEMON_FILE" > /dev/null
     sudo systemctl daemon-reload
