@@ -1,4 +1,4 @@
-"""Jobs control plane — polls MLflow for new submissions and manages their lifecycle on Ray."""
+"""Jobs control plane — polls jobs db (atm. MLFlow) for new submissions and manages their lifecycle on Ray."""
 
 from __future__ import annotations
 
