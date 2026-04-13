@@ -13,8 +13,6 @@ import cortexflow
 
 
 def job_fn():
-    import cortexflow
-
     cortexflow.log_metric("job_metric", 42.0)
     print("Logged job_metric=42.0 from the DGX")
 
