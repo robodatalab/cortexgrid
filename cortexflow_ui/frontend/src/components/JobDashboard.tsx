@@ -12,12 +12,11 @@ type JobDetail = {
 }
 
 type Props = {
-  experimentName: string
   runId: string
   jobId: string
 }
 
-export function JobDashboard({ experimentName, runId, jobId }: Props) {
+export function JobDashboard({ runId, jobId }: Props) {
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [logs, setLogs] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -25,10 +24,7 @@ export function JobDashboard({ experimentName, runId, jobId }: Props) {
   useEffect(() => {
     setStatus('loading')
     const controller = new AbortController()
-    fetch(
-      `/api/experiments/${encodeURIComponent(experimentName)}/runs/${runId}/jobs/${jobId}`,
-      { signal: controller.signal }
-    )
+    fetch(`/api/runs/${runId}/jobs/${jobId}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json() as Promise<JobDetail>
@@ -50,7 +46,7 @@ export function JobDashboard({ experimentName, runId, jobId }: Props) {
         setStatus('error')
       })
     return () => controller.abort()
-  }, [experimentName, runId, jobId])
+  }, [runId, jobId])
 
   if (status === 'loading') return <div className="job-dashboard__status">Loading...</div>
   if (status === 'error' || !detail) return <div className="job-dashboard__status">Failed to load</div>

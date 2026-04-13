@@ -82,7 +82,7 @@ function App() {
               ) : selection?.kind === 'run' ? (
                 <RunDashboard runId={selection.run_id} runName={selection.run_name} experimentName={selection.experiment_name} />
               ) : selection?.kind === 'job' ? (
-                <JobDashboard experimentName={selection.experiment_name} runId={selection.run_id} jobId={selection.job_id} />
+                <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
               ) : (
                 <main className="main" />
               )}
