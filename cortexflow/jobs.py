@@ -130,6 +130,7 @@ class Payload(BaseModel):
                 text=True,
                 check=True,
             ).stdout
+            pip_requirements = _strip_ray(pip_requirements)
             pip_requirements = _inject_github_token(pip_requirements)
             (project_dest / "requirements.txt").write_text(
                 f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
@@ -200,6 +201,18 @@ def _find_pyproject() -> Path:
         if candidate.exists():
             return candidate
     raise FileNotFoundError("No pyproject.toml found in any parent directory")
+
+
+def _strip_ray(pip_requirements: str) -> str:
+    """Drop ray from pip freeze output. Ray rejects any runtime_env pip list
+    that would install a different ray version than the cluster is running."""
+    result = []
+    for line in pip_requirements.splitlines():
+        name = line.lstrip().split("==", 1)[0].split(" @", 1)[0].split("[", 1)[0]
+        if name.strip().lower() == "ray":
+            continue
+        result.append(line)
+    return "\n".join(result)
 
 
 def _inject_github_token(pip_requirements: str) -> str:
