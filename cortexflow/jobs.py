@@ -116,7 +116,6 @@ class Payload(BaseModel):
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            Path(tmp_dir, "payload.pkl").write_bytes(cloudpickle.dumps(self))
             project_dest = Path(tmp_dir, "project_code_root")
             shutil.copytree(
                 self.project_code_root,
@@ -124,6 +123,7 @@ class Payload(BaseModel):
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
             )
+            Path(project_dest, "payload.pkl").write_bytes(cloudpickle.dumps(self))
             pip_requirements = subprocess.run(
                 [sys.executable, "-m", "pip", "freeze"],
                 capture_output=True,
@@ -142,13 +142,13 @@ class Payload(BaseModel):
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
-        payload_local_path = client.download_artifacts(
-            run_id, f"job/{job_id}/payload.pkl"
-        )
-        payload = cloudpickle.loads(Path(payload_local_path).read_bytes())
-        payload.project_code_root = client.download_artifacts(
+        project_code_root = client.download_artifacts(
             run_id, f"job/{job_id}/project_code_root"
         )
+        payload = cloudpickle.loads(
+            Path(project_code_root, "payload.pkl").read_bytes()
+        )
+        payload.project_code_root = project_code_root
         log.info(
             "Payload downloaded for job %s, project_code_root=%s",
             job_id,
