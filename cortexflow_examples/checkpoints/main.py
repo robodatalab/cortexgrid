@@ -39,7 +39,7 @@ def main():
 
     print("Waiting for the job to crash, retry, and succeed...")
     while True:
-        lifecycle = cortexflow.get_job_status(exp, job_id)
+        lifecycle = cortexflow.get_job_status(exp.run_id, job_id)
         status = lifecycle.status.value
         ray_id = lifecycle.ray_job_id or "not yet scheduled"
         print(f"  status: {status}  ray_job: {ray_id}")

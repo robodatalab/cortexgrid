@@ -14,6 +14,7 @@ import cortexflow
 
 def job_fn():
     import cortexflow
+
     cortexflow.log_metric("job_metric", 42.0)
     print("Logged job_metric=42.0 from the DGX")
 
@@ -31,9 +32,12 @@ def main():
 
     print("Waiting for the control plane to pick up and run the job...")
     while True:
-        lifecycle = cortexflow.get_job_status(exp, job_id)
+        lifecycle = cortexflow.get_job_status(exp.run_id, job_id)
         print(f"  status: {lifecycle.status.value}")
-        if lifecycle.status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
+        if lifecycle.status in (
+            cortexflow.JobStatus.FINISHED,
+            cortexflow.JobStatus.FAILED,
+        ):
             break
         time.sleep(5)
 
