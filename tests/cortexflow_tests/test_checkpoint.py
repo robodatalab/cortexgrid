@@ -49,14 +49,15 @@ class TestCheckpointPrefix(unittest.TestCase):
         clear_instance()
         set_instance(_make_experiment())
         self.fake_mlflow = FakeMLflow()
-        self.patcher = patch(
-            "cortexflow.checkpoint.MlflowClient",
-            return_value=self.fake_mlflow,
-        )
-        self.patcher.start()
+        patchers = [
+            patch("cortexflow.checkpoint.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.checkpoint.get_mlflow_tracking_uri", return_value="http://test:5000"),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
 
     def tearDown(self) -> None:
-        self.patcher.stop()
         clear_instance()
         set_cortexflow_job_id("")
 

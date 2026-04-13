@@ -12,7 +12,12 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.experiment import get_s3_access_key, get_s3_default_bucket, get_s3_endpoint_url, get_s3_secret_key
+from cortexflow.infra import get_s3_endpoint_url
+from cortexflow.secrets import get_secret
+
+
+_S3_ACCESS_KEY = "minioadmin"
+_S3_DEFAULT_BUCKET = "ray-checkpoints"
 
 
 def get_s3_client() -> Any:
@@ -21,10 +26,10 @@ def get_s3_client() -> Any:
     endpoint_url = get_s3_endpoint_url()
     if endpoint_url:
         kwargs["endpoint_url"] = endpoint_url
-    access_key = get_s3_access_key()
+    access_key = _S3_ACCESS_KEY
     if access_key:
         kwargs["aws_access_key_id"] = access_key
-    secret_key = get_s3_secret_key()
+    secret_key = get_secret("MINIO_ROOT_PASSWORD")
     if secret_key:
         kwargs["aws_secret_access_key"] = secret_key
     return boto3.client("s3", **kwargs)
@@ -45,7 +50,7 @@ def upload(
     Returns:
         The s3://bucket/key URI of the uploaded object.
     """
-    bucket = bucket or get_s3_default_bucket()
+    bucket = bucket or _S3_DEFAULT_BUCKET
     key = key or os.path.basename(local_path)
 
     client = get_s3_client()
@@ -81,7 +86,7 @@ def upload_dir(
     Returns:
         List of s3://bucket/key URIs for uploaded objects.
     """
-    bucket = bucket or get_s3_default_bucket()
+    bucket = bucket or _S3_DEFAULT_BUCKET
 
     client = get_s3_client()
     try:

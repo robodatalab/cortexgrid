@@ -5,20 +5,28 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import cloudpickle  # type: ignore
 
 import cortexflow
 from cortexflow.experiment import Experiment, clear_instance, set_instance
-from cortexflow.jobs import JobLifecycle, JobStatus, Payload
+from cortexflow.jobs import (
+    JobLifecycle,
+    JobStatus,
+    Payload,
+    get_job_status,
+    list_experiment_run_jobs,
+)
 
 
-def _make_experiment(experiment_name: str = "exp", run_id: str = "run") -> Experiment:
-    return Experiment(
-        experiment_name=experiment_name,
-        run_id=run_id,
-    )
+EXPERIMENT_NAME = "exp"
+RUN_ID = "run-1"
+
+
+def _make_experiment() -> Experiment:
+    return Experiment(experiment_name=EXPERIMENT_NAME, run_id=RUN_ID)
 
 
 class FakeMLflow:
@@ -40,7 +48,13 @@ class FakeMLflow:
         return str(self.root / path)
 
     def list_artifacts(self, run_id: str, path: str = "") -> list:
-        return []
+        target = self.root / path
+        if not target.exists():
+            return []
+        return [
+            SimpleNamespace(path=f"{path}/{d.name}", is_dir=d.is_dir())
+            for d in target.iterdir()
+        ]
 
 
 class TestRemote(unittest.TestCase):
@@ -55,9 +69,14 @@ class TestRemote(unittest.TestCase):
         os.chdir(self.project_dir)
 
         patchers = [
-            patch("cortexflow.experiment.MlflowClient"),
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.subprocess.run", return_value=MagicMock(stdout="numpy==1.26\ntorch==2.5\ncortexflow @ git+https://github.com/paksas/robolab-infra.git@abc123\n")),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.subprocess.run",
+                return_value=MagicMock(
+                    stdout="numpy==1.26\ntorch==2.5\ncortexflow @ git+https://github.com/paksas/robolab-infra.git@abc123\n"
+                ),
+            ),
             patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
         ]
         for p in patchers:
@@ -78,7 +97,7 @@ class TestRemote(unittest.TestCase):
         self.assertTrue(len(job_id) > 0)
 
     def test_remote_uploads_payload_and_lifecycle(self) -> None:
-        set_instance(_make_experiment(run_id="run-xyz"))
+        set_instance(_make_experiment())
 
         job_id = cortexflow.remote(lambda: None)
 
@@ -156,7 +175,8 @@ class TestRemote(unittest.TestCase):
         raw = (self.fake_mlflow.root / "job" / job_id / "payload.pkl").read_bytes()
         payload: Payload = cloudpickle.loads(raw)
         self.assertIsNotNone(payload.fn)
-        self.assertEqual(payload.experiment.experiment_name, "exp")
+        self.assertEqual(payload.experiment_name, EXPERIMENT_NAME)
+        self.assertEqual(payload.run_id, RUN_ID)
 
     def test_payload_includes_resource_requests(self) -> None:
         set_instance(_make_experiment())
@@ -171,7 +191,6 @@ class TestRemote(unittest.TestCase):
 
 class TestPayloadSaveLoad(unittest.TestCase):
     def setUp(self) -> None:
-        clear_instance()
         self.fake_mlflow = FakeMLflow()
         self.project_dir = Path(tempfile.mkdtemp())
         (self.project_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
@@ -181,18 +200,22 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.subprocess.run",
+                return_value=MagicMock(stdout="numpy==1.26\n"),
+            ),
+            patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
         ]
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
         self.addCleanup(shutil.rmtree, str(self.project_dir), True)
 
-    def tearDown(self) -> None:
-        clear_instance()
-
-    def _make_payload(self, exp: Experiment, job_id: str = "job-1") -> Payload:
+    def _make_payload(self, job_id: str = "job-1") -> Payload:
         return Payload(
-            experiment=exp,
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
             job_id=job_id,
             fn=lambda x: x * 2,
             args=(42,),
@@ -201,16 +224,14 @@ class TestPayloadSaveLoad(unittest.TestCase):
         )
 
     def test_save_creates_payload_pkl(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
 
         payload.save_to_mlflow()
 
         self.assertTrue((self.fake_mlflow.root / "job" / "job-1" / "payload.pkl").exists())
 
     def test_save_creates_project_code_root_dir(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
 
         payload.save_to_mlflow()
 
@@ -218,8 +239,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
         self.assertTrue(project.is_dir())
 
     def test_save_copies_project_files(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
 
         payload.save_to_mlflow()
 
@@ -229,8 +249,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
         self.assertTrue((project / "data" / "config.yaml").exists())
 
     def test_save_preserves_file_contents(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
 
         payload.save_to_mlflow()
 
@@ -239,23 +258,22 @@ class TestPayloadSaveLoad(unittest.TestCase):
         self.assertEqual((project / "data" / "config.yaml").read_text(), "lr: 0.001")
 
     def test_load_restores_payload_fields(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
         payload.save_to_mlflow()
 
-        loaded = Payload.load_from_mlflow(exp, "job-1")
+        loaded = Payload.load_from_mlflow(RUN_ID, "job-1")
 
-        self.assertEqual(loaded.experiment, exp)
+        self.assertEqual(loaded.experiment_name, EXPERIMENT_NAME)
+        self.assertEqual(loaded.run_id, RUN_ID)
         self.assertEqual(loaded.job_id, "job-1")
         self.assertEqual(loaded.fn(5), 10)
         self.assertEqual(loaded.args, (42,))
 
     def test_load_sets_project_code_root_to_downloaded_path(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
         payload.save_to_mlflow()
 
-        loaded = Payload.load_from_mlflow(exp, "job-1")
+        loaded = Payload.load_from_mlflow(RUN_ID, "job-1")
 
         self.assertTrue(Path(loaded.project_code_root).is_dir())
         self.assertTrue((Path(loaded.project_code_root) / "pyproject.toml").exists())
@@ -263,51 +281,94 @@ class TestPayloadSaveLoad(unittest.TestCase):
         self.assertTrue((Path(loaded.project_code_root) / "data" / "config.yaml").exists())
 
     def test_load_project_code_root_differs_from_original(self) -> None:
-        exp = _make_experiment()
-        payload = self._make_payload(exp)
+        payload = self._make_payload()
         payload.save_to_mlflow()
 
-        loaded = Payload.load_from_mlflow(exp, "job-1")
+        loaded = Payload.load_from_mlflow(RUN_ID, "job-1")
 
         self.assertNotEqual(loaded.project_code_root, str(self.project_dir))
 
 
 class TestGetJobStatus(unittest.TestCase):
     def setUp(self) -> None:
-        clear_instance()
         self.fake_mlflow = FakeMLflow()
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
         ]
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
 
-    def tearDown(self) -> None:
-        clear_instance()
-
     def test_get_job_status_returns_lifecycle(self) -> None:
-        exp = _make_experiment()
-        set_instance(exp)
-        lifecycle = JobLifecycle(experiment=exp, job_id="job-123", status=JobStatus.RUNNING, retry=True)
+        lifecycle = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="job-123",
+            status=JobStatus.RUNNING,
+            retry=True,
+        )
         lifecycle.save_to_mlflow()
 
-        result = cortexflow.get_job_status(exp, "job-123")
+        result = get_job_status(RUN_ID, "job-123")
 
         self.assertIsInstance(result, JobLifecycle)
         self.assertEqual(result.status, JobStatus.RUNNING)
         self.assertTrue(result.retry)
 
     def test_get_job_status_returns_error_on_failure(self) -> None:
-        exp = _make_experiment()
-        set_instance(exp)
-        lifecycle = JobLifecycle(experiment=exp, job_id="job-456", status=JobStatus.FAILED, error="OOM killed")
+        lifecycle = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="job-456",
+            status=JobStatus.FAILED,
+            error="OOM killed",
+        )
         lifecycle.save_to_mlflow()
 
-        result = cortexflow.get_job_status(exp, "job-456")
+        result = get_job_status(RUN_ID, "job-456")
 
         self.assertEqual(result.status, JobStatus.FAILED)
         self.assertEqual(result.error, "OOM killed")
+
+
+class TestListExperimentRunJobs(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        patchers = [
+            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_list_experiment_run_jobs_returns_all_jobs(self) -> None:
+        for job_id in ("j1", "j2"):
+            JobLifecycle(
+                experiment_name=EXPERIMENT_NAME,
+                run_id=RUN_ID,
+                job_id=job_id,
+                status=JobStatus.RUNNING,
+            ).save_to_mlflow()
+
+        result = list_experiment_run_jobs(RUN_ID)
+
+        self.assertEqual(sorted(j.job_id for j in result), ["j1", "j2"])
+
+    def test_list_experiment_run_jobs_skips_jobs_without_lifecycle(self) -> None:
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="j1",
+            status=JobStatus.RUNNING,
+        ).save_to_mlflow()
+        # create a job dir without a lifecycle.json
+        (self.fake_mlflow.root / "job" / "j2").mkdir(parents=True, exist_ok=True)
+
+        result = list_experiment_run_jobs(RUN_ID)
+
+        self.assertEqual([j.job_id for j in result], ["j1"])
 
 
 if __name__ == "__main__":

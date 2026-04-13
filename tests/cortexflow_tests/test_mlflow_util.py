@@ -94,7 +94,8 @@ class TestMlflowUtil(unittest.TestCase):
         self.assertEqual(result, ["model.pt", "job/job-1"])
 
     @patch("cortexflow.experiment.MlflowClient")
-    def test_list_experiments_returns_experiment_objects(self, mock_mlflow_cls: MagicMock) -> None:
+    @patch("cortexflow.experiment.get_mlflow_tracking_uri", return_value="http://test:5000")
+    def test_list_experiments_returns_experiment_objects(self, _mock_uri: MagicMock, mock_mlflow_cls: MagicMock) -> None:
         fake_client = MagicMock()
         mock_mlflow_cls.return_value = fake_client
 

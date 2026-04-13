@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
+from cortexflow.jobs import JobLifecycle, JobStatus
 from cortexflow_ui.backend.main import app
 
 
@@ -54,16 +55,15 @@ class TestRunEndpoints(unittest.TestCase):
     def test_job_detail_returns_lifecycle_and_ray_status(
         self, mock_get_job_status: MagicMock, _mock_ray_status: MagicMock, _mock_ray_url: MagicMock
     ) -> None:
-        from cortexflow.jobs import JobLifecycle, JobStatus
-        from cortexflow.experiment import Experiment
         mock_get_job_status.return_value = JobLifecycle(
-            experiment=Experiment("alpha", "run-1"),
+            experiment_name="alpha",
+            run_id="run-1",
             job_id="job-1",
             status=JobStatus.RUNNING,
             ray_job_id="ray-1",
         )
 
-        response = self.client.get("/api/experiments/alpha/runs/run-1/jobs/job-1")
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -81,16 +81,15 @@ class TestRunEndpoints(unittest.TestCase):
 
     @patch("cortexflow_ui.backend.main.get_job_status")
     def test_job_detail_handles_missing_ray_job(self, mock_get_job_status: MagicMock) -> None:
-        from cortexflow.jobs import JobLifecycle, JobStatus
-        from cortexflow.experiment import Experiment
         mock_get_job_status.return_value = JobLifecycle(
-            experiment=Experiment("alpha", "run-1"),
+            experiment_name="alpha",
+            run_id="run-1",
             job_id="job-1",
             status=JobStatus.PENDING,
             ray_job_id=None,
         )
 
-        response = self.client.get("/api/experiments/alpha/runs/run-1/jobs/job-1")
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()

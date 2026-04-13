@@ -4,60 +4,12 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from cortexflow.secrets import get_secret
+from cortexflow.infra import get_mlflow_tracking_uri
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 
 
-SM_PREFIX = "robolab/infra"
 _SINGLETON_EXPERIMENT: "Experiment | None" = None
-_RUNS_ON_DGX = False
-
-
-def set_runs_on_dgx(flag: bool) -> None:
-    global _RUNS_ON_DGX
-    _RUNS_ON_DGX = flag
-
-
-def runs_on_dgx() -> bool:
-    global _RUNS_ON_DGX
-    return _RUNS_ON_DGX
-
-
-def get_mlflow_tracking_uri() -> str:
-    """Build the MLflow tracking URI from secrets."""
-    if runs_on_dgx():
-        return "http://mlflow:5000"
-    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
-    return f"http://{dgx_ip}:5000" if dgx_ip else ""
-
-
-def get_ray_address() -> str:
-    """Build the Ray address from secrets."""
-    if runs_on_dgx():
-        return "http://ray-head:8265"
-    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
-    return f"http://{dgx_ip}:8265" if dgx_ip else ""
-
-
-def get_s3_endpoint_url() -> str:
-    """Build the S3/MinIO endpoint URL from secrets."""
-    if runs_on_dgx():
-        return "http://minio:9000"
-    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
-    return f"http://{dgx_ip}:9000" if dgx_ip else ""
-
-
-def get_s3_access_key() -> str:
-    return "minioadmin"
-
-
-def get_s3_secret_key() -> str:
-    return get_secret(f"{SM_PREFIX}/MINIO_ROOT_PASSWORD")
-
-
-def get_s3_default_bucket() -> str:
-    return "ray-checkpoints"
 
 
 @dataclass
@@ -133,9 +85,7 @@ class Experiment:
     @classmethod
     def get_instance(cls) -> "Experiment":
         if _SINGLETON_EXPERIMENT is None:
-            raise ValueError(
-                "Call Experiment.init or Experiment.from_experiment first"
-            )
+            raise ValueError("Call Experiment.init or Experiment.from_experiment first")
         return _SINGLETON_EXPERIMENT
 
 
@@ -179,12 +129,3 @@ def list_experiments() -> list[Experiment]:
         for run in runs:
             result.append(Experiment(exp.name, run_id=run.info.run_id))
     return result
-
-
-def get_mlflow_run_url(run_id: str) -> str:
-    """Build the URL to view a run in the MLflow UI (always via DGX tailscale IP)."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    run = client.get_run(run_id)
-    dgx_ip = get_secret(f"{SM_PREFIX}/DGX_TAILSCALE_IP")
-    return f"http://{dgx_ip}:5000/#/experiments/{run.info.experiment_id}/runs/{run_id}"
-

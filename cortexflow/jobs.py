@@ -15,7 +15,7 @@ import sys
 import tempfile
 from typing import Any, Callable
 
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
+from cortexflow.experiment import get_mlflow_tracking_uri
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -50,7 +50,8 @@ class JobStatus(str, Enum):
 
 @dataclass
 class JobLifecycle:
-    experiment: Experiment
+    experiment_name: str
+    run_id: str
     job_id: str
     status: JobStatus = JobStatus.PENDING
     error: str | None = None
@@ -69,7 +70,6 @@ class JobLifecycle:
     def from_json(cls, text: str) -> "JobLifecycle":
         data = json.loads(text)
         data["status"] = JobStatus(data["status"])
-        data["experiment"] = Experiment(**data["experiment"])
         return cls(**data)
 
     def save_to_mlflow(self) -> None:
@@ -83,22 +83,21 @@ class JobLifecycle:
             local_path = Path(tmp_dir, "lifecycle.json")
             local_path.write_text(self.to_json())
             client.log_artifact(
-                self.experiment.run_id, str(local_path), artifact_path=artifact_path
+                self.run_id, str(local_path), artifact_path=artifact_path
             )
 
     @classmethod
-    def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "JobLifecycle":
+    def load_from_mlflow(cls, run_id: str, job_id: str) -> "JobLifecycle":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        local_path = client.download_artifacts(
-            experiment.run_id, f"job/{job_id}/lifecycle.json"
-        )
+        local_path = client.download_artifacts(run_id, f"job/{job_id}/lifecycle.json")
         return cls.from_json(Path(local_path).read_text())
 
 
 class Payload(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    experiment: Experiment
+    experiment_name: str
+    run_id: str
     job_id: str
     fn: Callable[..., Any]
     args: tuple[Any, ...]
@@ -133,19 +132,19 @@ class Payload(BaseModel):
             (project_dest / "requirements.txt").write_text(
                 f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
             )
-            _upload_dir(client, self.experiment.run_id, tmp_dir, artifact_path)
+            _upload_dir(client, self.run_id, tmp_dir, artifact_path)
             log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
-    def load_from_mlflow(cls, experiment: Experiment, job_id: str) -> "Payload":
+    def load_from_mlflow(cls, run_id: str, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
         payload_local_path = client.download_artifacts(
-            experiment.run_id, f"job/{job_id}/payload.pkl"
+            run_id, f"job/{job_id}/payload.pkl"
         )
         payload = cloudpickle.loads(Path(payload_local_path).read_bytes())
         payload.project_code_root = client.download_artifacts(
-            experiment.run_id, f"job/{job_id}/project_code_root"
+            run_id, f"job/{job_id}/project_code_root"
         )
         log.info(
             "Payload downloaded for job %s, project_code_root=%s",
@@ -156,7 +155,9 @@ class Payload(BaseModel):
         return payload
 
 
-def remote(
+def schedule_remote_job(
+    experiment_name: str,
+    run_id: str,
     fn: Callable[..., Any],
     *args: Any,
     num_gpus: int = 0,
@@ -165,14 +166,13 @@ def remote(
     **kwargs: Any,
 ) -> str:
     """Submit a function to the control plane. Returns a job ID."""
-    experiment = Experiment.get_instance()
-
     name_gen = Haikunator()
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
     project_code_path = _find_pyproject().parent
     log.info("Submitting job %s (project=%s)", job_id, project_code_path)
     payload = Payload(
-        experiment=experiment,
+        experiment_name=experiment_name,
+        run_id=run_id,
         job_id=job_id,
         fn=fn,
         args=args,
@@ -183,7 +183,9 @@ def remote(
     )
     payload.save_to_mlflow()
 
-    lifecycle = JobLifecycle(experiment=experiment, job_id=job_id, retry=retry)
+    lifecycle = JobLifecycle(
+        experiment_name=experiment_name, run_id=run_id, job_id=job_id, retry=retry
+    )
     lifecycle.save_to_mlflow()
 
     return job_id
@@ -200,7 +202,7 @@ def _find_pyproject() -> Path:
 
 def _inject_github_token(pip_requirements: str) -> str:
     """Rewrite github.com git URLs in pip freeze output to include the auth token."""
-    token = get_secret("robolab/infra/GH_TOKEN")
+    token = get_secret("GH_TOKEN")
     return pip_requirements.replace(
         "git+https://github.com/",
         f"git+https://x-access-token:{token}@github.com/",
@@ -222,24 +224,29 @@ def _upload_dir(
             pbar.update(os.path.getsize(filepath))
 
 
-def get_job_status(experiment: Experiment, job_id: str) -> JobLifecycle:
+def get_job_status(run_id: str, job_id: str) -> JobLifecycle:
     """Read the job's lifecycle from MLflow artifacts."""
-    return JobLifecycle.load_from_mlflow(experiment, job_id)
+    return JobLifecycle.load_from_mlflow(run_id, job_id)
 
 
-def list_experiment_jobs(experiment: Experiment) -> list[JobLifecycle]:
+def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    entries = client.list_artifacts(experiment.run_id, path="job")
+    entries = client.list_artifacts(run_id, path="job")
     result: list[JobLifecycle] = []
     for entry in entries:
         if not entry.is_dir:
             continue
         job_id = Path(entry.path).name
         try:
-            result.append(JobLifecycle.load_from_mlflow(experiment, job_id))
+            result.append(JobLifecycle.load_from_mlflow(run_id, job_id))
         except Exception:
             logging.getLogger(__name__).warning(
                 "Skipping job %s: missing lifecycle", job_id
             )
     return result
+
+
+def stop_experiment_run_jobs(run_id: str) -> None:
+    """Stops all pending  running jobs in the specified experiment run."""
+    # TODO: implement me

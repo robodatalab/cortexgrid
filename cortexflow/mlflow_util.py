@@ -6,11 +6,11 @@ then exposes convenience functions for common operations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
 from typing import Any
 
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
+from cortexflow.experiment import Experiment
+from cortexflow.infra import get_mlflow_tracking_uri
 from mlflow.entities import Metric
 from mlflow.tracking import MlflowClient
 
@@ -18,7 +18,7 @@ from mlflow.tracking import MlflowClient
 def log_metric(key: str, value: float, step: int | None = None) -> None:
     """Log a metric to the current active MLflow run."""
     experiment = Experiment.get_instance()
-    
+
     client = get_mlflow_client()
     client.log_metric(experiment.run_id, key, value, step=step)
 
@@ -39,7 +39,7 @@ def log_metrics(metrics: dict[str, float], step: int | None = None) -> None:
 def log_params(params: dict[str, Any]) -> None:
     """Log parameters to the current active MLflow run."""
     experiment = Experiment.get_instance()
-    
+
     client = get_mlflow_client()
     for key, value in params.items():
         client.log_param(experiment.run_id, key, value)
@@ -48,7 +48,7 @@ def log_params(params: dict[str, Any]) -> None:
 def log_artifact(local_path: str, artifact_path: str | None = None) -> None:
     """Log a file as an artifact to the current active MLflow run."""
     experiment = Experiment.get_instance()
-    
+
     client = get_mlflow_client()
     client.log_artifact(experiment.run_id, local_path, artifact_path=artifact_path)
 
@@ -69,7 +69,9 @@ def get_metric_history(run_id: str, key: str) -> list[dict[str, Any]]:
     """Return the full history of a metric as [{step, value, timestamp}, ...]."""
     client = get_mlflow_client()
     history = client.get_metric_history(run_id, key)
-    return [{"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history]
+    return [
+        {"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history
+    ]
 
 
 def list_run_params(run_id: str) -> dict[str, str]:

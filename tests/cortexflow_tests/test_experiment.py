@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.experiment import Experiment, get_mlflow_run_url, set_instance
+from cortexflow.experiment import Experiment, set_instance
 
 
 class TestExperiment(unittest.TestCase):
@@ -68,15 +68,6 @@ class TestExperiment(unittest.TestCase):
         )
         self.assertEqual(result, ["job-1", "job-2"])
 
-    @patch("cortexflow.experiment.get_secret", return_value="100.80.27.32")
-    def test_get_mlflow_run_url_builds_url(self, _mock: MagicMock) -> None:
-        run = MagicMock()
-        run.info.experiment_id = "7"
-        self.fake_mlflow.get_run.return_value = run
-
-        url = get_mlflow_run_url("run-xyz")
-
-        self.assertEqual(url, "http://100.80.27.32:5000/#/experiments/7/runs/run-xyz")
 
 
 if __name__ == "__main__":

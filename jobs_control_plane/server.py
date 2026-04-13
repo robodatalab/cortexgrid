@@ -9,13 +9,16 @@ from pathlib import Path
 
 from ray.job_submission import JobSubmissionClient
 
-from cortexflow.experiment import (
+from cortexflow import (
     Experiment,
     list_experiments,
-    get_ray_address,
-    set_runs_on_dgx,
+    get_ray_job_server_uri,
+    JobLifecycle,
+    JobStatus,
+    Payload,
+    list_experiment_run_jobs,
+    set_runs_on_server,
 )
-from cortexflow.jobs import JobLifecycle, JobStatus, Payload, list_experiment_jobs
 
 
 log = logging.getLogger(__name__)
@@ -28,7 +31,7 @@ def poll_once() -> None:
     experiments = list_experiments()
     log.info("Poll: found %d experiment(s)", len(experiments))
     for experiment in experiments:
-        jobs = list_experiment_jobs(experiment)
+        jobs = list_experiment_run_jobs(experiment.run_id)
         log.info(
             "  %s/%s: %d job(s)",
             experiment.experiment_name,
@@ -56,7 +59,7 @@ def _start_job(
         experiment.run_name,
     )
 
-    payload = Payload.load_from_mlflow(experiment, job.job_id)
+    payload = Payload.load_from_mlflow(experiment.run_id, job.job_id)
 
     log.info(
         "Payload for job %s from experiment %s/%s loaded",
@@ -65,7 +68,7 @@ def _start_job(
         experiment.run_name,
     )
 
-    ray = JobSubmissionClient(get_ray_address())
+    ray = JobSubmissionClient(get_ray_job_server_uri())
     ray_job_id = ray.submit_job(
         entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
         runtime_env={
@@ -76,7 +79,7 @@ def _start_job(
         entrypoint_num_cpus=payload.num_cpus,
     )
 
-    lifecycle = JobLifecycle.load_from_mlflow(experiment, job.job_id)
+    lifecycle = JobLifecycle.load_from_mlflow(experiment.run_id, job.job_id)
     lifecycle.status = JobStatus.RUNNING
     lifecycle.ray_job_id = ray_job_id
     lifecycle.error = None
@@ -102,7 +105,7 @@ def _check_job(
         experiment.run_name,
     )
 
-    lifecycle = JobLifecycle.load_from_mlflow(experiment, job.job_id)
+    lifecycle = JobLifecycle.load_from_mlflow(experiment.run_id, job.job_id)
     if lifecycle.ray_job_id is None:
         # the job hasn't been scheduled yet - this case should not be entered
         log.info(
@@ -115,7 +118,7 @@ def _check_job(
             f"The job {job} hasn't been scheduled yet - this case should not be entered"
         )
 
-    ray = JobSubmissionClient(get_ray_address())
+    ray = JobSubmissionClient(get_ray_job_server_uri())
     ray_status = ray.get_job_status(lifecycle.ray_job_id).value
 
     if ray_status == "SUCCEEDED":
@@ -131,7 +134,7 @@ def _check_job(
 
 
 def main() -> None:
-    set_runs_on_dgx(True)
+    set_runs_on_server(True)
     while True:
         try:
             poll_once()

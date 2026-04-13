@@ -5,12 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import (
-    Experiment,
-    get_mlflow_run_url,
-    list_experiments,
-)
-from cortexflow.jobs import get_job_status, list_experiment_jobs
+from cortexflow.experiment import list_experiments
+from cortexflow.infra import get_server_ip, get_mlflow_run_url
+from cortexflow.jobs import get_job_status, list_experiment_run_jobs
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
@@ -45,11 +42,11 @@ def health() -> dict[str, str]:
 
 @app.get("/api/dashboards")
 def dashboards() -> list[Dashboard]:
-    host = get_secret("robolab/infra/DGX_TAILSCALE_IP")
+    host = get_server_ip()
     return [
-        Dashboard(id="mlflow", url=f"http://{host}:{get_secret('robolab/infra/MLFLOW_PORT')}"),
-        Dashboard(id="ray", url=f"http://{host}:{get_secret('robolab/infra/RAY_DASHBOARD_PORT')}"),
-        Dashboard(id="minio", url=f"http://{host}:{get_secret('robolab/infra/MINIO_CONSOLE_PORT')}"),
+        Dashboard(id="mlflow", url=f"http://{host}:{get_secret('MLFLOW_PORT')}"),
+        Dashboard(id="ray", url=f"http://{host}:{get_secret('RAY_DASHBOARD_PORT')}"),
+        Dashboard(id="minio", url=f"http://{host}:{get_secret('MINIO_CONSOLE_PORT')}"),
     ]
 
 
@@ -57,13 +54,15 @@ def dashboards() -> list[Dashboard]:
 def experiments() -> list[dict]:
     result = []
     for exp in list_experiments():
-        jobs = list_experiment_jobs(exp)
-        result.append({
-            "experiment_name": exp.experiment_name,
-            "run_id": exp.run_id,
-            "run_name": exp.run_name(),
-            "jobs": [{"job_id": j.job_id, "status": j.status.value} for j in jobs],
-        })
+        jobs = list_experiment_run_jobs(exp.run_id)
+        result.append(
+            {
+                "experiment_name": exp.experiment_name,
+                "run_id": exp.run_id,
+                "run_name": exp.run_name(),
+                "jobs": [{"job_id": j.job_id, "status": j.status.value} for j in jobs],
+            }
+        )
     return result
 
 
@@ -92,10 +91,9 @@ def run_url(run_id: str) -> dict[str, str]:
     return {"url": get_mlflow_run_url(run_id)}
 
 
-@app.get("/api/experiments/{experiment_name}/runs/{run_id}/jobs/{job_id}")
-def job_detail(experiment_name: str, run_id: str, job_id: str) -> dict:
-    exp = Experiment(experiment_name=experiment_name, run_id=run_id)
-    lifecycle = get_job_status(exp, job_id)
+@app.get("/api/runs/{run_id}/jobs/{job_id}")
+def job_detail(run_id: str, job_id: str) -> dict:
+    lifecycle = get_job_status(run_id, job_id)
     ray_status = get_ray_status(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
     ray_url = get_ray_job_url(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
     return {
