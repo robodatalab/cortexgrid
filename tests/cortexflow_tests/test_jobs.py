@@ -18,6 +18,7 @@ from cortexflow.jobs import (
     Payload,
     get_job_status,
     list_experiment_run_jobs,
+    stop_experiment_run_jobs,
 )
 
 
@@ -369,6 +370,60 @@ class TestListExperimentRunJobs(unittest.TestCase):
         result = list_experiment_run_jobs(RUN_ID)
 
         self.assertEqual([j.job_id for j in result], ["j1"])
+
+
+class TestStopExperimentRunJobs(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        self.mock_stop_ray = MagicMock()
+        patchers = [
+            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch("cortexflow.jobs.stop_ray_job", self.mock_stop_ray),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _save_job(self, job_id: str, status: JobStatus, ray_job_id: str | None = None) -> None:
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id=job_id,
+            status=status,
+            ray_job_id=ray_job_id,
+        ).save_to_mlflow()
+
+    def test_stops_pending_and_running_jobs(self) -> None:
+        self._save_job("j1", JobStatus.PENDING)
+        self._save_job("j2", JobStatus.RUNNING, ray_job_id="ray-2")
+
+        stop_experiment_run_jobs(RUN_ID)
+
+        updated_j1 = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
+        updated_j2 = JobLifecycle.load_from_mlflow(RUN_ID, "j2")
+        self.assertEqual(updated_j1.status, JobStatus.STOPPED)
+        self.assertEqual(updated_j2.status, JobStatus.STOPPED)
+        self.mock_stop_ray.assert_called_once_with("ray-2")
+
+    def test_skips_finished_and_failed_jobs(self) -> None:
+        self._save_job("j1", JobStatus.FINISHED, ray_job_id="ray-1")
+        self._save_job("j2", JobStatus.FAILED, ray_job_id="ray-2")
+
+        stop_experiment_run_jobs(RUN_ID)
+
+        updated_j1 = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
+        updated_j2 = JobLifecycle.load_from_mlflow(RUN_ID, "j2")
+        self.assertEqual(updated_j1.status, JobStatus.FINISHED)
+        self.assertEqual(updated_j2.status, JobStatus.FAILED)
+        self.mock_stop_ray.assert_not_called()
+
+    def test_skips_already_stopped_jobs(self) -> None:
+        self._save_job("j1", JobStatus.STOPPED, ray_job_id="ray-1")
+
+        stop_experiment_run_jobs(RUN_ID)
+
+        self.mock_stop_ray.assert_not_called()
 
 
 if __name__ == "__main__":

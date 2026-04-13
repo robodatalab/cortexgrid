@@ -23,3 +23,9 @@ def get_ray_job_url(ray_job_id: str) -> str:
     """Build the URL to view a job in the Ray dashboard (always via DGX tailscale IP)."""
     server_ip = get_server_ip()
     return f"http://{server_ip}:8265/#/jobs/{ray_job_id}"
+
+
+def stop_ray_job(ray_job_id: str) -> None:
+    """Stop a running ray job."""
+    client = JobSubmissionClient(get_ray_job_server_uri())
+    client.stop_job(ray_job_id)

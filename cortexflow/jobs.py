@@ -16,6 +16,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import get_mlflow_tracking_uri
+from cortexflow.ray_util import stop_ray_job
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -46,6 +47,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     FINISHED = "finished"
     FAILED = "failed"
+    STOPPED = "stopped"
 
 
 @dataclass
@@ -248,5 +250,11 @@ def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
 
 
 def stop_experiment_run_jobs(run_id: str) -> None:
-    """Stops all pending  running jobs in the specified experiment run."""
-    # TODO: implement me
+    """Stop all pending or running jobs in the specified experiment run."""
+    for job in list_experiment_run_jobs(run_id):
+        if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+            continue
+        if job.ray_job_id:
+            stop_ray_job(job.ray_job_id)
+        job.status = JobStatus.STOPPED
+        job.save_to_mlflow()
