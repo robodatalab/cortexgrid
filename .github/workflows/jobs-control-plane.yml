@@ -3,6 +3,8 @@ name: jobs-control-plane
 on:
   push:
     paths:
+      - "cortexflow/**"
+      - "tests/cortexflow_tests/**"
       - "jobs_control_plane/**"
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
@@ -10,6 +12,8 @@ on:
       - "terraform/platform/local-dgx-training/jobs-control-plane/**"
   pull_request:
     paths:
+      - "cortexflow/**"
+      - "tests/cortexflow_tests/**"
       - "jobs_control_plane/**"
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
@@ -21,6 +25,19 @@ permissions:
   contents: read
 
 jobs:
+  cortexflow-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run tests
+        run: uv run python -m unittest discover -s tests/cortexflow_tests -v
+
   test:
     runs-on: ubuntu-latest
 
@@ -36,7 +53,7 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [cortexflow-test, test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     env:

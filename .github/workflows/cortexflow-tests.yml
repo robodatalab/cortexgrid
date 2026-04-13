@@ -3,21 +3,20 @@ name: cortexflow tests
 on:
   push:
     paths:
-      - "terraform/platform/local-dgx-training/cortexflow/**"
-      - "terraform/platform/local-dgx-training/tests/**"
-      - "terraform/platform/local-dgx-training/pyproject.toml"
+      - "cortexflow/**"
+      - "tests/cortexflow_tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/cortexflow-tests.yml"
   pull_request:
     paths:
-      - "terraform/platform/local-dgx-training/cortexflow/**"
-      - "terraform/platform/local-dgx-training/tests/**"
-      - "terraform/platform/local-dgx-training/pyproject.toml"
+      - "cortexflow/**"
+      - "tests/cortexflow_tests/**"
+      - "pyproject.toml"
+      - ".github/workflows/cortexflow-tests.yml"
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: terraform/platform/local-dgx-training
 
     steps:
       - uses: actions/checkout@v4
@@ -27,4 +26,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
-        run: uv run python -m unittest discover -s tests -v
+        run: uv run python -m unittest discover -s tests/cortexflow_tests -v
