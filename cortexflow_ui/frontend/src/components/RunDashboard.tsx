@@ -3,6 +3,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import './RunDashboard.css'
 
 type MetricPoint = { step: number; value: number }
+type Job = { job_id: string; status: string }
+
+const STOPPABLE_STATUSES = new Set(['pending', 'running'])
 
 type Props = {
   runId: string
@@ -16,6 +19,8 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
   const [metricData, setMetricData] = useState<Record<string, MetricPoint[]>>({})
   const [artifacts, setArtifacts] = useState<string[]>([])
   const [mlflowUrl, setMlflowUrl] = useState<string | null>(null)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [stopping, setStopping] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
@@ -28,12 +33,14 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
       fetch(`/api/runs/${runId}/metrics`, opts).then((r) => r.json() as Promise<string[]>),
       fetch(`/api/runs/${runId}/artifacts`, opts).then((r) => r.json() as Promise<string[]>),
       fetch(`/api/runs/${runId}/url`, opts).then((r) => r.json() as Promise<{ url: string }>),
+      fetch(`/api/runs/${runId}/jobs`, opts).then((r) => r.json() as Promise<Job[]>),
     ])
-      .then(([p, m, a, u]) => {
+      .then(([p, m, a, u, j]) => {
         setParams(p)
         setMetricKeys(m)
         setArtifacts(a)
         setMlflowUrl(u.url)
+        setJobs(j)
         return Promise.all(
           m.map((key) =>
             fetch(`/api/runs/${runId}/metrics/${encodeURIComponent(key)}`, opts)
@@ -54,6 +61,19 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
     return () => controller.abort()
   }, [runId])
 
+  const hasStoppableJobs = jobs.some((j) => STOPPABLE_STATUSES.has(j.status))
+
+  async function handleStop() {
+    setStopping(true)
+    try {
+      await fetch(`/api/runs/${runId}/stop`, { method: 'POST' })
+      const res = await fetch(`/api/runs/${runId}/jobs`)
+      setJobs(await res.json())
+    } finally {
+      setStopping(false)
+    }
+  }
+
   if (status === 'loading') return <div className="run-dashboard__status">Loading...</div>
   if (status === 'error') return <div className="run-dashboard__status">Failed to load</div>
 
@@ -61,16 +81,28 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
     <div className="run-dashboard">
       <div className="run-dashboard__header">
         <div className="run-dashboard__title">{experimentName} / {runName}</div>
-        {mlflowUrl && (
-          <a
-            className="run-dashboard__open-button"
-            href={mlflowUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Open in MLflow
-          </a>
-        )}
+        <div className="run-dashboard__actions">
+          {hasStoppableJobs && (
+            <button
+              type="button"
+              className="run-dashboard__open-button"
+              onClick={handleStop}
+              disabled={stopping}
+            >
+              {stopping ? 'Stopping...' : 'Stop all jobs'}
+            </button>
+          )}
+          {mlflowUrl && (
+            <a
+              className="run-dashboard__open-button"
+              href={mlflowUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open in MLflow
+            </a>
+          )}
+        </div>
       </div>
 
       {Object.keys(params).length > 0 && (

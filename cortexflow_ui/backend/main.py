@@ -7,7 +7,11 @@ from pydantic import BaseModel
 
 from cortexflow.experiment import list_experiments
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
-from cortexflow.jobs import get_job_status, list_experiment_run_jobs
+from cortexflow.jobs import (
+    get_job_status,
+    list_experiment_run_jobs,
+    stop_experiment_run_jobs,
+)
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
@@ -91,6 +95,14 @@ def run_url(run_id: str) -> dict[str, str]:
     return {"url": get_mlflow_run_url(run_id)}
 
 
+@app.get("/api/runs/{run_id}/jobs")
+def run_jobs(run_id: str) -> list[dict]:
+    return [
+        {"job_id": j.job_id, "status": j.status.value}
+        for j in list_experiment_run_jobs(run_id)
+    ]
+
+
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
 def job_detail(run_id: str, job_id: str) -> dict:
     lifecycle = get_job_status(run_id, job_id)
@@ -110,6 +122,12 @@ def job_detail(run_id: str, job_id: str) -> dict:
 @app.get("/api/ray/jobs/{ray_job_id}/logs")
 def ray_job_logs(ray_job_id: str) -> dict[str, str]:
     return {"logs": get_ray_logs(ray_job_id)}
+
+
+@app.post("/api/runs/{run_id}/stop")
+def stop_run(run_id: str) -> dict[str, str]:
+    stop_experiment_run_jobs(run_id)
+    return {"status": "ok"}
 
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"

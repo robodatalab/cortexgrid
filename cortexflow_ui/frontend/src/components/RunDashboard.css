@@ -18,6 +18,11 @@
   font-weight: 500;
 }
 
+.run-dashboard__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .run-dashboard__open-button {
   display: inline-block;
   padding: 6px 16px;
@@ -28,11 +33,18 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
 }
 
-.run-dashboard__open-button:hover {
+.run-dashboard__open-button:hover:not(:disabled) {
   background: #000;
   color: #fff;
+}
+
+.run-dashboard__open-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .run-dashboard__section {

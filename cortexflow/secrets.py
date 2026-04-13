@@ -5,7 +5,7 @@ from __future__ import annotations
 import boto3  # type: ignore
 
 
-_SM_PREFIX = "robolab/infra/"
+_SM_PREFIX = "robolab/infra"
 _SM_REGION = "us-east-1"
 
 
