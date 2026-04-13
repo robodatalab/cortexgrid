@@ -45,7 +45,7 @@ echo "DGX Setup (running from Mac)"
 echo "  Target: ${DGX_HOST}:${DGX_DIR}"
 echo
 
-echo "[1/5] Checking SSH to DGX..."
+echo "[1/7] Checking SSH to DGX..."
 if ! ssh $SSH_OPTS "$DGX_HOST" "echo ok" >/dev/null; then
     echo "Error: Cannot SSH to ${DGX_HOST}"
     echo "  Check Tailscale: tailscale status"
@@ -54,7 +54,7 @@ if ! ssh $SSH_OPTS "$DGX_HOST" "echo ok" >/dev/null; then
 fi
 echo "  SSH connection OK"
 
-echo "[2/5] Checking DGX prerequisites..."
+echo "[2/7] Checking DGX prerequisites..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<'REMOTE_CHECK'
 set -euo pipefail
 if ! command -v docker &>/dev/null; then
@@ -74,19 +74,41 @@ else
 fi
 REMOTE_CHECK
 
-echo "[3/5] Syncing files to DGX..."
+echo "[3/7] Configuring Docker daemon TCP listener on DGX..."
+ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_DOCKER_TCP
+set -euo pipefail
+DAEMON_FILE=/etc/systemd/system/docker.service.d/docker-override.conf
+DESIRED='[Unit]
+After=nvidia-gpu-reset.target tailscaled.service
+Wants=nvidia-gpu-reset.target tailscaled.service
+
+[Service]
+ExecStart=
+ExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://${DGX_IP}:2375 --containerd=/run/containerd/containerd.sock'
+if [[ -f "\$DAEMON_FILE" ]] && [[ "\$(cat "\$DAEMON_FILE")" == "\$DESIRED" ]]; then
+    echo "  Already configured"
+else
+    sudo mkdir -p "\$(dirname "\$DAEMON_FILE")"
+    echo "\$DESIRED" | sudo tee "\$DAEMON_FILE" > /dev/null
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+    echo "  Reconfigured — daemon restarted"
+fi
+REMOTE_DOCKER_TCP
+
+echo "[4/7] Syncing files to DGX..."
 ssh $SSH_OPTS "$DGX_HOST" "mkdir -p ${DGX_DIR}"
 rsync -az -e "ssh $SSH_OPTS" --exclude='.env' --exclude='__pycache__' --exclude='.git' \
     "$REPO_ROOT/" "${DGX_HOST}:${DGX_DIR}/"
 scp $SSH_OPTS -q "$REPO_ROOT/.env" "${DGX_HOST}:${DGX_DIR}/.env"
 echo "  Files synced (including .env)"
 
-echo "[4/6] Logging into ECR on DGX..."
+echo "[5/7] Logging into ECR on DGX..."
 ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1)
 echo "$ECR_PASSWORD" | ssh $SSH_OPTS "$DGX_HOST" "docker login --username AWS --password-stdin 517906913330.dkr.ecr.us-east-1.amazonaws.com"
 echo "  ECR login OK"
 
-echo "[5/6] Starting services on DGX..."
+echo "[6/7] Starting services on DGX..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
 cd "${DGX_DIR}"
@@ -98,7 +120,7 @@ docker compose --profile monitoring pull
 docker compose --profile monitoring up -d
 REMOTE_UP
 
-echo "[6/6] Waiting for Ray Dashboard..."
+echo "[7/7] Waiting for Ray Dashboard..."
 MAX_WAIT=120
 ELAPSED=0
 while ! curl -sf "http://${DGX_IP}:8265" &>/dev/null; do
