@@ -22,3 +22,7 @@ Cloud infrastructure and deployment orchestration for RoboLab.
 
 WORK in small increments, always consulting everything with the user.
 You are not allowed to touch more than one function at a time, maximum 20 lines of code.
+
+## Imports
+
+Never use local/inline imports (imports inside functions, methods, or conditional blocks). All imports must be unconditional and at the top of the file. If this creates a circular dependency, restructure the code (e.g. move a function to a different module) rather than working around it with a lazy import.
