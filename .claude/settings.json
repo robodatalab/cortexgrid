@@ -39,7 +39,14 @@
       "Bash(python -m unittest discover -s tests)",
       "Bash(python -m unittest tests.jobs_control_plane_tests.test_server -v)",
       "Bash(python -m unittest tests.jobs_control_plane_tests.test_server tests.cortexflow_tests.test_jobs)",
-      "Bash(bash -n /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/scripts/setup-dgx.sh)"
+      "Bash(bash -n /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/scripts/setup-dgx.sh)",
+      "Bash(python -c \"from cortexflow.secrets import list_secrets, get_secret, set_secret, delete_secret; from cortexflow_ui.backend.main import app; print\\('ok'\\)\")",
+      "Bash(node -e \"const l = require\\('lucide-react'\\); console.log\\('Check' in l, 'Trash2' in l\\)\")",
+      "Bash(curl -sS -o /tmp/body -w 'HTTP %{http_code}\\\\n' -X PUT http://localhost:8000/api/secrets/__claude_test -H 'Content-Type: application/json' -d '{\"value\":\"hello\"}')",
+      "Read(//tmp/**)",
+      "Bash(curl -sS -o /tmp/body -w 'HTTP %{http_code}\\\\n' -X DELETE http://localhost:8000/api/secrets/__claude_test)",
+      "Bash(curl -sS http://localhost:8000/api/secrets)",
+      "Bash(python -c 'import json,sys; data=json.load\\(sys.stdin\\); print\\(\"__claude_test present:\", any\\(s[\"id\"]==\"__claude_test\" for s in data\\)\\)')"
     ]
   }
 }

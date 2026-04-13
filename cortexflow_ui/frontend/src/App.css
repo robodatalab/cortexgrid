@@ -20,6 +20,10 @@
   color: #000;
   text-decoration: none;
   font-size: 16px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .navbar__link:hover {

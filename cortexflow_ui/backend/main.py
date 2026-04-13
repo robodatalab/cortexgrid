@@ -19,7 +19,12 @@ from cortexflow.mlflow_util import (
     list_run_params,
 )
 from cortexflow.ray_util import get_ray_job_url, get_ray_logs, get_ray_status
-from cortexflow.secrets import get_secret
+from cortexflow.secrets import (
+    delete_secret,
+    get_secret,
+    list_secrets,
+    set_secret,
+)
 
 from cortexflow_ui.backend.config import settings
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
@@ -40,6 +45,15 @@ class Dashboard(BaseModel):
     url: str
 
 
+class Secret(BaseModel):
+    id: str
+    value: str
+
+
+class SecretValue(BaseModel):
+    value: str
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -58,6 +72,23 @@ def dashboards() -> list[Dashboard]:
         Dashboard(id="ray", url=f"http://{host}:{get_secret('RAY_DASHBOARD_PORT')}"),
         Dashboard(id="minio", url=f"http://{host}:{get_secret('MINIO_CONSOLE_PORT')}"),
     ]
+
+
+@app.get("/api/secrets")
+def secrets() -> list[Secret]:
+    return [Secret(id=sid, value=get_secret(sid)) for sid in list_secrets()]
+
+
+@app.put("/api/secrets/{id}")
+def secret_put(id: str, body: SecretValue) -> dict[str, str]:
+    set_secret(id, body.value)
+    return {"status": "ok"}
+
+
+@app.delete("/api/secrets/{id}")
+def secret_delete(id: str) -> dict[str, str]:
+    delete_secret(id)
+    return {"status": "ok"}
 
 
 @app.get("/api/experiments")

@@ -10,6 +10,7 @@ import { RunDashboard } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
 import { InfraStatusIndicator } from './components/InfraStatusIndicator'
 import { InfraDashboard } from './components/InfraDashboard'
+import { SecretsDashboard } from './components/SecretsDashboard'
 
 type Dashboard = {
   id: string
@@ -24,7 +25,7 @@ type LoadState =
 function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
-  const [view, setView] = useState<'experiments' | 'infra'>('experiments')
+  const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -75,6 +76,13 @@ function App() {
                 {d.id}
               </a>
             ))}
+          <button
+            type="button"
+            className="navbar__link"
+            onClick={() => setView(view === 'secrets' ? 'experiments' : 'secrets')}
+          >
+            secrets
+          </button>
           <InfraStatusIndicator
             onClick={() => setView(view === 'infra' ? 'experiments' : 'infra')}
           />
@@ -83,6 +91,8 @@ function App() {
       <div className="layout">
         {view === 'infra' ? (
           <InfraDashboard />
+        ) : view === 'secrets' ? (
+          <SecretsDashboard />
         ) : (
           <Allotment>
             <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>

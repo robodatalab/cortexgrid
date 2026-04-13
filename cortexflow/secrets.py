@@ -16,12 +16,15 @@ def get_secret(id: str) -> str:
 
 def list_secrets() -> list[str]:
     client = boto3.client("secretsmanager", region_name=_SM_REGION)
-    names: list[str] = []
+    ids: list[str] = []
     paginator = client.get_paginator("list_secrets")
+    prefix = f"{_SM_PREFIX}/"
     for page in paginator.paginate(Filters=[{"Key": "name", "Values": [_SM_PREFIX]}]):
         for entry in page.get("SecretList", []):
-            names.append(entry["Name"])
-    return names
+            name = entry["Name"]
+            if name.startswith(prefix):
+                ids.append(name[len(prefix):])
+    return ids
 
 
 def set_secret(id: str, value: str) -> None:
@@ -32,3 +35,11 @@ def set_secret(id: str, value: str) -> None:
         client.create_secret(Name=f"{_SM_PREFIX}/{id}", SecretString=value)
         return
     client.put_secret_value(SecretId=f"{_SM_PREFIX}/{id}", SecretString=value)
+
+
+def delete_secret(id: str) -> None:
+    client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    client.delete_secret(
+        SecretId=f"{_SM_PREFIX}/{id}",
+        ForceDeleteWithoutRecovery=True,
+    )
