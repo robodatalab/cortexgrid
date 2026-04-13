@@ -122,11 +122,7 @@ function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps) {
   )
 }
 
-function useRowActions(
-  state: LoadState,
-  setState: (s: LoadState) => void,
-  load: () => void,
-) {
+function useRowActions(state: LoadState, setState: (s: LoadState) => void) {
   const updateRow = (index: number, patch: Partial<Row>) => {
     if (state.status !== 'ready') return
     setState({
@@ -149,14 +145,29 @@ function useRowActions(
     const r = state.rows[index]
     if (!r.id) return
     if (r.originalId && r.originalId !== r.id) {
-      await fetch(`/api/secrets/${encodeURIComponent(r.originalId)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/secrets/${encodeURIComponent(r.originalId)}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        alert(`Rename failed (delete old): HTTP ${res.status}\n${await res.text()}`)
+        return
+      }
     }
-    await fetch(`/api/secrets/${encodeURIComponent(r.id)}`, {
+    const res = await fetch(`/api/secrets/${encodeURIComponent(r.id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: r.value }),
     })
-    load()
+    if (!res.ok) {
+      alert(`Save failed: HTTP ${res.status}\n${await res.text()}`)
+      return
+    }
+    setState({
+      status: 'ready',
+      rows: state.rows.map((row, i) =>
+        i === index ? { ...row, originalId: row.id, originalValue: row.value } : row,
+      ),
+    })
   }
   const deleteRow = async (index: number) => {
     if (state.status !== 'ready') return
@@ -177,8 +188,8 @@ function useRowActions(
 }
 
 export function SecretsDashboard() {
-  const { state, setState, load } = useSecrets()
-  const { updateRow, addRow, saveRow, deleteRow } = useRowActions(state, setState, load)
+  const { state, setState } = useSecrets()
+  const { updateRow, addRow, saveRow, deleteRow } = useRowActions(state, setState)
   const [pendingDelete, setPendingDelete] = useState<number | null>(null)
   const requestDelete = (index: number) => {
     if (state.status !== 'ready') return
