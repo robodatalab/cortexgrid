@@ -33,4 +33,5 @@ ui = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",
     "pydantic-settings>=2.6,<3",
+    "docker>=7,<8",
 ]

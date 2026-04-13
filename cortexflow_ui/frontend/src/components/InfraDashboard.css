@@ -1,0 +1,73 @@
+.infra-dashboard {
+  height: 100%;
+  overflow: auto;
+  background: #fff;
+  color: #000;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.infra-dashboard__empty {
+  padding: 24px;
+  color: #000;
+}
+
+.infra-dashboard__header h1 {
+  margin: 0 0 16px 0;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.infra-dashboard__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.infra-card {
+  border: 1px solid #000;
+  padding: 16px;
+  background: #fff;
+}
+
+.infra-card--ok {
+  border-left: 4px solid #22c55e;
+}
+
+.infra-card--bad {
+  border-left: 4px solid #ef4444;
+}
+
+.infra-card__name {
+  font-weight: 500;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.infra-card__meta {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 8px;
+}
+
+.infra-card__logs {
+  margin-top: 8px;
+}
+
+.infra-card__logs summary {
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.infra-card__logs pre {
+  font-size: 12px;
+  max-height: 300px;
+  overflow: auto;
+  background: #f5f5f5;
+  padding: 8px;
+  margin-top: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

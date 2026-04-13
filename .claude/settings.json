@@ -38,7 +38,8 @@
       "Bash(python -m unittest discover -s tests/cortexflow_ui_tests)",
       "Bash(python -m unittest discover -s tests)",
       "Bash(python -m unittest tests.jobs_control_plane_tests.test_server -v)",
-      "Bash(python -m unittest tests.jobs_control_plane_tests.test_server tests.cortexflow_tests.test_jobs)"
+      "Bash(python -m unittest tests.jobs_control_plane_tests.test_server tests.cortexflow_tests.test_jobs)",
+      "Bash(bash -n /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/scripts/setup-dgx.sh)"
     ]
   }
 }

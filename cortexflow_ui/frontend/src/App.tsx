@@ -8,6 +8,8 @@ import type { Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
+import { InfraStatusIndicator } from './components/InfraStatusIndicator'
+import { InfraDashboard } from './components/InfraDashboard'
 
 type Dashboard = {
   id: string
@@ -22,6 +24,7 @@ type LoadState =
 function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
+  const [view, setView] = useState<'experiments' | 'infra'>('experiments')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -44,7 +47,13 @@ function App() {
   return (
     <>
       <header className="navbar">
-        <div className="navbar__title">cortexflow</div>
+        <button
+          type="button"
+          className="navbar__title"
+          onClick={() => setView('experiments')}
+        >
+          cortexflow
+        </button>
         <nav className="navbar__links" aria-label="Dashboards">
           {state.status === 'loading' && (
             <span className="navbar__status">Loading…</span>
@@ -66,29 +75,36 @@ function App() {
                 {d.id}
               </a>
             ))}
+          <InfraStatusIndicator
+            onClick={() => setView(view === 'infra' ? 'experiments' : 'infra')}
+          />
         </nav>
       </header>
       <div className="layout">
-        <Allotment>
-          <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
-            <Panel>
-              <ExperimentTree onSelect={setSelection} />
-            </Panel>
-          </Allotment.Pane>
-          <Allotment.Pane>
-            <Panel>
-              {selection?.kind === 'experiment' ? (
-                <ExperimentDashboard experimentName={selection.experiment_name} />
-              ) : selection?.kind === 'run' ? (
-                <RunDashboard runId={selection.run_id} runName={selection.run_name} experimentName={selection.experiment_name} />
-              ) : selection?.kind === 'job' ? (
-                <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
-              ) : (
-                <main className="main" />
-              )}
-            </Panel>
-          </Allotment.Pane>
-        </Allotment>
+        {view === 'infra' ? (
+          <InfraDashboard />
+        ) : (
+          <Allotment>
+            <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
+              <Panel>
+                <ExperimentTree onSelect={setSelection} />
+              </Panel>
+            </Allotment.Pane>
+            <Allotment.Pane>
+              <Panel>
+                {selection?.kind === 'experiment' ? (
+                  <ExperimentDashboard experimentName={selection.experiment_name} />
+                ) : selection?.kind === 'run' ? (
+                  <RunDashboard runId={selection.run_id} runName={selection.run_name} experimentName={selection.experiment_name} />
+                ) : selection?.kind === 'job' ? (
+                  <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
+                ) : (
+                  <main className="main" />
+                )}
+              </Panel>
+            </Allotment.Pane>
+          </Allotment>
+        )}
       </div>
     </>
   )

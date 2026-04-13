@@ -22,6 +22,7 @@ from cortexflow.ray_util import get_ray_job_url, get_ray_logs, get_ray_status
 from cortexflow.secrets import get_secret
 
 from cortexflow_ui.backend.config import settings
+from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 app = FastAPI(title="CortexFlow UI", version="0.1.0")
 
@@ -42,6 +43,11 @@ class Dashboard(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/infra/status")
+def infra_status() -> InfraStatus:
+    return get_infra_status()
 
 
 @app.get("/api/dashboards")
