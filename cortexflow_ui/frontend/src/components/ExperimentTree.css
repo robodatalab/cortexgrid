@@ -4,9 +4,27 @@
 }
 
 .experiment-tree__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 16px 16px 8px;
   font-size: 14px;
   font-weight: 500;
+  color: #000;
+}
+
+.experiment-tree__refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #444;
+}
+
+.experiment-tree__refresh:hover {
   color: #000;
 }
 

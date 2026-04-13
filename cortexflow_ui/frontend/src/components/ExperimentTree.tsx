@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FlaskConical, Play, Cog } from 'lucide-react'
+import { FlaskConical, Play, Cog, RefreshCw } from 'lucide-react'
 import './ExperimentTree.css'
 
 type Job = {
@@ -54,9 +54,11 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [selected, setSelected] = useState<string | null>(null)
+  const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
+    setStatus('loading')
     fetch('/api/experiments', { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -71,7 +73,7 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
         setStatus('error')
       })
     return () => controller.abort()
-  }, [])
+  }, [refreshTick])
 
   function toggleExperiment(index: number) {
     setNodes((prev) =>
@@ -91,7 +93,17 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
 
   return (
     <div className="experiment-tree">
-      <div className="experiment-tree__title">Experiments</div>
+      <div className="experiment-tree__title">
+        <span>Experiments</span>
+        <button
+          type="button"
+          className="experiment-tree__refresh"
+          onClick={() => setRefreshTick((t) => t + 1)}
+          aria-label="Refresh"
+        >
+          <RefreshCw size={14} />
+        </button>
+      </div>
       {status === 'loading' && (
         <div className="experiment-tree__status">Loading...</div>
       )}
