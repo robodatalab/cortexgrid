@@ -26,11 +26,11 @@ def get_ray_status(ray_job_id: str | None) -> str | None:
 
 
 def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
-    """Derive the observable status of a job.
+    """Derive a job's observable status from a live Ray query.
 
-    Status is never persisted — it is computed from the lifecycle latches
-    and a live Ray query. Pass ``ray_status`` to reuse a cached value from
-    a bulk ``ray.list_jobs()`` call and avoid N round-trips.
+    Returns ``PENDING`` both when ``ray_job_id is None`` (never submitted)
+    and when Ray itself reports ``PENDING`` (queued). Callers that need
+    to distinguish those two must check ``ray_job_id is None`` first.
     """
     ray_status = get_ray_status(ray_job_id)
     if ray_job_id is None or ray_status == "PENDING":
@@ -44,14 +44,20 @@ def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
     return JobStatus.RUNNING
 
 
-def get_ray_logs(ray_job_id: str) -> str:
+def get_ray_logs(ray_job_id: str | None) -> str | None:
     """Return the stdout/stderr of a previously submitted ray job."""
+    if ray_job_id is None:
+        return None
+
     client = JobSubmissionClient(get_ray_job_server_uri())
     return client.get_job_logs(ray_job_id)
 
 
-def get_ray_job_url(ray_job_id: str) -> str:
+def get_ray_job_url(ray_job_id: str | None) -> str | None:
     """Build the URL to view a job in the Ray dashboard (always via DGX tailscale IP)."""
+    if ray_job_id is None:
+        return None
+
     server_ip = get_server_ip()
     return f"http://{server_ip}:8265/#/jobs/{ray_job_id}"
 
@@ -80,8 +86,10 @@ def ray_submission_id(run_id: str, job_id: str, attempt: int | None) -> str:
 def get_ray_job_attempt(ray_job_id: str | None) -> int:
     if ray_job_id is None:
         return 0
-
-    return int(ray_job_id.split("-")[-1])
+    _, sep, suffix = ray_job_id.rpartition("-")
+    if not sep or not suffix.isdigit():
+        raise ValueError(f"Ray submission_id has no attempt suffix: {ray_job_id!r}")
+    return int(suffix)
 
 
 def submit_ray_job(

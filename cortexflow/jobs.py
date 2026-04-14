@@ -71,13 +71,9 @@ class JobLifecycle:
         return cls(**data)
 
     def get_ray_job_id(self) -> str | None:
-        ray_jobs = list_ray_jobs_with_submission_id()
-        submission_id_core = ray_submission_id(self.run_id, self.job_id, None)
-        candidates = [ray_id for ray_id in ray_jobs if submission_id_core in ray_id]
-        if not candidates:
-            return None
-
-        return list(sorted(candidates, key=lambda k: get_ray_job_attempt(k)))[-1]
+        prefix = ray_submission_id(self.run_id, self.job_id, None) + "-"
+        attempts = [sid for sid in list_ray_jobs_with_submission_id() if sid.startswith(prefix)]
+        return max(attempts, key=get_ray_job_attempt) if attempts else None
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"

@@ -6,12 +6,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from cortexflow.experiment import list_experiments
+from cortexflow.ray_util import get_ray_job_status
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
 from cortexflow.jobs import (
-    JobLifecycle,
-    get_ray_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
+    JobLifecycle,
 )
 from cortexflow.mlflow_util import (
     get_metric_history,
@@ -147,15 +147,15 @@ def run_jobs(run_id: str) -> list[dict]:
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
 def job_detail(run_id: str, job_id: str) -> dict:
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    ray_status = get_ray_status(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
-    ray_url = get_ray_job_url(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
+    ray_job_id = lifecycle.get_ray_job_id()
+    ray_status = get_ray_status(ray_job_id)
+    ray_url = get_ray_job_url(ray_job_id)
     return {
         "job_id": lifecycle.job_id,
-        "status": get_ray_job_status(lifecycle, ray_status).value,
+        "status": str(ray_status),
         "error": lifecycle.error,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
-        "ray_job_id": lifecycle.ray_job_id,
         "ray_status": ray_status,
         "ray_url": ray_url,
     }
@@ -163,7 +163,8 @@ def job_detail(run_id: str, job_id: str) -> dict:
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")
 def ray_job_logs(ray_job_id: str) -> dict[str, str]:
-    return {"logs": get_ray_logs(ray_job_id)}
+    logs = get_ray_logs(ray_job_id)
+    return {"logs": logs or ""}
 
 
 @app.post("/api/runs/{run_id}/stop")

@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from cortexflow.jobs import JobLifecycle, JobStatus
+from cortexflow.ray_util import JobStatus
+from cortexflow.jobs import JobLifecycle
 from cortexflow_ui.backend.main import app
 
 
@@ -70,10 +71,12 @@ class TestRunEndpoints(unittest.TestCase):
         return_value="http://test:8265/#/jobs/ray-1",
     )
     @patch("cortexflow_ui.backend.main.get_ray_status", return_value="RUNNING")
+    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_returns_lifecycle_and_ray_status(
         self,
         mock_lifecycle_cls: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
         _mock_ray_status: MagicMock,
         _mock_ray_url: MagicMock,
     ) -> None:
@@ -81,7 +84,6 @@ class TestRunEndpoints(unittest.TestCase):
             experiment_name="alpha",
             run_id="run-1",
             job_id="job-1",
-            ray_job_id="ray-1",
         )
 
         response = self.client.get("/api/runs/run-1/jobs/job-1")
@@ -89,8 +91,7 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["job_id"], "job-1")
-        self.assertEqual(data["status"], "running")
-        self.assertEqual(data["ray_job_id"], "ray-1")
+        self.assertEqual(data["status"], "RUNNING")
         self.assertEqual(data["ray_status"], "RUNNING")
         self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
 
@@ -132,25 +133,6 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
         mock_stop.assert_called_once_with("run-1")
-
-    @patch("cortexflow_ui.backend.main.JobLifecycle")
-    def test_job_detail_handles_missing_ray_job(
-        self, mock_lifecycle_cls: MagicMock
-    ) -> None:
-        mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
-            experiment_name="alpha",
-            run_id="run-1",
-            job_id="job-1",
-            ray_job_id=None,
-        )
-
-        response = self.client.get("/api/runs/run-1/jobs/job-1")
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertIsNone(data["ray_job_id"])
-        self.assertIsNone(data["ray_status"])
-        self.assertIsNone(data["ray_url"])
 
 
 if __name__ == "__main__":

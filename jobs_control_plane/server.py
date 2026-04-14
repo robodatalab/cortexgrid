@@ -1,14 +1,16 @@
 """Jobs control plane — polls MLflow for pending jobs and submits them to Ray.
 
-Post-pivot architecture:
+Architecture:
 
-- ``JobLifecycle`` is pure static identity + latches (``ray_job_id``,
-  ``stop_requested``). Status is never persisted.
-- The control plane uses Ray as the source of truth for execution state.
+- ``JobLifecycle`` is pure static identity plus the ``stop_requested`` and
+  ``retry`` latches. Execution status is never persisted.
+- Ray is the source of truth for execution state. Each poll cycle reconciles
+  cortexflow jobs (from MLflow) against the set of Ray submissions returned
+  by ``list_ray_jobs_with_submission_id``.
 - Submission to Ray is async — handed to a ``ProcessPoolExecutor`` so a
   large payload upload cannot block the poll loop.
-- Submission is idempotent via a deterministic ``submission_id`` derived
-  from ``(run_id, job_id)``; a crashed worker can be re-run safely.
+- Submission ids are shaped ``{run_id}-{job_id}-{attempt}``. Each retry
+  uses a fresh attempt suffix so Ray never sees a duplicate id.
 - A single heartbeat file is touched at the end of every successful
   poll cycle. The Docker healthcheck watches its mtime.
 """
@@ -45,13 +47,11 @@ HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
 
 
 def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
-    """Async submission body run inside a ProcessPoolExecutor subprocess.
+    """Submit a single job to Ray. Runs in a ProcessPoolExecutor subprocess.
 
-    Never raises. On any failure, logs and returns without mutating the
-    lifecycle; the next poll cycle sees ray_job_id is still None and
-    re-dispatches. Because the submission_id is deterministic, Ray will
-    reject a duplicate submission on the retry and we proceed to save
-    ray_job_id on the lifecycle.
+    May raise: exceptions propagate to the Future and surface on the next
+    poll cycle. The lifecycle is never mutated here — Ray is the source of
+    truth, and the next poll observes whatever state Ray ended up in.
     """
     set_runs_on_server(True)
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
@@ -78,30 +78,14 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
 def _match_ray_jobs_to_cortexflow_jobs(
     cortexflow_jobs: list[JobLifecycle],
 ) -> list[tuple[JobLifecycle, str | None]]:
-    ray_jobs = list_ray_jobs_with_submission_id()
+    all_ray_submission_ids = list_ray_jobs_with_submission_id()
 
-    # we will find all jobs (and all their attempts related to a specific job)
-    matches: dict[str, list[str]] = {}
-    submission_id_core_to_cortexflow_job: dict[str, JobLifecycle] = {}
-    for cjob in cortexflow_jobs:
-        submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
-        submission_id_core_to_cortexflow_job[submission_id_core] = cjob
-        matches[submission_id_core] = []
-        for submission_id in ray_jobs:
-            if submission_id_core in submission_id:
-                matches[submission_id_core].append(submission_id)
-
-    # filter the list of submission ids for the one with the largest attempt id, and only leave that one
     pairs: list[tuple[JobLifecycle, str | None]] = []
-    for submission_id_core, ray_jobs in matches.items():
-        cjob = submission_id_core_to_cortexflow_job[submission_id_core]
-        if ray_jobs:
-            last_attempt_ray_job = list(
-                sorted(ray_jobs, key=lambda k: get_ray_job_attempt(k))
-            )[-1]
-            pairs.append((cjob, last_attempt_ray_job))
-        else:
-            pairs.append((cjob, None))
+    for cjob in cortexflow_jobs:
+        prefix = ray_submission_id(cjob.run_id, cjob.job_id, None) + "-"
+        attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
+        latest = max(attempts, key=get_ray_job_attempt) if attempts else None
+        pairs.append((cjob, latest))
     return pairs
 
 
@@ -124,38 +108,26 @@ def poll_once(
     cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
 
     for cjob, rjob in cortexflow_to_ray_jobs:
-        assert cjob is not None
-
         submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
         if submission_id_core in in_flight:
-            # this entry is currently being processed by a worker process _submit_job_worker
             continue
 
-        job_status = get_ray_job_status(rjob)
-        attempt = get_ray_job_attempt(rjob)
+        if cjob.stop_requested:
+            if rjob is not None:
+                stop_ray_job(rjob)
+            continue
 
-        if job_status == JobStatus.PENDING:
-            assert attempt == 0
+        if rjob is None:
             in_flight[submission_id_core] = executor.submit(
-                _submit_job_worker, cjob.run_id, cjob.job_id, attempt
+                _submit_job_worker, cjob.run_id, cjob.job_id, 0
             )
-        elif job_status == JobStatus.RUNNING:
-            pass
-        elif job_status == JobStatus.FINISHED:
-            pass
-        elif job_status == JobStatus.FAILED:
-            if cjob.retry:
-                in_flight[submission_id_core] = executor.submit(
-                    _submit_job_worker,
-                    cjob.run_id,
-                    cjob.job_id,
-                    attempt + 1,
-                )
-        elif job_status == JobStatus.STOPPED:
-            pass
+            continue
 
-        if cjob.stop_requested and rjob is not None:
-            stop_ray_job(rjob)
+        if get_ray_job_status(rjob) == JobStatus.FAILED and cjob.retry:
+            attempt = get_ray_job_attempt(rjob)
+            in_flight[submission_id_core] = executor.submit(
+                _submit_job_worker, cjob.run_id, cjob.job_id, attempt + 1
+            )
 
 
 def main() -> None:

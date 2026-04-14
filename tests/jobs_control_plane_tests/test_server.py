@@ -11,12 +11,13 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import cloudpickle  # type: ignore
+from parameterized import parameterized
 
 from cortexflow.experiment import Experiment
 from cortexflow.jobs import JobLifecycle, Payload
+from cortexflow.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
-    _dispatch_job,
-    _ray_submission_id,
+    _match_ray_jobs_to_cortexflow_jobs,
     _submit_job_worker,
     poll_once,
 )
@@ -27,12 +28,23 @@ RUN_ID = "run-1"
 JOB_ID = "job-1"
 
 
-def _make_experiment() -> Experiment:
-    return Experiment(experiment_name=EXPERIMENT_NAME, run_id=RUN_ID)
+def _make_lifecycle(
+    run_id: str = RUN_ID,
+    job_id: str = JOB_ID,
+    stop_requested: bool = False,
+    retry: bool = False,
+) -> JobLifecycle:
+    return JobLifecycle(
+        experiment_name=EXPERIMENT_NAME,
+        run_id=run_id,
+        job_id=job_id,
+        stop_requested=stop_requested,
+        retry=retry,
+    )
 
 
 class FakeMLflow:
-    """Fake MlflowClient backed by a real temp directory."""
+    """MlflowClient stand-in backed by a real temp directory."""
 
     def __init__(self) -> None:
         self.artifact_root = Path(tempfile.mkdtemp())
@@ -81,214 +93,360 @@ class FakeMLflow:
             (project_dest / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
 
 
-class FakeRay:
-    """Backs the cortexflow ray wrappers that ``server.py`` calls.
+class TestMatchRayJobsToCortexflowJobs(unittest.TestCase):
+    """Exhaustive tests for ``_match_ray_jobs_to_cortexflow_jobs``.
 
-    The three wrappers are patched at the ``jobs_control_plane.server``
-    import site (see :meth:`install`) and each one routes into a method
-    on this object. That keeps test state in one place while still
-    exercising the wrapper boundary the production code goes through.
-
-    Semantics:
-    - ``get_ray_status`` raises for unknown submission_ids (matching
-      Ray's "job not found" behaviour that idempotent submission relies
-      on).
-    - ``submit_ray_job`` records the kwargs; refuses duplicates so a
-      double-submit is observable.
-    - ``stop_ray_job`` records the call.
+    The match function takes the current set of cortexflow jobs and the
+    current set of Ray submission ids (queried internally) and returns a
+    list of ``(cjob, latest_ray_submission_id_or_None)`` pairs.
     """
 
-    def __init__(self) -> None:
-        self.submissions: dict[str, dict[str, Any]] = {}
-        self.stopped: list[str] = []
-        self.submit_raises: Exception | None = None
-
-    def get_ray_status(self, submission_id: str) -> str:
-        if submission_id not in self.submissions:
-            raise RuntimeError(f"Job {submission_id} not found")
-        return "STOPPED" if submission_id in self.stopped else "RUNNING"
-
-    def submit_ray_job(self, **kwargs: Any) -> None:
-        if self.submit_raises is not None:
-            raise self.submit_raises
-        submission_id = kwargs["submission_id"]
-        if submission_id in self.submissions:
-            raise RuntimeError(f"Job {submission_id} already exists")
-        self.submissions[submission_id] = kwargs
-
-    def stop_ray_job(self, submission_id: str) -> None:
-        self.stopped.append(submission_id)
-
-    def install(self, case: unittest.TestCase) -> None:
-        """Patch the three cortexflow wrappers at their server.py import
-        site so every call routes through this FakeRay instance.
-        """
-        patchers = [
-            patch(
-                "jobs_control_plane.server.get_ray_status",
-                side_effect=self.get_ray_status,
+    @parameterized.expand(
+        [
+            (
+                "no_ray_jobs",
+                [("run-1", "job-1")],
+                [],
+                [("run-1", "job-1", None)],
             ),
-            patch(
-                "jobs_control_plane.server.stop_ray_job",
-                side_effect=self.stop_ray_job,
+            (
+                "single_attempt",
+                [("run-1", "job-1")],
+                ["run-1-job-1-0"],
+                [("run-1", "job-1", "run-1-job-1-0")],
             ),
-            patch(
-                "jobs_control_plane.server.submit_ray_job",
-                side_effect=self.submit_ray_job,
+            (
+                "multiple_attempts_picks_numeric_max",
+                [("run-1", "job-1")],
+                ["run-1-job-1-0", "run-1-job-1-1", "run-1-job-1-2"],
+                [("run-1", "job-1", "run-1-job-1-2")],
+            ),
+            (
+                "attempts_past_nine_sorted_numerically",
+                [("run-1", "job-1")],
+                [
+                    "run-1-job-1-0",
+                    "run-1-job-1-9",
+                    "run-1-job-1-10",
+                    "run-1-job-1-11",
+                    "run-1-job-1-2",
+                ],
+                [("run-1", "job-1", "run-1-job-1-11")],
+            ),
+            (
+                "prefix_overlap_does_not_cross_attribute",
+                [("run-1", "job-1"), ("run-1", "job-10")],
+                ["run-1-job-1-0", "run-1-job-10-0", "run-1-job-10-1"],
+                [
+                    ("run-1", "job-1", "run-1-job-1-0"),
+                    ("run-1", "job-10", "run-1-job-10-1"),
+                ],
+            ),
+            (
+                "legacy_format_without_attempt_suffix_ignored",
+                [("run-1", "job-1")],
+                ["run-1-job-1"],
+                [("run-1", "job-1", None)],
+            ),
+            (
+                "unrelated_ray_jobs_ignored",
+                [("run-1", "job-1")],
+                ["run-2-job-2-0", "garbage", "run-1-job-2-0"],
+                [("run-1", "job-1", None)],
+            ),
+            (
+                "multiple_cjobs_distinct_attempts",
+                [("run-1", "job-a"), ("run-1", "job-b")],
+                ["run-1-job-a-0", "run-1-job-b-0", "run-1-job-b-1"],
+                [
+                    ("run-1", "job-a", "run-1-job-a-0"),
+                    ("run-1", "job-b", "run-1-job-b-1"),
+                ],
+            ),
+            (
+                "mixed_cjobs_some_without_ray_jobs",
+                [("run-1", "job-a"), ("run-1", "job-b")],
+                ["run-1-job-b-0"],
+                [
+                    ("run-1", "job-a", None),
+                    ("run-1", "job-b", "run-1-job-b-0"),
+                ],
+            ),
+            (
+                "empty_cjobs_returns_empty",
+                [],
+                ["run-1-job-1-0"],
+                [],
             ),
         ]
-        for p in patchers:
-            p.start()
-            case.addCleanup(p.stop)
-
-
-def _make_lifecycle(**overrides: Any) -> JobLifecycle:
-    return JobLifecycle(
-        experiment_name=EXPERIMENT_NAME,
-        run_id=RUN_ID,
-        job_id=JOB_ID,
-        **overrides,
     )
-
-
-class TestDispatchJob(unittest.TestCase):
-    """Unit tests for the per-job decision step.
-
-    These test the pure dispatch logic without running a worker — the
-    executor is a MagicMock and we assert on its ``submit`` calls.
-    """
-
-    def setUp(self) -> None:
-        self.fake_ray = FakeRay()
-        self.fake_ray.install(self)
-        self.executor = MagicMock()
-        self.executor.submit.return_value = Future()
-        self.in_flight: dict[str, Future] = {}
-
-    def _dispatch(self, lifecycle: JobLifecycle) -> None:
-        _dispatch_job(self.executor, self.in_flight, lifecycle)
-
-    def test_unsubmitted_job_is_handed_to_worker_pool(self) -> None:
-        self._dispatch(_make_lifecycle())
-
-        self.executor.submit.assert_called_once_with(
-            _submit_job_worker, RUN_ID, JOB_ID
-        )
-        self.assertIn(_ray_submission_id(RUN_ID, JOB_ID), self.in_flight)
-
-    def test_unsubmitted_job_with_stop_requested_is_skipped(self) -> None:
-        self._dispatch(_make_lifecycle(stop_requested=True))
-
-        self.executor.submit.assert_not_called()
-        self.assertEqual(self.in_flight, {})
-
-    def test_unsubmitted_job_already_in_flight_is_skipped(self) -> None:
-        key = _ray_submission_id(RUN_ID, JOB_ID)
-        self.in_flight[key] = Future()  # not done
-        self._dispatch(_make_lifecycle())
-
-        self.executor.submit.assert_not_called()
-
-    def test_submitted_job_without_stop_is_not_touched(self) -> None:
-        self._dispatch(_make_lifecycle(ray_job_id="sid"))
-
-        self.executor.submit.assert_not_called()
-        self.assertEqual(self.fake_ray.stopped, [])
-
-    def test_submitted_job_with_stop_requested_calls_ray_stop(self) -> None:
-        self.fake_ray.submissions["sid"] = {}  # exists in Ray, running
-        self._dispatch(_make_lifecycle(ray_job_id="sid", stop_requested=True))
-
-        self.assertEqual(self.fake_ray.stopped, ["sid"])
-        self.executor.submit.assert_not_called()
-
-    def test_submitted_job_with_stop_requested_but_terminal_in_ray(self) -> None:
-        # Ray says STOPPED already — nothing to do.
-        self.fake_ray.submissions["sid"] = {}
-        self.fake_ray.stopped.append("sid")
-        self._dispatch(_make_lifecycle(ray_job_id="sid", stop_requested=True))
-
-        # stop_ray_job should NOT have been called a second time.
-        self.assertEqual(self.fake_ray.stopped, ["sid"])
-
-    def test_ray_query_failure_does_not_raise(self) -> None:
-        # Unknown submission_id in FakeRay → get_ray_status raises.
-        self._dispatch(_make_lifecycle(ray_job_id="unknown", stop_requested=True))
-        # If we got here, no exception propagated. stop_ray_job should
-        # not have been called because the status query failed.
-        self.assertEqual(self.fake_ray.stopped, [])
+    def test_match(
+        self,
+        name: str,
+        cjobs: list[tuple[str, str]],
+        ray_submission_ids: list[str],
+        expected: list[tuple[str, str, str | None]],
+    ) -> None:
+        lifecycles = [_make_lifecycle(run_id=r, job_id=j) for r, j in cjobs]
+        with patch(
+            "jobs_control_plane.server.list_ray_jobs_with_submission_id",
+            return_value=ray_submission_ids,
+        ):
+            pairs = _match_ray_jobs_to_cortexflow_jobs(lifecycles)
+        actual = [(lc.run_id, lc.job_id, sid) for lc, sid in pairs]
+        self.assertEqual(actual, expected)
 
 
 class TestPollOnce(unittest.TestCase):
-    """Integration-ish tests for poll_once dispatch + in_flight reaping."""
+    """Tests for ``poll_once`` covering the cjob × ray_state action matrix.
+
+    The test rig patches the four boundary calls ``poll_once`` makes into
+    cortexflow (``list_experiments``, ``list_experiment_run_jobs``,
+    ``list_ray_jobs_with_submission_id``, ``get_ray_job_status``) and the
+    one outbound side effect (``stop_ray_job``). The executor is a
+    MagicMock whose ``submit`` records ``(run_id, job_id, attempt)``.
+    """
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
-        self.fake_ray = FakeRay()
-        self.fake_ray.install(self)
-        self.executor = MagicMock()
-        self.executor.submit.return_value = Future()
+        self._cjobs: list[JobLifecycle] = []
+        self._ray_state: dict[str, JobStatus] = {}
+        self._submitted: list[tuple[str, str, int]] = []
+        self._stopped: list[str] = []
         self.in_flight: dict[str, Future] = {}
+
+        self.executor = MagicMock()
+
+        def _submit_side_effect(
+            fn: Any, run_id: str, job_id: str, attempt: int
+        ) -> Future:
+            self._submitted.append((run_id, job_id, attempt))
+            return Future()
+
+        self.executor.submit.side_effect = _submit_side_effect
+
+        def _list_jobs(run_id: str) -> list[JobLifecycle]:
+            return [j for j in self._cjobs if j.run_id == run_id]
+
+        def _get_status(rjob: str | None) -> JobStatus:
+            if rjob is None:
+                return JobStatus.PENDING
+            return self._ray_state[rjob]
 
         patchers = [
             patch(
                 "jobs_control_plane.server.list_experiments",
-                return_value=[_make_experiment()],
+                side_effect=lambda: [
+                    Experiment(experiment_name=EXPERIMENT_NAME, run_id=r)
+                    for r in sorted({j.run_id for j in self._cjobs})
+                ],
             ),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
+                "jobs_control_plane.server.list_experiment_run_jobs",
+                side_effect=_list_jobs,
             ),
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "jobs_control_plane.server.list_ray_jobs_with_submission_id",
+                side_effect=lambda: list(self._ray_state.keys()),
+            ),
+            patch(
+                "jobs_control_plane.server.get_ray_job_status",
+                side_effect=_get_status,
+            ),
+            patch(
+                "jobs_control_plane.server.stop_ray_job",
+                side_effect=self._stopped.append,
+            ),
         ]
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
 
-    def test_unsubmitted_job_is_dispatched(self) -> None:
-        self.fake_mlflow.add_job(JOB_ID, _make_lifecycle())
+    def _seed_ray_attempt(
+        self, run_id: str, job_id: str, attempt: int, status: JobStatus
+    ) -> None:
+        self._ray_state[ray_submission_id(run_id, job_id, attempt)] = status
+
+    @parameterized.expand(
+        [
+            # ---- unsubmitted (rjob is None) ---------------------------
+            ("unsubmitted__no_retry__no_stop", None, False, False, "dispatch_0"),
+            ("unsubmitted__retry__no_stop", None, True, False, "dispatch_0"),
+            ("unsubmitted__no_retry__stop_requested", None, False, True, "noop"),
+            ("unsubmitted__retry__stop_requested", None, True, True, "noop"),
+            # ---- Ray says PENDING (queued) ----------------------------
+            # Bug #10 regression — must NOT redispatch on Ray PENDING.
+            ("pending_in_ray__no_retry__no_stop", JobStatus.PENDING, False, False, "noop"),
+            ("pending_in_ray__retry__no_stop", JobStatus.PENDING, True, False, "noop"),
+            ("pending_in_ray__stop_requested", JobStatus.PENDING, False, True, "stop_0"),
+            # ---- Ray says RUNNING -------------------------------------
+            ("running__no_retry__no_stop", JobStatus.RUNNING, False, False, "noop"),
+            ("running__retry__no_stop", JobStatus.RUNNING, True, False, "noop"),
+            ("running__stop_requested", JobStatus.RUNNING, False, True, "stop_0"),
+            # ---- Ray says FINISHED ------------------------------------
+            ("finished__no_retry__no_stop", JobStatus.FINISHED, False, False, "noop"),
+            ("finished__retry__no_stop", JobStatus.FINISHED, True, False, "noop"),
+            ("finished__stop_requested", JobStatus.FINISHED, False, True, "stop_0"),
+            # ---- Ray says FAILED --------------------------------------
+            ("failed__no_retry__no_stop", JobStatus.FAILED, False, False, "noop"),
+            ("failed__retry__no_stop", JobStatus.FAILED, True, False, "retry_1"),
+            # Bug #5 guard — stop_requested must suppress retry, not race it.
+            ("failed__retry__stop_requested", JobStatus.FAILED, True, True, "stop_0"),
+            ("failed__no_retry__stop_requested", JobStatus.FAILED, False, True, "stop_0"),
+            # ---- Ray says STOPPED -------------------------------------
+            ("stopped_in_ray__no_retry__no_stop", JobStatus.STOPPED, False, False, "noop"),
+            ("stopped_in_ray__retry__no_stop", JobStatus.STOPPED, True, False, "noop"),
+            ("stopped_in_ray__stop_requested", JobStatus.STOPPED, False, True, "stop_0"),
+        ]
+    )
+    def test_action_matrix(
+        self,
+        name: str,
+        ray_state: JobStatus | None,
+        retry: bool,
+        stop_requested: bool,
+        expected_action: str,
+    ) -> None:
+        self._cjobs.append(
+            _make_lifecycle(retry=retry, stop_requested=stop_requested)
+        )
+        if ray_state is not None:
+            self._seed_ray_attempt(RUN_ID, JOB_ID, 0, ray_state)
 
         poll_once(self.executor, self.in_flight)
 
-        self.executor.submit.assert_called_once_with(
-            _submit_job_worker, RUN_ID, JOB_ID
-        )
+        sid_0 = ray_submission_id(RUN_ID, JOB_ID, 0)
+        if expected_action == "dispatch_0":
+            self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
+            self.assertEqual(self._stopped, [])
+        elif expected_action == "retry_1":
+            self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 1)])
+            self.assertEqual(self._stopped, [])
+        elif expected_action == "stop_0":
+            self.assertEqual(self._submitted, [])
+            self.assertEqual(self._stopped, [sid_0])
+        elif expected_action == "noop":
+            self.assertEqual(self._submitted, [])
+            self.assertEqual(self._stopped, [])
+        else:
+            self.fail(f"unknown expected_action {expected_action!r}")
 
-    def test_done_futures_are_reaped_before_dispatch(self) -> None:
-        key = _ray_submission_id(RUN_ID, JOB_ID)
-        done_future: Future = Future()
-        done_future.set_result(None)
-        self.in_flight[key] = done_future
-        self.fake_mlflow.add_job(JOB_ID, _make_lifecycle())
+    def test_retry_uses_next_attempt_number_after_several_failures(self) -> None:
+        """A retry chain must increment the attempt beyond the highest Ray knows."""
+        self._cjobs.append(_make_lifecycle(retry=True))
+        for attempt in range(4):
+            self._seed_ray_attempt(RUN_ID, JOB_ID, attempt, JobStatus.FAILED)
 
         poll_once(self.executor, self.in_flight)
 
-        # The done future was reaped, so dispatch re-submitted.
-        self.executor.submit.assert_called_once_with(
-            _submit_job_worker, RUN_ID, JOB_ID
-        )
+        self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 4)])
+
+    def test_retry_picks_latest_attempt_even_if_older_attempts_also_failed(
+        self,
+    ) -> None:
+        """Regression for the lex-sort bug: attempt 10 must win over attempt 2."""
+        self._cjobs.append(_make_lifecycle(retry=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 2, JobStatus.FAILED)
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 10, JobStatus.FAILED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 11)])
 
     def test_in_flight_job_is_not_redispatched(self) -> None:
-        key = _ray_submission_id(RUN_ID, JOB_ID)
+        self._cjobs.append(_make_lifecycle())
+        key = ray_submission_id(RUN_ID, JOB_ID, None)
         self.in_flight[key] = Future()  # not done
-        self.fake_mlflow.add_job(JOB_ID, _make_lifecycle())
 
         poll_once(self.executor, self.in_flight)
 
-        self.executor.submit.assert_not_called()
+        self.assertEqual(self._submitted, [])
+
+    def test_in_flight_job_with_failed_ray_state_is_not_redispatched(self) -> None:
+        """If a worker is still running for this job identity, skip it
+        regardless of what Ray reports for the most recent attempt."""
+        self._cjobs.append(_make_lifecycle(retry=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
+        key = ray_submission_id(RUN_ID, JOB_ID, None)
+        self.in_flight[key] = Future()  # not done
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [])
+
+    def test_done_futures_are_reaped_before_dispatch(self) -> None:
+        self._cjobs.append(_make_lifecycle())
+        key = ray_submission_id(RUN_ID, JOB_ID, None)
+        done: Future = Future()
+        done.set_result(None)
+        self.in_flight[key] = done
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
+        self.assertIsNot(self.in_flight[key], done)
+
+    def test_pending_in_ray_does_not_crash_loop_across_many_polls(self) -> None:
+        """Bug #10 regression — a Ray job sitting in PENDING for many poll
+        cycles must not redispatch or raise."""
+        self._cjobs.append(_make_lifecycle())
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.PENDING)
+
+        for _ in range(5):
+            poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [])
+        self.assertEqual(self._stopped, [])
+
+    def test_multiple_jobs_are_handled_independently(self) -> None:
+        self._cjobs = [
+            _make_lifecycle(job_id="job-new"),
+            _make_lifecycle(job_id="job-running"),
+            _make_lifecycle(job_id="job-fail", retry=True),
+            _make_lifecycle(job_id="job-stop", stop_requested=True),
+            _make_lifecycle(job_id="job-done"),
+        ]
+        self._seed_ray_attempt(RUN_ID, "job-running", 0, JobStatus.RUNNING)
+        self._seed_ray_attempt(RUN_ID, "job-fail", 0, JobStatus.FAILED)
+        self._seed_ray_attempt(RUN_ID, "job-stop", 0, JobStatus.RUNNING)
+        self._seed_ray_attempt(RUN_ID, "job-done", 0, JobStatus.FINISHED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(
+            sorted(self._submitted),
+            sorted([(RUN_ID, "job-new", 0), (RUN_ID, "job-fail", 1)]),
+        )
+        self.assertEqual(
+            self._stopped, [ray_submission_id(RUN_ID, "job-stop", 0)]
+        )
+
+    def test_in_flight_is_populated_after_dispatch(self) -> None:
+        self._cjobs.append(_make_lifecycle())
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), self.in_flight)
 
 
 class TestSubmitJobWorker(unittest.TestCase):
-    """Exercises _submit_job_worker with faked MLflow and Ray."""
+    """Sanity tests for ``_submit_job_worker`` under its new contract.
+
+    The worker now always appends an ``attempt`` suffix to the submission
+    id, raises on MLflow/Ray errors (no more swallowing), and does not
+    write anything back to the lifecycle.
+    """
 
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
-        self.fake_ray = FakeRay()
-        self.fake_ray.install(self)
+        self.submitted: list[dict[str, Any]] = []
         self.project_root = Path(tempfile.mkdtemp())
         (self.project_root / "pyproject.toml").write_text("[project]\nname='t'\n")
         self.original_cwd = os.getcwd()
         os.chdir(self.project_root)
+
+        def _submit_ray_job(**kwargs: Any) -> None:
+            self.submitted.append(kwargs)
 
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
@@ -297,6 +455,10 @@ class TestSubmitJobWorker(unittest.TestCase):
                 return_value="http://test:5000",
             ),
             patch("jobs_control_plane.server.set_runs_on_server"),
+            patch(
+                "jobs_control_plane.server.submit_ray_job",
+                side_effect=_submit_ray_job,
+            ),
         ]
         for p in patchers:
             p.start()
@@ -308,12 +470,9 @@ class TestSubmitJobWorker(unittest.TestCase):
     def _seed(
         self,
         stop_requested: bool = False,
-        ray_job_id: str | None = None,
         with_payload: bool = True,
     ) -> None:
-        lifecycle = _make_lifecycle(
-            stop_requested=stop_requested, ray_job_id=ray_job_id
-        )
+        lifecycle = _make_lifecycle(stop_requested=stop_requested)
         payload = None
         if with_payload:
             payload = Payload(
@@ -327,56 +486,41 @@ class TestSubmitJobWorker(unittest.TestCase):
             )
         self.fake_mlflow.add_job(JOB_ID, lifecycle, payload)
 
-    def _loaded(self) -> JobLifecycle:
-        return JobLifecycle.load_from_mlflow(RUN_ID, JOB_ID)
-
-    def test_happy_path_submits_to_ray_and_persists_ray_job_id(self) -> None:
+    def test_happy_path_submits_to_ray_with_attempt_suffix(self) -> None:
         self._seed()
 
-        _submit_job_worker(RUN_ID, JOB_ID)
+        _submit_job_worker(RUN_ID, JOB_ID, 0)
 
-        submission_id = _ray_submission_id(RUN_ID, JOB_ID)
-        self.assertIn(submission_id, self.fake_ray.submissions)
-        self.assertEqual(self._loaded().ray_job_id, submission_id)
-
-    def test_idempotent_when_ray_already_has_the_submission(self) -> None:
-        # Seed Ray with an existing submission for the deterministic id.
-        submission_id = _ray_submission_id(RUN_ID, JOB_ID)
-        self.fake_ray.submissions[submission_id] = {"prior": True}
-        self._seed()
-
-        _submit_job_worker(RUN_ID, JOB_ID)
-
-        # submit_job was NOT called — prior dict entry unchanged.
+        self.assertEqual(len(self.submitted), 1)
         self.assertEqual(
-            self.fake_ray.submissions[submission_id], {"prior": True}
+            self.submitted[0]["submission_id"],
+            ray_submission_id(RUN_ID, JOB_ID, 0),
         )
-        self.assertEqual(self._loaded().ray_job_id, submission_id)
 
-    def test_stop_requested_short_circuits_submission(self) -> None:
+    def test_retry_attempt_uses_a_fresh_submission_id(self) -> None:
+        self._seed()
+
+        _submit_job_worker(RUN_ID, JOB_ID, 3)
+
+        self.assertEqual(
+            self.submitted[0]["submission_id"],
+            ray_submission_id(RUN_ID, JOB_ID, 3),
+        )
+
+    def test_stop_requested_short_circuits_before_submitting(self) -> None:
         self._seed(stop_requested=True)
 
-        _submit_job_worker(RUN_ID, JOB_ID)
+        _submit_job_worker(RUN_ID, JOB_ID, 0)
 
-        self.assertEqual(self.fake_ray.submissions, {})
-        self.assertIsNone(self._loaded().ray_job_id)
+        self.assertEqual(self.submitted, [])
 
-    def test_payload_load_failure_does_not_raise_or_mutate(self) -> None:
+    def test_missing_payload_propagates_the_error(self) -> None:
         self._seed(with_payload=False)
 
-        _submit_job_worker(RUN_ID, JOB_ID)
+        with self.assertRaises(Exception):
+            _submit_job_worker(RUN_ID, JOB_ID, 0)
 
-        self.assertEqual(self.fake_ray.submissions, {})
-        self.assertIsNone(self._loaded().ray_job_id)
-
-    def test_ray_submit_failure_does_not_raise_or_mutate(self) -> None:
-        self._seed()
-        self.fake_ray.submit_raises = RuntimeError("cluster is full")
-
-        _submit_job_worker(RUN_ID, JOB_ID)
-
-        self.assertEqual(self.fake_ray.submissions, {})
-        self.assertIsNone(self._loaded().ray_job_id)
+        self.assertEqual(self.submitted, [])
 
 
 def _noop() -> None:
