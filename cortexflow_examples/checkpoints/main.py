@@ -29,30 +29,45 @@ def crashy_job():
     raise RuntimeError("Intentional crash to test retry")
 
 
+def _wait_for_terminal(run_id: str, job_id: str) -> cortexflow.JobStatus:
+    """Poll the lifecycle until Ray reports a terminal state."""
+    while True:
+        lifecycle = cortexflow.JobLifecycle.load_from_mlflow(run_id, job_id)
+        status = cortexflow.get_job_status(lifecycle)
+        ray_id = lifecycle.ray_job_id or "not yet scheduled"
+        print(f"  status: {status.value}  ray_job: {ray_id}")
+        if status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
+            return status
+        time.sleep(5)
+
+
 def main():
     exp = cortexflow.Experiment.init("Examples-Checkpoints")
     print(f"Experiment: {exp.experiment_name}")
     print(f"Run ID:     {exp.run_id}")
 
-    job_id = cortexflow.remote(crashy_job, retry=True)
-    print(f"Submitted job: {job_id} (retry=True)")
+    # Attempt 1 — expected to crash and save a checkpoint.
+    # Automatic retry by the control plane is not currently implemented, so
+    # this example drives the retry from the client side. The checkpoint is
+    # scoped to the experiment run, so the second job sees it on resume.
+    first_job = cortexflow.remote(crashy_job)
+    print(f"Submitted first job: {first_job}")
+    first_status = _wait_for_terminal(exp.run_id, first_job)
+    if first_status != cortexflow.JobStatus.FAILED:
+        print(f"\nExpected first attempt to fail, got {first_status.value}.")
+        return
+    print("\nFirst attempt failed as expected; re-submitting to resume from checkpoint.")
 
-    print("Waiting for the job to crash, retry, and succeed...")
-    while True:
-        lifecycle = cortexflow.get_job_status(exp.run_id, job_id)
-        status = lifecycle.status.value
-        ray_id = lifecycle.ray_job_id or "not yet scheduled"
-        print(f"  status: {status}  ray_job: {ray_id}")
-        if lifecycle.status == cortexflow.JobStatus.FINISHED:
-            break
-        if lifecycle.status == cortexflow.JobStatus.FAILED and not lifecycle.retry:
-            print(f"\nJob failed permanently: {lifecycle.error}")
-            break
-        time.sleep(5)
+    # Attempt 2 — cortexflow.resume() should return the saved checkpoint.
+    second_job = cortexflow.remote(crashy_job)
+    print(f"Submitted second job: {second_job}")
+    second_status = _wait_for_terminal(exp.run_id, second_job)
 
-    if lifecycle.status == cortexflow.JobStatus.FINISHED:
-        print("\nJob survived the crash and completed on retry!")
+    if second_status == cortexflow.JobStatus.FINISHED:
+        print("\nJob survived the crash and completed on re-submission!")
         print("Check MLflow for final_execution_count=2.")
+    else:
+        print(f"\nUnexpected final status: {second_status.value}")
 
 
 if __name__ == "__main__":

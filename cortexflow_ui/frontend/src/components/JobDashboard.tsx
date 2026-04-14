@@ -6,6 +6,7 @@ type JobDetail = {
   status: string
   error: string | null
   retry: boolean
+  stop_requested: boolean
   ray_job_id: string | null
   ray_status: string | null
   ray_url: string | null
@@ -72,6 +73,7 @@ export function JobDashboard({ runId, jobId }: Props) {
         <table className="job-dashboard__table">
           <tbody>
             <tr><td>Status</td><td>{detail.status}</td></tr>
+            <tr><td>Stop requested</td><td>{detail.stop_requested ? 'yes' : 'no'}</td></tr>
             <tr><td>Retry</td><td>{detail.retry ? 'yes' : 'no'}</td></tr>
             <tr><td>Ray job ID</td><td>{detail.ray_job_id ?? '—'}</td></tr>
           </tbody>

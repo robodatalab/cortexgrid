@@ -29,20 +29,23 @@ def main():
     print(f"Submitted job: {job_id}")
 
     print("Waiting for the control plane to pick up and run the job...")
+    terminal = (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED)
     while True:
-        lifecycle = cortexflow.get_job_status(exp.run_id, job_id)
-        print(f"  status: {lifecycle.status.value}")
-        if lifecycle.status in (
-            cortexflow.JobStatus.FINISHED,
-            cortexflow.JobStatus.FAILED,
-        ):
+        lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
+        status = cortexflow.get_job_status(lifecycle)
+        print(f"  status: {status.value}")
+        if status in terminal:
             break
         time.sleep(5)
 
-    if lifecycle.status == cortexflow.JobStatus.FINISHED:
+    if status == cortexflow.JobStatus.FINISHED:
         print("\nJob completed. Check MLflow for both main_metric and job_metric.")
     else:
-        print(f"\nJob failed: {lifecycle.error}")
+        # Ray-reported errors live in Ray logs, not on the lifecycle.
+        # Check the Ray dashboard or use cortexflow.get_ray_logs(ray_job_id).
+        print(f"\nJob failed. ray_job_id={lifecycle.ray_job_id}")
+        if lifecycle.error:
+            print(f"Submission error: {lifecycle.error}")
 
 
 if __name__ == "__main__":
