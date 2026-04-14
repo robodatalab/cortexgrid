@@ -422,6 +422,63 @@ class TestListExperimentRunJobs(unittest.TestCase):
 
         self.assertEqual([j.job_id for j in result], ["j1"])
 
+    def test_error_field_round_trips_through_mlflow(self) -> None:
+        """A lifecycle with an error message survives save+load."""
+        saved = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="j1",
+            error="payload download failed",
+        )
+        saved.save_to_mlflow()
+
+        loaded = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
+
+        self.assertEqual(loaded.error, "payload download failed")
+
+
+class TestGetRayJobId(unittest.TestCase):
+    """``JobLifecycle.get_ray_job_id`` accepts a pre-fetched Ray submission
+    list so callers can batch the Ray round-trip across many jobs."""
+
+    def _lifecycle(self, job_id: str = "job-1") -> JobLifecycle:
+        return JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id=job_id
+        )
+
+    def test_passed_list_is_used_without_querying_ray(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id(
+                ["run-1-job-1-0", "run-1-job-1-1"]
+            )
+
+        self.assertEqual(result, "run-1-job-1-1")
+        mock_list.assert_not_called()
+
+    def test_empty_passed_list_returns_none_without_querying_ray(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id([])
+
+        self.assertIsNone(result)
+        mock_list.assert_not_called()
+
+    def test_no_arg_queries_ray_live(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id",
+            return_value=["run-1-job-1-0"],
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id()
+
+        self.assertEqual(result, "run-1-job-1-0")
+        mock_list.assert_called_once()
+
 
 class TestStopExperimentRunJobs(unittest.TestCase):
     """stop_experiment_run_jobs is a pure latch-flipper: it never calls Ray."""
