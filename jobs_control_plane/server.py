@@ -24,6 +24,7 @@ from cortexflow import (
 log = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXFLOW_POLL_INTERVAL", "5"))
+HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
 
 
 def poll_once() -> None:
@@ -138,6 +139,7 @@ def main() -> None:
     while True:
         try:
             poll_once()
+            HEARTBEAT_PATH.touch()
         except Exception:
             log.exception("Error during poll cycle")
         time.sleep(POLL_INTERVAL_SECONDS)

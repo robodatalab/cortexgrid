@@ -46,7 +46,10 @@
       "Read(//tmp/**)",
       "Bash(curl -sS -o /tmp/body -w 'HTTP %{http_code}\\\\n' -X DELETE http://localhost:8000/api/secrets/__claude_test)",
       "Bash(curl -sS http://localhost:8000/api/secrets)",
-      "Bash(python -c 'import json,sys; data=json.load\\(sys.stdin\\); print\\(\"__claude_test present:\", any\\(s[\"id\"]==\"__claude_test\" for s in data\\)\\)')"
+      "Bash(python -c 'import json,sys; data=json.load\\(sys.stdin\\); print\\(\"__claude_test present:\", any\\(s[\"id\"]==\"__claude_test\" for s in data\\)\\)')",
+      "Bash(docker -H tcp://100.80.27.32:2375 ps --format '{{.Names}}\\\\t{{.Status}}')",
+      "Bash(docker -H tcp://100.80.27.32:2375 logs --tail=200 robolab-jobs-control-plane)",
+      "Bash(docker -H tcp://100.80.27.32:2375 logs --tail=50 robolab-jobs-control-plane)"
     ]
   }
 }
