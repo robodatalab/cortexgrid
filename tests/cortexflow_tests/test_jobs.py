@@ -12,11 +12,10 @@ import cloudpickle  # type: ignore
 
 import cortexflow
 from cortexflow.experiment import Experiment, clear_instance, set_instance
+from cortexflow.ray_util import JobStatus, get_ray_job_status
 from cortexflow.jobs import (
     JobLifecycle,
-    JobStatus,
     Payload,
-    get_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
 )
@@ -36,12 +35,16 @@ class FakeMLflow:
     def __init__(self) -> None:
         self.root = Path(tempfile.mkdtemp())
 
-    def log_artifact(self, run_id: str, local_path: str, artifact_path: str = "") -> None:
+    def log_artifact(
+        self, run_id: str, local_path: str, artifact_path: str = ""
+    ) -> None:
         dest = self.root / artifact_path
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copy2(local_path, dest / Path(local_path).name)
 
-    def log_artifacts(self, run_id: str, local_dir: str, artifact_path: str = "") -> None:
+    def log_artifacts(
+        self, run_id: str, local_dir: str, artifact_path: str = ""
+    ) -> None:
         dest = self.root / artifact_path
         shutil.copytree(local_dir, str(dest), dirs_exist_ok=True)
 
@@ -71,7 +74,10 @@ class TestRemote(unittest.TestCase):
 
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
             patch(
                 "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(
@@ -103,9 +109,17 @@ class TestRemote(unittest.TestCase):
         job_id = cortexflow.remote(lambda: None)
 
         self.assertTrue(
-            (self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl").exists()
+            (
+                self.fake_mlflow.root
+                / "job"
+                / job_id
+                / "project_code_root"
+                / "payload.pkl"
+            ).exists()
         )
-        self.assertTrue((self.fake_mlflow.root / "job" / job_id / "lifecycle.json").exists())
+        self.assertTrue(
+            (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").exists()
+        )
 
     def test_remote_uploads_project_code(self) -> None:
         set_instance(_make_experiment())
@@ -122,7 +136,13 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        requirements = self.fake_mlflow.root / "job" / job_id / "project_code_root" / "requirements.txt"
+        requirements = (
+            self.fake_mlflow.root
+            / "job"
+            / job_id
+            / "project_code_root"
+            / "requirements.txt"
+        )
         self.assertTrue(requirements.exists())
         self.assertIn("numpy==1.26", requirements.read_text())
         self.assertIn("torch==2.5", requirements.read_text())
@@ -132,9 +152,18 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        requirements = self.fake_mlflow.root / "job" / job_id / "project_code_root" / "requirements.txt"
+        requirements = (
+            self.fake_mlflow.root
+            / "job"
+            / job_id
+            / "project_code_root"
+            / "requirements.txt"
+        )
         content = requirements.read_text()
-        self.assertIn("git+https://x-access-token:ghp_faketoken@github.com/paksas/robolab-infra.git", content)
+        self.assertIn(
+            "git+https://x-access-token:ghp_faketoken@github.com/paksas/robolab-infra.git",
+            content,
+        )
         self.assertNotIn("git+https://github.com/paksas/robolab-infra.git", content)
 
     def test_remote_excludes_venv_and_git(self) -> None:
@@ -157,7 +186,6 @@ class TestRemote(unittest.TestCase):
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
-        self.assertIsNone(lifecycle.ray_job_id)
         self.assertFalse(lifecycle.stop_requested)
         self.assertIsNone(lifecycle.error)
         self.assertFalse(lifecycle.retry)
@@ -208,7 +236,10 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
             patch(
                 "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(stdout="numpy==1.26\n"),
@@ -237,7 +268,13 @@ class TestPayloadSaveLoad(unittest.TestCase):
         payload.save_to_mlflow()
 
         self.assertTrue(
-            (self.fake_mlflow.root / "job" / "job-1" / "project_code_root" / "payload.pkl").exists()
+            (
+                self.fake_mlflow.root
+                / "job"
+                / "job-1"
+                / "project_code_root"
+                / "payload.pkl"
+            ).exists()
         )
 
     def test_save_creates_project_code_root_dir(self) -> None:
@@ -288,7 +325,9 @@ class TestPayloadSaveLoad(unittest.TestCase):
         self.assertTrue(Path(loaded.project_code_root).is_dir())
         self.assertTrue((Path(loaded.project_code_root) / "pyproject.toml").exists())
         self.assertTrue((Path(loaded.project_code_root) / "train.py").exists())
-        self.assertTrue((Path(loaded.project_code_root) / "data" / "config.yaml").exists())
+        self.assertTrue(
+            (Path(loaded.project_code_root) / "data" / "config.yaml").exists()
+        )
 
     def test_load_project_code_root_differs_from_original(self) -> None:
         payload = self._make_payload()
@@ -300,82 +339,48 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
 
 class TestGetJobStatus(unittest.TestCase):
+    """``get_ray_job_status`` is a thin mapping from Ray's raw state string.
+
+    ``None`` is the sentinel for "never submitted"; it maps to PENDING
+    without needing a separate signal. Ray's own PENDING (queued) also
+    maps to PENDING — callers that need to distinguish the two check
+    ``ray_job_id is None`` first.
+    """
+
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
         self.mock_get_ray_status = MagicMock()
-        patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-            patch("cortexflow.jobs.get_ray_status", self.mock_get_ray_status),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        patcher = patch("cortexflow.ray_util.get_ray_status", self.mock_get_ray_status)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def _lc(
-        self,
-        ray_job_id: str | None = None,
-        stop_requested: bool = False,
-    ) -> JobLifecycle:
-        return JobLifecycle(
-            experiment_name=EXPERIMENT_NAME,
-            run_id=RUN_ID,
-            job_id="job-1",
-            ray_job_id=ray_job_id,
-            stop_requested=stop_requested,
-        )
+    def test_none_ray_job_id_is_pending(self) -> None:
+        self.mock_get_ray_status.return_value = None
+        self.assertEqual(get_ray_job_status(None), JobStatus.PENDING)
 
-    def test_unsubmitted_job_is_pending(self) -> None:
-        self.assertEqual(get_job_status(self._lc()), JobStatus.PENDING)
-        self.mock_get_ray_status.assert_not_called()
-
-    def test_unsubmitted_job_with_stop_requested_is_stopped(self) -> None:
-        self.assertEqual(
-            get_job_status(self._lc(stop_requested=True)), JobStatus.STOPPED
-        )
-        self.mock_get_ray_status.assert_not_called()
-
-    def test_submitted_job_derives_status_from_ray(self) -> None:
+    def test_ray_running_maps_to_running(self) -> None:
         self.mock_get_ray_status.return_value = "RUNNING"
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid")), JobStatus.RUNNING
-        )
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.RUNNING)
         self.mock_get_ray_status.assert_called_once_with("sid")
 
     def test_ray_succeeded_maps_to_finished(self) -> None:
         self.mock_get_ray_status.return_value = "SUCCEEDED"
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid")), JobStatus.FINISHED
-        )
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.FINISHED)
 
     def test_ray_failed_maps_to_failed(self) -> None:
         self.mock_get_ray_status.return_value = "FAILED"
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid")), JobStatus.FAILED
-        )
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.FAILED)
 
     def test_ray_stopped_maps_to_stopped(self) -> None:
         self.mock_get_ray_status.return_value = "STOPPED"
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid")), JobStatus.STOPPED
-        )
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.STOPPED)
 
     def test_ray_pending_maps_to_pending(self) -> None:
         self.mock_get_ray_status.return_value = "PENDING"
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid")), JobStatus.PENDING
-        )
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.PENDING)
 
-    def test_injected_ray_status_skips_ray_call(self) -> None:
-        # Passing ray_status explicitly is the batching path — no Ray call.
-        self.assertEqual(
-            get_job_status(self._lc(ray_job_id="sid"), ray_status="RUNNING"),
-            JobStatus.RUNNING,
-        )
-        self.mock_get_ray_status.assert_not_called()
+    def test_unknown_ray_state_falls_through_to_running(self) -> None:
+        self.mock_get_ray_status.return_value = "SOMETHING_ELSE"
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.RUNNING)
 
 
 class TestListExperimentRunJobs(unittest.TestCase):
@@ -383,7 +388,10 @@ class TestListExperimentRunJobs(unittest.TestCase):
         self.fake_mlflow = FakeMLflow()
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
         ]
         for p in patchers:
             p.start()
@@ -414,6 +422,63 @@ class TestListExperimentRunJobs(unittest.TestCase):
 
         self.assertEqual([j.job_id for j in result], ["j1"])
 
+    def test_error_field_round_trips_through_mlflow(self) -> None:
+        """A lifecycle with an error message survives save+load."""
+        saved = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="j1",
+            error="payload download failed",
+        )
+        saved.save_to_mlflow()
+
+        loaded = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
+
+        self.assertEqual(loaded.error, "payload download failed")
+
+
+class TestGetRayJobId(unittest.TestCase):
+    """``JobLifecycle.get_ray_job_id`` accepts a pre-fetched Ray submission
+    list so callers can batch the Ray round-trip across many jobs."""
+
+    def _lifecycle(self, job_id: str = "job-1") -> JobLifecycle:
+        return JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id=job_id
+        )
+
+    def test_passed_list_is_used_without_querying_ray(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id(
+                ["run-1-job-1-0", "run-1-job-1-1"]
+            )
+
+        self.assertEqual(result, "run-1-job-1-1")
+        mock_list.assert_not_called()
+
+    def test_empty_passed_list_returns_none_without_querying_ray(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id([])
+
+        self.assertIsNone(result)
+        mock_list.assert_not_called()
+
+    def test_no_arg_queries_ray_live(self) -> None:
+        lifecycle = self._lifecycle()
+        with patch(
+            "cortexflow.jobs.list_ray_jobs_with_submission_id",
+            return_value=["run-1-job-1-0"],
+        ) as mock_list:
+            result = lifecycle.get_ray_job_id()
+
+        self.assertEqual(result, "run-1-job-1-0")
+        mock_list.assert_called_once()
+
 
 class TestStopExperimentRunJobs(unittest.TestCase):
     """stop_experiment_run_jobs is a pure latch-flipper: it never calls Ray."""
@@ -434,14 +499,12 @@ class TestStopExperimentRunJobs(unittest.TestCase):
     def _save_job(
         self,
         job_id: str,
-        ray_job_id: str | None = None,
         stop_requested: bool = False,
     ) -> None:
         JobLifecycle(
             experiment_name=EXPERIMENT_NAME,
             run_id=RUN_ID,
             job_id=job_id,
-            ray_job_id=ray_job_id,
             stop_requested=stop_requested,
         ).save_to_mlflow()
 
@@ -449,42 +512,37 @@ class TestStopExperimentRunJobs(unittest.TestCase):
         return JobLifecycle.load_from_mlflow(RUN_ID, job_id)
 
     def test_flips_stop_requested_on_unsubmitted_job(self) -> None:
-        self._save_job("j1", ray_job_id=None)
+        self._save_job("j1")
 
         stop_experiment_run_jobs(RUN_ID)
 
         self.assertTrue(self._loaded("j1").stop_requested)
 
     def test_flips_stop_requested_on_submitted_job(self) -> None:
-        self._save_job("j2", ray_job_id="sid-2")
+        self._save_job("j2")
 
         stop_experiment_run_jobs(RUN_ID)
 
         loaded = self._loaded("j2")
         self.assertTrue(loaded.stop_requested)
-        self.assertEqual(loaded.ray_job_id, "sid-2")  # latch unchanged
 
     def test_does_not_rewrite_already_requested_job(self) -> None:
-        self._save_job("j3", ray_job_id="sid-3", stop_requested=True)
+        self._save_job("j3", stop_requested=True)
         # Capture the original mtime-equivalent by snapshotting the file.
-        original = (
-            self.fake_mlflow.root / "job" / "j3" / "lifecycle.json"
-        ).read_text()
+        original = (self.fake_mlflow.root / "job" / "j3" / "lifecycle.json").read_text()
 
         stop_experiment_run_jobs(RUN_ID)
 
         loaded = self._loaded("j3")
         self.assertTrue(loaded.stop_requested)
         # File content unchanged — we short-circuited before save_to_mlflow.
-        after = (
-            self.fake_mlflow.root / "job" / "j3" / "lifecycle.json"
-        ).read_text()
+        after = (self.fake_mlflow.root / "job" / "j3" / "lifecycle.json").read_text()
         self.assertEqual(original, after)
 
     def test_mixed_jobs_all_get_flipped_except_already_requested(self) -> None:
-        self._save_job("pending", ray_job_id=None)
-        self._save_job("running", ray_job_id="sid-running")
-        self._save_job("requested", ray_job_id="sid-req", stop_requested=True)
+        self._save_job("pending")
+        self._save_job("running")
+        self._save_job("requested", stop_requested=True)
 
         stop_experiment_run_jobs(RUN_ID)
 

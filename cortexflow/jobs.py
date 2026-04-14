@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import cloudpickle  # type: ignore
 from dataclasses import asdict, dataclass
-from enum import Enum
 import json
 import logging
 import os
@@ -16,7 +15,11 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import get_mlflow_tracking_uri
-from cortexflow.ray_util import get_ray_status
+from cortexflow.ray_util import (
+    list_ray_jobs_with_submission_id,
+    ray_submission_id,
+    get_ray_job_attempt,
+)
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -42,14 +45,6 @@ DEFAULT_EXCLUDES = [
 ENABLE_CUDA_ON_RAY = "https://download.pytorch.org/whl/cu128"
 
 
-class JobStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    FINISHED = "finished"
-    FAILED = "failed"
-    STOPPED = "stopped"
-
-
 @dataclass
 class JobLifecycle:
     """Static identity and latches for a job.
@@ -57,17 +52,14 @@ class JobLifecycle:
     JobLifecycle is the source of truth for *job identity* and for a
     handful of fields that are either immutable or can only change once
     over the lifetime of a job. Live execution status is never stored
-    here — it is derived on demand from Ray by :func:`get_job_status`.
+    here — it is derived on demand from Ray by :func:`get_ray_job_status`.
     """
 
     experiment_name: str
     run_id: str
     job_id: str
-    ray_job_id: str | None = (
-        None  # latch: set once, after first successful Ray submission
-    )
     stop_requested: bool = False  # latch: False -> True, never cleared
-    error: str | None = None  # latch: set only for non-Ray submission errors
+    error: str | None = None  # last worker submission error; overwritten on each attempt
     retry: bool = False  # static flag set at job creation
 
     def to_json(self) -> str:
@@ -78,13 +70,21 @@ class JobLifecycle:
         data = json.loads(text)
         return cls(**data)
 
+    def get_ray_job_id(
+        self, all_ray_submission_ids: list[str] | None = None
+    ) -> str | None:
+        if all_ray_submission_ids is None:
+            all_ray_submission_ids = list_ray_jobs_with_submission_id()
+        prefix = ray_submission_id(self.run_id, self.job_id, None) + "-"
+        attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
+        return max(attempts, key=get_ray_job_attempt) if attempts else None
+
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info(
-            "Saving lifecycle for job %s (ray_job_id=%s, stop_requested=%s)",
+            "Saving lifecycle for job %s (stop_requested=%s)",
             self.job_id,
-            self.ray_job_id,
             self.stop_requested,
         )
 
@@ -260,28 +260,6 @@ def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
                 "Skipping job %s: missing lifecycle", job_id
             )
     return result
-
-
-def get_job_status(lifecycle: JobLifecycle, ray_status: str | None = None) -> JobStatus:
-    """Derive the observable status of a job.
-
-    Status is never persisted — it is computed from the lifecycle latches
-    and a live Ray query. Pass ``ray_status`` to reuse a cached value from
-    a bulk ``ray.list_jobs()`` call and avoid N round-trips.
-    """
-    if lifecycle.ray_job_id is None:
-        return JobStatus.STOPPED if lifecycle.stop_requested else JobStatus.PENDING
-    if ray_status is None:
-        ray_status = get_ray_status(lifecycle.ray_job_id)
-    if ray_status == "SUCCEEDED":
-        return JobStatus.FINISHED
-    if ray_status == "FAILED":
-        return JobStatus.FAILED
-    if ray_status == "STOPPED":
-        return JobStatus.STOPPED
-    if ray_status == "PENDING":
-        return JobStatus.PENDING
-    return JobStatus.RUNNING
 
 
 def stop_experiment_run_jobs(run_id: str) -> None:

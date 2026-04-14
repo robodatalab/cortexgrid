@@ -32,7 +32,8 @@ def main():
     terminal = (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED)
     while True:
         lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-        status = cortexflow.get_job_status(lifecycle)
+        ray_job_id = lifecycle.get_ray_job_id()
+        status = cortexflow.get_ray_job_status(ray_job_id)
         print(f"  status: {status.value}")
         if status in terminal:
             break
@@ -43,7 +44,9 @@ def main():
     else:
         # Ray-reported errors live in Ray logs, not on the lifecycle.
         # Check the Ray dashboard or use cortexflow.get_ray_logs(ray_job_id).
-        print(f"\nJob failed. ray_job_id={lifecycle.ray_job_id}")
+        lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
+        ray_job_id = lifecycle.get_ray_job_id()
+        print(f"\nJob failed. ray_job_id={ray_job_id}")
         if lifecycle.error:
             print(f"Submission error: {lifecycle.error}")
 

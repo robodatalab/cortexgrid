@@ -13,8 +13,6 @@ import cortexflow
 
 
 def crashy_job():
-    import cortexflow
-
     ckpt = cortexflow.resume()
     if ckpt:
         print(f"Resumed from checkpoint: execution_count={ckpt.execution_count}")
@@ -33,9 +31,9 @@ def _wait_for_terminal(run_id: str, job_id: str) -> cortexflow.JobStatus:
     """Poll the lifecycle until Ray reports a terminal state."""
     while True:
         lifecycle = cortexflow.JobLifecycle.load_from_mlflow(run_id, job_id)
-        status = cortexflow.get_job_status(lifecycle)
-        ray_id = lifecycle.ray_job_id or "not yet scheduled"
-        print(f"  status: {status.value}  ray_job: {ray_id}")
+        ray_job_id = lifecycle.get_ray_job_id()
+        status = cortexflow.get_ray_job_status(ray_job_id)
+        print(f"  status: {status.value}  ray_job: {ray_job_id or 'not yet scheduled'}")
         if status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
             return status
         time.sleep(5)
@@ -56,7 +54,9 @@ def main():
     if first_status != cortexflow.JobStatus.FAILED:
         print(f"\nExpected first attempt to fail, got {first_status.value}.")
         return
-    print("\nFirst attempt failed as expected; re-submitting to resume from checkpoint.")
+    print(
+        "\nFirst attempt failed as expected; re-submitting to resume from checkpoint."
+    )
 
     # Attempt 2 — cortexflow.resume() should return the saved checkpoint.
     second_job = cortexflow.remote(crashy_job)

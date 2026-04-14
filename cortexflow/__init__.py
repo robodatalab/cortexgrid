@@ -4,13 +4,14 @@ import cortexflow
 
 cortexflow.init()
 
-# Fire-and-forget training on the DGX
-train_fn = cortexflow.remote(num_gpus=1, max_retries=3)(my_train)
-job = train_fn.remote(config)
-print(f"Submitted: {job.job_id}")
+# Fire-and-forget training on the DGX; returns a job id immediately.
+# The jobs control plane picks up the submission and dispatches it to Ray.
+job_id = cortexflow.remote(my_train, config, num_gpus=1, retry=True)
+print(f"Submitted: {job_id}")
 
 # Check on it later
-info = cortexflow.status(job.job_id)
+for job in cortexflow.list_experiment_run_jobs(run_id):
+    status = cortexflow.get_ray_job_status(job.get_ray_job_id())
 
 # Inside the training function — checkpoint after each epoch
 with cortexflow.checkpoint() as ckpt:
@@ -35,10 +36,8 @@ from cortexflow.experiment import (
 from cortexflow.infra import get_ray_job_server_uri, set_runs_on_server
 from cortexflow.jobs import (
     schedule_remote_job,
-    get_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
-    JobStatus,
     JobLifecycle,
     Payload,
 )
@@ -59,6 +58,11 @@ from cortexflow.ray_util import (
     get_ray_job_url,
     stop_ray_job,
     submit_ray_job,
+    list_ray_jobs_with_submission_id,
+    get_ray_job_status,
+    ray_submission_id,
+    get_ray_job_attempt,
+    JobStatus,
 )
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
@@ -89,7 +93,7 @@ __all__ = [
     "Experiment",
     # Ray / jobs
     "remote",
-    "get_job_status",
+    "get_ray_job_status",
     "list_experiment_run_jobs",
     "stop_experiment_run_jobs",
     "JobStatus",
@@ -102,6 +106,9 @@ __all__ = [
     "submit_ray_job",
     "get_ray_job_server_uri",
     "set_runs_on_server",
+    "list_ray_jobs_with_submission_id",
+    "ray_submission_id",
+    "get_ray_job_attempt",
     # MLflow
     "log_metric",
     "log_metrics",

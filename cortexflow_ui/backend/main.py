@@ -6,12 +6,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from cortexflow.experiment import list_experiments
+from cortexflow.ray_util import get_ray_job_status, list_ray_jobs_with_submission_id
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
 from cortexflow.jobs import (
-    JobLifecycle,
-    get_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
+    JobLifecycle,
 )
 from cortexflow.mlflow_util import (
     get_metric_history,
@@ -19,7 +19,7 @@ from cortexflow.mlflow_util import (
     list_run_metrics,
     list_run_params,
 )
-from cortexflow.ray_util import get_ray_job_url, get_ray_logs, get_ray_status
+from cortexflow.ray_util import get_ray_job_url, get_ray_logs
 from cortexflow.secrets import (
     delete_secret,
     get_secret,
@@ -94,6 +94,7 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.get("/api/experiments")
 def experiments() -> list[dict]:
+    all_ray_submission_ids = list_ray_jobs_with_submission_id()
     result = []
     for exp in list_experiments():
         jobs = list_experiment_run_jobs(exp.run_id)
@@ -103,7 +104,12 @@ def experiments() -> list[dict]:
                 "run_id": exp.run_id,
                 "run_name": exp.run_name(),
                 "jobs": [
-                    {"job_id": j.job_id, "status": get_job_status(j).value}
+                    {
+                        "job_id": j.job_id,
+                        "status": get_ray_job_status(
+                            j.get_ray_job_id(all_ray_submission_ids)
+                        ).value,
+                    }
                     for j in jobs
                 ],
             }
@@ -138,8 +144,14 @@ def run_url(run_id: str) -> dict[str, str]:
 
 @app.get("/api/runs/{run_id}/jobs")
 def run_jobs(run_id: str) -> list[dict]:
+    all_ray_submission_ids = list_ray_jobs_with_submission_id()
     return [
-        {"job_id": j.job_id, "status": get_job_status(j).value}
+        {
+            "job_id": j.job_id,
+            "status": get_ray_job_status(
+                j.get_ray_job_id(all_ray_submission_ids)
+            ).value,
+        }
         for j in list_experiment_run_jobs(run_id)
     ]
 
@@ -147,23 +159,22 @@ def run_jobs(run_id: str) -> list[dict]:
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
 def job_detail(run_id: str, job_id: str) -> dict:
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    ray_status = get_ray_status(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
-    ray_url = get_ray_job_url(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
+    ray_job_id = lifecycle.get_ray_job_id()
     return {
         "job_id": lifecycle.job_id,
-        "status": get_job_status(lifecycle, ray_status).value,
+        "status": get_ray_job_status(ray_job_id).value,
         "error": lifecycle.error,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
-        "ray_job_id": lifecycle.ray_job_id,
-        "ray_status": ray_status,
-        "ray_url": ray_url,
+        "ray_job_id": ray_job_id,
+        "ray_url": get_ray_job_url(ray_job_id),
     }
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")
 def ray_job_logs(ray_job_id: str) -> dict[str, str]:
-    return {"logs": get_ray_logs(ray_job_id)}
+    logs = get_ray_logs(ray_job_id)
+    return {"logs": logs or ""}
 
 
 @app.post("/api/runs/{run_id}/stop")
