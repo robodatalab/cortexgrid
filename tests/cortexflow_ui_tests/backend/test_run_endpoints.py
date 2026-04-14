@@ -108,7 +108,10 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.json(), {"logs": "installing torch...\nDone\n"})
 
     @patch("cortexflow_ui.backend.main.get_ray_job_status")
-    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch(
+        "cortexflow_ui.backend.main.list_ray_jobs_with_submission_id",
+        return_value=[],
+    )
     @patch("cortexflow_ui.backend.main.list_experiment_run_jobs")
     def test_run_jobs_returns_list(
         self,
@@ -132,6 +135,30 @@ class TestRunEndpoints(unittest.TestCase):
                 {"job_id": "j2", "status": "finished"},
             ],
         )
+
+    @patch("cortexflow_ui.backend.main.get_ray_job_status", return_value=JobStatus.RUNNING)
+    @patch(
+        "cortexflow_ui.backend.main.list_ray_jobs_with_submission_id",
+        return_value=[],
+    )
+    @patch("cortexflow_ui.backend.main.list_experiment_run_jobs")
+    def test_run_jobs_queries_ray_list_once_regardless_of_job_count(
+        self,
+        mock_list: MagicMock,
+        mock_list_ray_jobs: MagicMock,
+        _mock_status: MagicMock,
+    ) -> None:
+        """Regression guard for the N+1 Ray query bug: one Ray list call
+        per request, not per job."""
+        mock_list.return_value = [
+            JobLifecycle(experiment_name="alpha", run_id="run-1", job_id=f"j{i}")
+            for i in range(5)
+        ]
+
+        response = self.client.get("/api/runs/run-1/jobs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(mock_list_ray_jobs.call_count, 1)
 
     @patch("cortexflow_ui.backend.main.stop_experiment_run_jobs")
     def test_stop_run_calls_cortexflow(self, mock_stop: MagicMock) -> None:

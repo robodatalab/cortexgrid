@@ -212,7 +212,7 @@ class TestPollOnce(unittest.TestCase):
         self._ray_state: dict[str, JobStatus] = {}
         self._submitted: list[tuple[str, str, int]] = []
         self._stopped: list[str] = []
-        self.in_flight: dict[str, Future] = {}
+        self.in_flight: dict[str, tuple[str, str, Future]] = {}
 
         self.executor = MagicMock()
 
@@ -356,7 +356,7 @@ class TestPollOnce(unittest.TestCase):
     def test_in_flight_job_is_not_redispatched(self) -> None:
         self._cjobs.append(_make_lifecycle())
         key = ray_submission_id(RUN_ID, JOB_ID, None)
-        self.in_flight[key] = Future()  # not done
+        self.in_flight[key] = (RUN_ID, JOB_ID, Future())  # not done
 
         poll_once(self.executor, self.in_flight)
 
@@ -368,7 +368,7 @@ class TestPollOnce(unittest.TestCase):
         self._cjobs.append(_make_lifecycle(retry=True))
         self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
         key = ray_submission_id(RUN_ID, JOB_ID, None)
-        self.in_flight[key] = Future()  # not done
+        self.in_flight[key] = (RUN_ID, JOB_ID, Future())  # not done
 
         poll_once(self.executor, self.in_flight)
 
@@ -379,12 +379,12 @@ class TestPollOnce(unittest.TestCase):
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         done: Future = Future()
         done.set_result(None)
-        self.in_flight[key] = done
+        self.in_flight[key] = (RUN_ID, JOB_ID, done)
 
         poll_once(self.executor, self.in_flight)
 
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
-        self.assertIsNot(self.in_flight[key], done)
+        self.assertIsNot(self.in_flight[key][2], done)
 
     def test_pending_in_ray_does_not_crash_loop_across_many_polls(self) -> None:
         """Bug #10 regression — a Ray job sitting in PENDING for many poll
@@ -427,6 +427,38 @@ class TestPollOnce(unittest.TestCase):
         poll_once(self.executor, self.in_flight)
 
         self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), self.in_flight)
+
+    def test_worker_exception_is_persisted_to_lifecycle_error(self) -> None:
+        """A worker that raised has its error written to lifecycle.error."""
+        lifecycle = _make_lifecycle()
+        key = ray_submission_id(RUN_ID, JOB_ID, None)
+        failed: Future = Future()
+        failed.set_exception(RuntimeError("payload download failed"))
+        self.in_flight[key] = (RUN_ID, JOB_ID, failed)
+
+        with patch.object(
+            JobLifecycle, "load_from_mlflow", return_value=lifecycle
+        ), patch.object(JobLifecycle, "save_to_mlflow") as mock_save:
+            poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(lifecycle.error, "payload download failed")
+        mock_save.assert_called_once()
+        self.assertNotIn(key, self.in_flight)
+
+    def test_worker_exception_does_not_block_subsequent_dispatch(self) -> None:
+        """After a worker raises, the next poll can redispatch the job."""
+        self._cjobs.append(_make_lifecycle())
+        key = ray_submission_id(RUN_ID, JOB_ID, None)
+        failed: Future = Future()
+        failed.set_exception(RuntimeError("boom"))
+        self.in_flight[key] = (RUN_ID, JOB_ID, failed)
+
+        with patch.object(
+            JobLifecycle, "load_from_mlflow", return_value=_make_lifecycle()
+        ), patch.object(JobLifecycle, "save_to_mlflow"):
+            poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
 
 
 class TestSubmitJobWorker(unittest.TestCase):

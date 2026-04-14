@@ -59,7 +59,7 @@ class JobLifecycle:
     run_id: str
     job_id: str
     stop_requested: bool = False  # latch: False -> True, never cleared
-    error: str | None = None  # latch: set only for non-Ray submission errors
+    error: str | None = None  # last worker submission error; overwritten on each attempt
     retry: bool = False  # static flag set at job creation
 
     def to_json(self) -> str:
@@ -70,9 +70,13 @@ class JobLifecycle:
         data = json.loads(text)
         return cls(**data)
 
-    def get_ray_job_id(self) -> str | None:
+    def get_ray_job_id(
+        self, all_ray_submission_ids: list[str] | None = None
+    ) -> str | None:
+        if all_ray_submission_ids is None:
+            all_ray_submission_ids = list_ray_jobs_with_submission_id()
         prefix = ray_submission_id(self.run_id, self.job_id, None) + "-"
-        attempts = [sid for sid in list_ray_jobs_with_submission_id() if sid.startswith(prefix)]
+        attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
         return max(attempts, key=get_ray_job_attempt) if attempts else None
 
     def save_to_mlflow(self) -> None:

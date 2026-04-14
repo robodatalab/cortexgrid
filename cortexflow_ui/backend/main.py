@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from cortexflow.experiment import list_experiments
-from cortexflow.ray_util import get_ray_job_status
+from cortexflow.ray_util import get_ray_job_status, list_ray_jobs_with_submission_id
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
 from cortexflow.jobs import (
     list_experiment_run_jobs,
@@ -94,6 +94,7 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.get("/api/experiments")
 def experiments() -> list[dict]:
+    all_ray_submission_ids = list_ray_jobs_with_submission_id()
     result = []
     for exp in list_experiments():
         jobs = list_experiment_run_jobs(exp.run_id)
@@ -105,7 +106,9 @@ def experiments() -> list[dict]:
                 "jobs": [
                     {
                         "job_id": j.job_id,
-                        "status": get_ray_job_status(j.get_ray_job_id()).value,
+                        "status": get_ray_job_status(
+                            j.get_ray_job_id(all_ray_submission_ids)
+                        ).value,
                     }
                     for j in jobs
                 ],
@@ -141,10 +144,13 @@ def run_url(run_id: str) -> dict[str, str]:
 
 @app.get("/api/runs/{run_id}/jobs")
 def run_jobs(run_id: str) -> list[dict]:
+    all_ray_submission_ids = list_ray_jobs_with_submission_id()
     return [
         {
             "job_id": j.job_id,
-            "status": get_ray_job_status(j.get_ray_job_id()).value,
+            "status": get_ray_job_status(
+                j.get_ray_job_id(all_ray_submission_ids)
+            ).value,
         }
         for j in list_experiment_run_jobs(run_id)
     ]

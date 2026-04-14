@@ -91,13 +91,25 @@ def _match_ray_jobs_to_cortexflow_jobs(
 
 def poll_once(
     executor: ProcessPoolExecutor,
-    in_flight: dict[str, Future],
+    in_flight: dict[str, tuple[str, str, Future]],
 ) -> None:
     """Single poll cycle: scan all jobs, dispatch work, handle stops."""
-    # remove the finished _submit_job_worker futures from the list
     for submission_id_core in list(in_flight.keys()):
-        if in_flight[submission_id_core].done():
-            del in_flight[submission_id_core]
+        run_id, job_id, future = in_flight[submission_id_core]
+        if not future.done():
+            continue
+        exc = future.exception()
+        if exc is not None:
+            log.error("Worker for %s failed: %s", submission_id_core, exc)
+            try:
+                lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+                lifecycle.error = str(exc)
+                lifecycle.save_to_mlflow()
+            except Exception:
+                log.exception(
+                    "Failed to persist error for %s", submission_id_core
+                )
+        del in_flight[submission_id_core]
 
     experiments = list_experiments()
     cortexflow_jobs = [
@@ -118,22 +130,28 @@ def poll_once(
             continue
 
         if rjob is None:
-            in_flight[submission_id_core] = executor.submit(
-                _submit_job_worker, cjob.run_id, cjob.job_id, 0
+            in_flight[submission_id_core] = (
+                cjob.run_id,
+                cjob.job_id,
+                executor.submit(_submit_job_worker, cjob.run_id, cjob.job_id, 0),
             )
             continue
 
         if get_ray_job_status(rjob) == JobStatus.FAILED and cjob.retry:
             attempt = get_ray_job_attempt(rjob)
-            in_flight[submission_id_core] = executor.submit(
-                _submit_job_worker, cjob.run_id, cjob.job_id, attempt + 1
+            in_flight[submission_id_core] = (
+                cjob.run_id,
+                cjob.job_id,
+                executor.submit(
+                    _submit_job_worker, cjob.run_id, cjob.job_id, attempt + 1
+                ),
             )
 
 
 def main() -> None:
     set_runs_on_server(True)
     executor = ProcessPoolExecutor(max_workers=STARTER_WORKERS)
-    in_flight: dict[str, Future] = {}
+    in_flight: dict[str, tuple[str, str, Future]] = {}
     while True:
         try:
             poll_once(executor, in_flight)
