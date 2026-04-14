@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import cloudpickle  # type: ignore
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import logging
 import os
@@ -46,6 +46,21 @@ ENABLE_CUDA_ON_RAY = "https://download.pytorch.org/whl/cu128"
 
 
 @dataclass
+class LifecycleEvent:
+    """A single observed state on a given attempt of a job.
+
+    ``start`` and ``end`` are ISO 8601 timestamps. ``end`` is ``None``
+    while the state is still current; it is set when a subsequent
+    observation shows the (attempt, state) pair has changed.
+    """
+
+    attempt: int
+    state: str
+    start: str
+    end: str | None = None
+
+
+@dataclass
 class JobLifecycle:
     """Static identity and latches for a job.
 
@@ -61,6 +76,7 @@ class JobLifecycle:
     stop_requested: bool = False  # latch: False -> True, never cleared
     error: str | None = None  # last worker submission error; overwritten on each attempt
     retry: bool = False  # static flag set at job creation
+    history: list[LifecycleEvent] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self))
@@ -68,6 +84,7 @@ class JobLifecycle:
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
         data = json.loads(text)
+        data["history"] = [LifecycleEvent(**e) for e in data.get("history", [])]
         return cls(**data)
 
     def get_ray_job_id(
