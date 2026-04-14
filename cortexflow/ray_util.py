@@ -2,15 +2,46 @@
 
 from __future__ import annotations
 
-from ray.job_submission import JobSubmissionClient
+from enum import Enum
 
 from cortexflow.infra import get_ray_job_server_uri, get_server_ip
+from ray.job_submission import JobSubmissionClient
 
 
-def get_ray_status(ray_job_id: str) -> str:
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    FINISHED = "finished"
+    FAILED = "failed"
+    STOPPED = "stopped"
+
+
+def get_ray_status(ray_job_id: str | None) -> str | None:
     """Return the current status of a previously submitted ray job."""
+    if ray_job_id is None:
+        return None
+
     client = JobSubmissionClient(get_ray_job_server_uri())
     return client.get_job_status(ray_job_id).value
+
+
+def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
+    """Derive the observable status of a job.
+
+    Status is never persisted — it is computed from the lifecycle latches
+    and a live Ray query. Pass ``ray_status`` to reuse a cached value from
+    a bulk ``ray.list_jobs()`` call and avoid N round-trips.
+    """
+    ray_status = get_ray_status(ray_job_id)
+    if ray_job_id is None or ray_status == "PENDING":
+        return JobStatus.PENDING
+    if ray_status == "SUCCEEDED":
+        return JobStatus.FINISHED
+    if ray_status == "FAILED":
+        return JobStatus.FAILED
+    if ray_status == "STOPPED":
+        return JobStatus.STOPPED
+    return JobStatus.RUNNING
 
 
 def get_ray_logs(ray_job_id: str) -> str:
@@ -29,6 +60,28 @@ def stop_ray_job(ray_job_id: str) -> None:
     """Stop a running ray job."""
     client = JobSubmissionClient(get_ray_job_server_uri())
     client.stop_job(ray_job_id)
+
+
+def list_ray_jobs_with_submission_id() -> list[str]:
+    """List all ray jobs, the ones that received submission id."""
+    client = JobSubmissionClient(get_ray_job_server_uri())
+    return [
+        job.submission_id for job in client.list_jobs() if job.submission_id is not None
+    ]
+
+
+def ray_submission_id(run_id: str, job_id: str, attempt: int | None) -> str:
+    """Deterministic Ray submission id derived from a job's identity."""
+    return (
+        f"{run_id}-{job_id}-{attempt}" if attempt is not None else f"{run_id}-{job_id}"
+    )
+
+
+def get_ray_job_attempt(ray_job_id: str | None) -> int:
+    if ray_job_id is None:
+        return 0
+
+    return int(ray_job_id.split("-")[-1])
 
 
 def submit_ray_job(

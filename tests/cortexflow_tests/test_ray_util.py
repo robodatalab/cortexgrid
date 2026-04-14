@@ -13,7 +13,7 @@ class FakeJobSubmissionClient:
         self.statuses: dict[str, str] = {}
         self.logs_by_id: dict[str, str] = {}
 
-    def get_job_status(self, job_id: str) -> SimpleNamespace:
+    def get_ray_job_status(self, job_id: str) -> SimpleNamespace:
         return SimpleNamespace(value=self.statuses.get(job_id, "PENDING"))
 
     def get_job_logs(self, job_id: str) -> str:
@@ -49,9 +49,7 @@ class TestRayUtil(unittest.TestCase):
     def test_get_ray_logs_returns_log_text(self) -> None:
         self.fake_jsc.logs_by_id["job-1"] = "hello from the cluster"
 
-        self.assertEqual(
-            cortexflow.get_ray_logs("job-1"), "hello from the cluster"
-        )
+        self.assertEqual(cortexflow.get_ray_logs("job-1"), "hello from the cluster")
 
     def test_get_ray_job_url_builds_dashboard_url(self) -> None:
         url = cortexflow.get_ray_job_url("ray_abc123")

@@ -9,7 +9,7 @@ from cortexflow.experiment import list_experiments
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
 from cortexflow.jobs import (
     JobLifecycle,
-    get_job_status,
+    get_ray_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
 )
@@ -103,7 +103,7 @@ def experiments() -> list[dict]:
                 "run_id": exp.run_id,
                 "run_name": exp.run_name(),
                 "jobs": [
-                    {"job_id": j.job_id, "status": get_job_status(j).value}
+                    {"job_id": j.job_id, "status": get_ray_job_status(j).value}
                     for j in jobs
                 ],
             }
@@ -139,7 +139,7 @@ def run_url(run_id: str) -> dict[str, str]:
 @app.get("/api/runs/{run_id}/jobs")
 def run_jobs(run_id: str) -> list[dict]:
     return [
-        {"job_id": j.job_id, "status": get_job_status(j).value}
+        {"job_id": j.job_id, "status": get_ray_job_status(j).value}
         for j in list_experiment_run_jobs(run_id)
     ]
 
@@ -151,7 +151,7 @@ def job_detail(run_id: str, job_id: str) -> dict:
     ray_url = get_ray_job_url(lifecycle.ray_job_id) if lifecycle.ray_job_id else None
     return {
         "job_id": lifecycle.job_id,
-        "status": get_job_status(lifecycle, ray_status).value,
+        "status": get_ray_job_status(lifecycle, ray_status).value,
         "error": lifecycle.error,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,

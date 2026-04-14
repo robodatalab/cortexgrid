@@ -13,16 +13,21 @@ class TestRunEndpoints(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
-    @patch("cortexflow_ui.backend.main.list_run_metrics", return_value=["loss", "accuracy"])
+    @patch(
+        "cortexflow_ui.backend.main.list_run_metrics", return_value=["loss", "accuracy"]
+    )
     def test_run_metrics_returns_keys(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/runs/run-1/metrics")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), ["loss", "accuracy"])
 
-    @patch("cortexflow_ui.backend.main.get_metric_history", return_value=[
-        {"step": 1, "value": 0.9, "timestamp": 1000},
-        {"step": 2, "value": 0.8, "timestamp": 2000},
-    ])
+    @patch(
+        "cortexflow_ui.backend.main.get_metric_history",
+        return_value=[
+            {"step": 1, "value": 0.9, "timestamp": 1000},
+            {"step": 2, "value": 0.8, "timestamp": 2000},
+        ],
+    )
     def test_run_metric_history_returns_points(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/runs/run-1/metrics/loss")
         self.assertEqual(response.status_code, 200)
@@ -31,25 +36,39 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data[0]["step"], 1)
         self.assertEqual(data[1]["value"], 0.8)
 
-    @patch("cortexflow_ui.backend.main.list_run_params", return_value={"lr": "0.001", "epochs": "10"})
+    @patch(
+        "cortexflow_ui.backend.main.list_run_params",
+        return_value={"lr": "0.001", "epochs": "10"},
+    )
     def test_run_params_returns_dict(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/runs/run-1/params")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"lr": "0.001", "epochs": "10"})
 
-    @patch("cortexflow_ui.backend.main.list_run_artifacts", return_value=["model.pt", "job/job-1"])
+    @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["model.pt", "job/job-1"],
+    )
     def test_run_artifacts_returns_paths(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/runs/run-1/artifacts")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), ["model.pt", "job/job-1"])
 
-    @patch("cortexflow_ui.backend.main.get_mlflow_run_url", return_value="http://test:5000/#/experiments/1/runs/run-1")
+    @patch(
+        "cortexflow_ui.backend.main.get_mlflow_run_url",
+        return_value="http://test:5000/#/experiments/1/runs/run-1",
+    )
     def test_run_url_returns_mlflow_url(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/runs/run-1/url")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"url": "http://test:5000/#/experiments/1/runs/run-1"})
+        self.assertEqual(
+            response.json(), {"url": "http://test:5000/#/experiments/1/runs/run-1"}
+        )
 
-    @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value="http://test:8265/#/jobs/ray-1")
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_url",
+        return_value="http://test:8265/#/jobs/ray-1",
+    )
     @patch("cortexflow_ui.backend.main.get_ray_status", return_value="RUNNING")
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_returns_lifecycle_and_ray_status(
@@ -75,13 +94,16 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data["ray_status"], "RUNNING")
         self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
 
-    @patch("cortexflow_ui.backend.main.get_ray_logs", return_value="installing torch...\nDone\n")
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_logs",
+        return_value="installing torch...\nDone\n",
+    )
     def test_ray_job_logs_returns_logs(self, _mock: MagicMock) -> None:
         response = self.client.get("/api/ray/jobs/ray-1/logs")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"logs": "installing torch...\nDone\n"})
 
-    @patch("cortexflow_ui.backend.main.get_job_status")
+    @patch("cortexflow_ui.backend.main.get_ray_job_status")
     @patch("cortexflow_ui.backend.main.list_experiment_run_jobs")
     def test_run_jobs_returns_list(
         self, mock_list: MagicMock, mock_status: MagicMock

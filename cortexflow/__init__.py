@@ -35,10 +35,8 @@ from cortexflow.experiment import (
 from cortexflow.infra import get_ray_job_server_uri, set_runs_on_server
 from cortexflow.jobs import (
     schedule_remote_job,
-    get_job_status,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
-    JobStatus,
     JobLifecycle,
     Payload,
 )
@@ -59,6 +57,11 @@ from cortexflow.ray_util import (
     get_ray_job_url,
     stop_ray_job,
     submit_ray_job,
+    list_ray_jobs_with_submission_id,
+    get_ray_job_status,
+    ray_submission_id,
+    get_ray_job_attempt,
+    JobStatus,
 )
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
@@ -89,7 +92,7 @@ __all__ = [
     "Experiment",
     # Ray / jobs
     "remote",
-    "get_job_status",
+    "get_ray_job_status",
     "list_experiment_run_jobs",
     "stop_experiment_run_jobs",
     "JobStatus",
@@ -102,6 +105,9 @@ __all__ = [
     "submit_ray_job",
     "get_ray_job_server_uri",
     "set_runs_on_server",
+    "list_ray_jobs_with_submission_id",
+    "ray_submission_id",
+    "get_ray_job_attempt",
     # MLflow
     "log_metric",
     "log_metrics",
