@@ -53,7 +53,13 @@ from cortexflow.mlflow_util import (
     list_run_params,
     list_run_artifacts,
 )
-from cortexflow.ray_util import get_ray_status, get_ray_logs, get_ray_job_url
+from cortexflow.ray_util import (
+    get_ray_status,
+    get_ray_logs,
+    get_ray_job_url,
+    stop_ray_job,
+    submit_ray_job,
+)
 from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
 
 
@@ -92,6 +98,8 @@ __all__ = [
     "get_ray_status",
     "get_ray_logs",
     "get_ray_job_url",
+    "stop_ray_job",
+    "submit_ray_job",
     "get_ray_job_server_uri",
     "set_runs_on_server",
     # MLflow

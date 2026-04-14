@@ -157,7 +157,8 @@ class TestRemote(unittest.TestCase):
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
-        self.assertEqual(lifecycle.status, JobStatus.PENDING)
+        self.assertIsNone(lifecycle.ray_job_id)
+        self.assertFalse(lifecycle.stop_requested)
         self.assertIsNone(lifecycle.error)
         self.assertFalse(lifecycle.retry)
 
@@ -301,44 +302,80 @@ class TestPayloadSaveLoad(unittest.TestCase):
 class TestGetJobStatus(unittest.TestCase):
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
+        self.mock_get_ray_status = MagicMock()
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+            patch("cortexflow.jobs.get_ray_status", self.mock_get_ray_status),
         ]
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
 
-    def test_get_job_status_returns_lifecycle(self) -> None:
-        lifecycle = JobLifecycle(
+    def _lc(
+        self,
+        ray_job_id: str | None = None,
+        stop_requested: bool = False,
+    ) -> JobLifecycle:
+        return JobLifecycle(
             experiment_name=EXPERIMENT_NAME,
             run_id=RUN_ID,
-            job_id="job-123",
-            status=JobStatus.RUNNING,
-            retry=True,
+            job_id="job-1",
+            ray_job_id=ray_job_id,
+            stop_requested=stop_requested,
         )
-        lifecycle.save_to_mlflow()
 
-        result = get_job_status(RUN_ID, "job-123")
+    def test_unsubmitted_job_is_pending(self) -> None:
+        self.assertEqual(get_job_status(self._lc()), JobStatus.PENDING)
+        self.mock_get_ray_status.assert_not_called()
 
-        self.assertIsInstance(result, JobLifecycle)
-        self.assertEqual(result.status, JobStatus.RUNNING)
-        self.assertTrue(result.retry)
-
-    def test_get_job_status_returns_error_on_failure(self) -> None:
-        lifecycle = JobLifecycle(
-            experiment_name=EXPERIMENT_NAME,
-            run_id=RUN_ID,
-            job_id="job-456",
-            status=JobStatus.FAILED,
-            error="OOM killed",
+    def test_unsubmitted_job_with_stop_requested_is_stopped(self) -> None:
+        self.assertEqual(
+            get_job_status(self._lc(stop_requested=True)), JobStatus.STOPPED
         )
-        lifecycle.save_to_mlflow()
+        self.mock_get_ray_status.assert_not_called()
 
-        result = get_job_status(RUN_ID, "job-456")
+    def test_submitted_job_derives_status_from_ray(self) -> None:
+        self.mock_get_ray_status.return_value = "RUNNING"
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid")), JobStatus.RUNNING
+        )
+        self.mock_get_ray_status.assert_called_once_with("sid")
 
-        self.assertEqual(result.status, JobStatus.FAILED)
-        self.assertEqual(result.error, "OOM killed")
+    def test_ray_succeeded_maps_to_finished(self) -> None:
+        self.mock_get_ray_status.return_value = "SUCCEEDED"
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid")), JobStatus.FINISHED
+        )
+
+    def test_ray_failed_maps_to_failed(self) -> None:
+        self.mock_get_ray_status.return_value = "FAILED"
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid")), JobStatus.FAILED
+        )
+
+    def test_ray_stopped_maps_to_stopped(self) -> None:
+        self.mock_get_ray_status.return_value = "STOPPED"
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid")), JobStatus.STOPPED
+        )
+
+    def test_ray_pending_maps_to_pending(self) -> None:
+        self.mock_get_ray_status.return_value = "PENDING"
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid")), JobStatus.PENDING
+        )
+
+    def test_injected_ray_status_skips_ray_call(self) -> None:
+        # Passing ray_status explicitly is the batching path — no Ray call.
+        self.assertEqual(
+            get_job_status(self._lc(ray_job_id="sid"), ray_status="RUNNING"),
+            JobStatus.RUNNING,
+        )
+        self.mock_get_ray_status.assert_not_called()
 
 
 class TestListExperimentRunJobs(unittest.TestCase):
@@ -358,7 +395,6 @@ class TestListExperimentRunJobs(unittest.TestCase):
                 experiment_name=EXPERIMENT_NAME,
                 run_id=RUN_ID,
                 job_id=job_id,
-                status=JobStatus.RUNNING,
             ).save_to_mlflow()
 
         result = list_experiment_run_jobs(RUN_ID)
@@ -370,7 +406,6 @@ class TestListExperimentRunJobs(unittest.TestCase):
             experiment_name=EXPERIMENT_NAME,
             run_id=RUN_ID,
             job_id="j1",
-            status=JobStatus.RUNNING,
         ).save_to_mlflow()
         # create a job dir without a lifecycle.json
         (self.fake_mlflow.root / "job" / "j2").mkdir(parents=True, exist_ok=True)
@@ -381,57 +416,81 @@ class TestListExperimentRunJobs(unittest.TestCase):
 
 
 class TestStopExperimentRunJobs(unittest.TestCase):
+    """stop_experiment_run_jobs is a pure latch-flipper: it never calls Ray."""
+
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
-        self.mock_stop_ray = MagicMock()
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="http://test:5000"),
-            patch("cortexflow.jobs.stop_ray_job", self.mock_stop_ray),
+            patch(
+                "cortexflow.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
         ]
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
 
-    def _save_job(self, job_id: str, status: JobStatus, ray_job_id: str | None = None) -> None:
+    def _save_job(
+        self,
+        job_id: str,
+        ray_job_id: str | None = None,
+        stop_requested: bool = False,
+    ) -> None:
         JobLifecycle(
             experiment_name=EXPERIMENT_NAME,
             run_id=RUN_ID,
             job_id=job_id,
-            status=status,
             ray_job_id=ray_job_id,
+            stop_requested=stop_requested,
         ).save_to_mlflow()
 
-    def test_stops_pending_and_running_jobs(self) -> None:
-        self._save_job("j1", JobStatus.PENDING)
-        self._save_job("j2", JobStatus.RUNNING, ray_job_id="ray-2")
+    def _loaded(self, job_id: str) -> JobLifecycle:
+        return JobLifecycle.load_from_mlflow(RUN_ID, job_id)
+
+    def test_flips_stop_requested_on_unsubmitted_job(self) -> None:
+        self._save_job("j1", ray_job_id=None)
 
         stop_experiment_run_jobs(RUN_ID)
 
-        updated_j1 = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
-        updated_j2 = JobLifecycle.load_from_mlflow(RUN_ID, "j2")
-        self.assertEqual(updated_j1.status, JobStatus.STOPPED)
-        self.assertEqual(updated_j2.status, JobStatus.STOPPED)
-        self.mock_stop_ray.assert_called_once_with("ray-2")
+        self.assertTrue(self._loaded("j1").stop_requested)
 
-    def test_skips_finished_and_failed_jobs(self) -> None:
-        self._save_job("j1", JobStatus.FINISHED, ray_job_id="ray-1")
-        self._save_job("j2", JobStatus.FAILED, ray_job_id="ray-2")
+    def test_flips_stop_requested_on_submitted_job(self) -> None:
+        self._save_job("j2", ray_job_id="sid-2")
 
         stop_experiment_run_jobs(RUN_ID)
 
-        updated_j1 = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
-        updated_j2 = JobLifecycle.load_from_mlflow(RUN_ID, "j2")
-        self.assertEqual(updated_j1.status, JobStatus.FINISHED)
-        self.assertEqual(updated_j2.status, JobStatus.FAILED)
-        self.mock_stop_ray.assert_not_called()
+        loaded = self._loaded("j2")
+        self.assertTrue(loaded.stop_requested)
+        self.assertEqual(loaded.ray_job_id, "sid-2")  # latch unchanged
 
-    def test_skips_already_stopped_jobs(self) -> None:
-        self._save_job("j1", JobStatus.STOPPED, ray_job_id="ray-1")
+    def test_does_not_rewrite_already_requested_job(self) -> None:
+        self._save_job("j3", ray_job_id="sid-3", stop_requested=True)
+        # Capture the original mtime-equivalent by snapshotting the file.
+        original = (
+            self.fake_mlflow.root / "job" / "j3" / "lifecycle.json"
+        ).read_text()
 
         stop_experiment_run_jobs(RUN_ID)
 
-        self.mock_stop_ray.assert_not_called()
+        loaded = self._loaded("j3")
+        self.assertTrue(loaded.stop_requested)
+        # File content unchanged — we short-circuited before save_to_mlflow.
+        after = (
+            self.fake_mlflow.root / "job" / "j3" / "lifecycle.json"
+        ).read_text()
+        self.assertEqual(original, after)
+
+    def test_mixed_jobs_all_get_flipped_except_already_requested(self) -> None:
+        self._save_job("pending", ray_job_id=None)
+        self._save_job("running", ray_job_id="sid-running")
+        self._save_job("requested", ray_job_id="sid-req", stop_requested=True)
+
+        stop_experiment_run_jobs(RUN_ID)
+
+        self.assertTrue(self._loaded("pending").stop_requested)
+        self.assertTrue(self._loaded("running").stop_requested)
+        self.assertTrue(self._loaded("requested").stop_requested)
 
 
 if __name__ == "__main__":

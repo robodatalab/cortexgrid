@@ -16,7 +16,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import get_mlflow_tracking_uri
-from cortexflow.ray_util import stop_ray_job
+from cortexflow.ray_util import get_ray_status
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -52,33 +52,40 @@ class JobStatus(str, Enum):
 
 @dataclass
 class JobLifecycle:
+    """Static identity and latches for a job.
+
+    JobLifecycle is the source of truth for *job identity* and for a
+    handful of fields that are either immutable or can only change once
+    over the lifetime of a job. Live execution status is never stored
+    here — it is derived on demand from Ray by :func:`get_job_status`.
+    """
+
     experiment_name: str
     run_id: str
     job_id: str
-    status: JobStatus = JobStatus.PENDING
-    error: str | None = None
-    retry: bool = False
-    ray_job_id: str | None = None
+    ray_job_id: str | None = (
+        None  # latch: set once, after first successful Ray submission
+    )
+    stop_requested: bool = False  # latch: False -> True, never cleared
+    error: str | None = None  # latch: set only for non-Ray submission errors
+    retry: bool = False  # static flag set at job creation
 
     def to_json(self) -> str:
-        return json.dumps(
-            {
-                "status": self.status.value,
-                **{k: v for k, v in asdict(self).items() if k != "status"},
-            }
-        )
+        return json.dumps(asdict(self))
 
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
         data = json.loads(text)
-        data["status"] = JobStatus(data["status"])
         return cls(**data)
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info(
-            "Saving lifecycle for job %s (status=%s)", self.job_id, self.status.value
+            "Saving lifecycle for job %s (ray_job_id=%s, stop_requested=%s)",
+            self.job_id,
+            self.ray_job_id,
+            self.stop_requested,
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -145,9 +152,7 @@ class Payload(BaseModel):
         project_code_root = client.download_artifacts(
             run_id, f"job/{job_id}/project_code_root"
         )
-        payload = cloudpickle.loads(
-            Path(project_code_root, "payload.pkl").read_bytes()
-        )
+        payload = cloudpickle.loads(Path(project_code_root, "payload.pkl").read_bytes())
         payload.project_code_root = project_code_root
         log.info(
             "Payload downloaded for job %s, project_code_root=%s",
@@ -239,11 +244,6 @@ def _upload_dir(
             pbar.update(os.path.getsize(filepath))
 
 
-def get_job_status(run_id: str, job_id: str) -> JobLifecycle:
-    """Read the job's lifecycle from MLflow artifacts."""
-    return JobLifecycle.load_from_mlflow(run_id, job_id)
-
-
 def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
@@ -262,12 +262,41 @@ def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
     return result
 
 
+def get_job_status(lifecycle: JobLifecycle, ray_status: str | None = None) -> JobStatus:
+    """Derive the observable status of a job.
+
+    Status is never persisted — it is computed from the lifecycle latches
+    and a live Ray query. Pass ``ray_status`` to reuse a cached value from
+    a bulk ``ray.list_jobs()`` call and avoid N round-trips.
+    """
+    if lifecycle.ray_job_id is None:
+        return JobStatus.STOPPED if lifecycle.stop_requested else JobStatus.PENDING
+    if ray_status is None:
+        ray_status = get_ray_status(lifecycle.ray_job_id)
+    if ray_status == "SUCCEEDED":
+        return JobStatus.FINISHED
+    if ray_status == "FAILED":
+        return JobStatus.FAILED
+    if ray_status == "STOPPED":
+        return JobStatus.STOPPED
+    if ray_status == "PENDING":
+        return JobStatus.PENDING
+    return JobStatus.RUNNING
+
+
 def stop_experiment_run_jobs(run_id: str) -> None:
-    """Stop all pending or running jobs in the specified experiment run."""
+    """Request all jobs in the run to stop by flipping the stop_requested latch.
+
+    This function never touches Ray. The control plane observes the
+    latch on its next poll and calls `ray.stop_job` for any job that
+    has reached Ray. For jobs that have not yet been submitted, the
+    latch short-circuits the submission path in the worker.
+
+    Idempotent: already-requested jobs are skipped, and the flag has
+    no effect on jobs that Ray already reports as terminal.
+    """
     for job in list_experiment_run_jobs(run_id):
-        if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+        if job.stop_requested:
             continue
-        if job.ray_job_id:
-            stop_ray_job(job.ray_job_id)
-        job.status = JobStatus.STOPPED
+        job.stop_requested = True
         job.save_to_mlflow()

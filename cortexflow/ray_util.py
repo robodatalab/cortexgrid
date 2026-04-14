@@ -29,3 +29,26 @@ def stop_ray_job(ray_job_id: str) -> None:
     """Stop a running ray job."""
     client = JobSubmissionClient(get_ray_job_server_uri())
     client.stop_job(ray_job_id)
+
+
+def submit_ray_job(
+    submission_id: str,
+    entrypoint: str,
+    runtime_env: dict,
+    num_gpus: int = 0,
+    num_cpus: int = 1,
+) -> None:
+    """Submit a job to Ray with a caller-supplied deterministic submission_id.
+
+    Raises whatever the Ray SDK raises on a duplicate submission_id; the
+    control plane relies on that exception to short-circuit re-submission
+    on retry paths.
+    """
+    client = JobSubmissionClient(get_ray_job_server_uri())
+    client.submit_job(
+        submission_id=submission_id,
+        entrypoint=entrypoint,
+        runtime_env=runtime_env,
+        entrypoint_num_gpus=num_gpus,
+        entrypoint_num_cpus=num_cpus,
+    )
