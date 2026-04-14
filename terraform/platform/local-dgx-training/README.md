@@ -51,22 +51,20 @@ Then in your code:
 ```python
 import cortexflow
 
-cortexflow.init()
+cortexflow.init(experiment="my-experiment")
+cortexflow.log_metric("loss", 0.5, step=1)
 
-# MLflow experiment tracking
-with cortexflow.mlflow_run("my-experiment") as run:
-    cortexflow.log_metric("loss", 0.5, step=1)
-    cortexflow.save_checkpoint(model, optimizer, epoch=5)
-
-# Distributed compute on the DGX
-@cortexflow.remote(num_gpus=1, max_retries=3)
 def train(config):
     ...
+    with cortexflow.checkpoint() as ckpt:
+        ckpt.epoch = 5
+        ckpt.save_training_state(model, optimizer)
 
-cortexflow.get(train.remote({"lr": 1e-3}))
+# Submit to the jobs control plane; returns a job id immediately.
+job_id = cortexflow.remote(train, {"lr": 1e-3}, num_gpus=1, retry=True)
 ```
 
-Run as normal: `uv run python train.py`
+Run as normal: `uv run python train.py`. The `jobs-control-plane` service on the DGX picks up the submission from MLflow, dispatches it to Ray, and retries it whenever Ray reports the last attempt as failed. Stop a job manually from the UI or by calling `cortexflow.stop_experiment_run_jobs(run_id)`.
 
 See the [root README](../../../README.md#cortexflow) for the full API reference.
 
@@ -75,7 +73,8 @@ See the [root README](../../../README.md#cortexflow) for the full API reference.
 | Service | Port | Purpose |
 |---------|------|---------|
 | Ray | 8265 | Job scheduling, distributed compute |
-| MLflow | 5000 | Experiment tracking, model registry |
+| MLflow | 5000 | Experiment tracking, model registry, and the queue of pending cortexflow job requests |
+| Jobs control plane | — | Polls MLflow for pending `JobLifecycle` records and dispatches them to Ray; handles retries and stops |
 | MinIO | 9000/9001 | S3-compatible artifact storage |
 | PostgreSQL | 5432 | MLflow metadata backend |
 | Redis | 6379 | Ray GCS persistence |

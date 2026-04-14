@@ -4,13 +4,14 @@ import cortexflow
 
 cortexflow.init()
 
-# Fire-and-forget training on the DGX
-train_fn = cortexflow.remote(num_gpus=1, max_retries=3)(my_train)
-job = train_fn.remote(config)
-print(f"Submitted: {job.job_id}")
+# Fire-and-forget training on the DGX; returns a job id immediately.
+# The jobs control plane picks up the submission and dispatches it to Ray.
+job_id = cortexflow.remote(my_train, config, num_gpus=1, retry=True)
+print(f"Submitted: {job_id}")
 
 # Check on it later
-info = cortexflow.status(job.job_id)
+for job in cortexflow.list_experiment_run_jobs(run_id):
+    status = cortexflow.get_ray_job_status(job.get_ray_job_id())
 
 # Inside the training function — checkpoint after each epoch
 with cortexflow.checkpoint() as ckpt:

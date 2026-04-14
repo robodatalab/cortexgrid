@@ -31,7 +31,7 @@ cortexflow.init(experiment="weather-forecast")
 
 That single call reads `RAY_ADDRESS`, `MLFLOW_TRACKING_URI`, and `DGX_TAILSCALE_IP` from your shell environment (set by `make setup-mac`) and connects to all services. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
 
-**One experiment per binary run.** `cortexflow.init()` may only be called once per process. Every subsequent `cortexflow.log_metric`, `cortexflow.log_artifact`, checkpoint, and `cortexflow.remote()` submission is scoped to that experiment+run. Ray jobs submitted via `.remote()` inherit the experiment+run via env vars, so their logging flows into the same MLflow run as the parent binary.
+**One experiment per binary run.** `cortexflow.init()` may only be called once per process. Every subsequent `cortexflow.log_metric`, `cortexflow.log_artifact`, checkpoint, and `cortexflow.remote()` submission is scoped to that experiment+run. Remote jobs dispatched by the control plane inherit the experiment+run via the pickled payload, so their logging flows into the same MLflow run as the parent binary.
 
 #### Experiment tracking (MLflow)
 
@@ -45,38 +45,67 @@ for epoch in range(20):
     cortexflow.log_metric("loss", loss, step=epoch)
 
     if epoch % 5 == 0:
-        cortexflow.save_checkpoint(model, optimizer, epoch=epoch)
+        with cortexflow.checkpoint() as ckpt:
+            ckpt.epoch = epoch
+            ckpt.save_training_state(model, optimizer)
 ```
 
 No run-scoping context manager — `init()` starts the run, and every subsequent logging call flows into it. Metrics and artifacts are logged to the MLflow server on the DGX. View them at `http://<DGX_IP>:5000`.
 
-#### Resuming from a checkpoint
+#### Checkpointing and resuming
+
+Inside a cortexflow job, `cortexflow.checkpoint()` returns an attribute-based checkpoint object that persists to MLflow artifacts when its `with` block exits. On job restart (either manual retry or `retry=True`), `cortexflow.resume()` returns the last checkpoint for the same job ID, or `None` if there isn't one.
 
 ```python
-checkpoint = cortexflow.load_checkpoint(run_id="abc123")
-model.load_state_dict(checkpoint["model_state_dict"])
-optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-start_epoch = checkpoint["epoch"] + 1
+ckpt = cortexflow.resume()
+if ckpt:
+    ckpt.restore_training_state(model, optimizer)
+    start_epoch = ckpt.epoch + 1
+else:
+    start_epoch = 0
+
+for epoch in range(start_epoch, 20):
+    train_one_epoch(model, dataloader)
+    with cortexflow.checkpoint() as ckpt:
+        ckpt.epoch = epoch
+        ckpt.save_training_state(model, optimizer)
 ```
 
-#### Distributed compute (Ray)
+You can assign any cloudpickle-compatible or torch-serializable value as an attribute on the checkpoint (`ckpt.metric = 0.93`, `ckpt.weights = model.state_dict()`); the `save_training_state`/`restore_training_state` helpers are a shortcut for the common model+optimizer pair.
+
+#### Distributed compute (jobs control plane)
 
 ```python
-@cortexflow.remote(num_gpus=1, max_retries=3)
 def train_step(batch):
     # runs on the DGX GPU
     # MLflow and S3 env vars are injected automatically
     return loss
 
-futures = [train_step.remote(b) for b in batches]
-results = cortexflow.get(futures)
+job_id = cortexflow.remote(train_step, batch, num_gpus=1, retry=True)
+print(f"Submitted: {job_id}")
 ```
 
-`cortexflow.remote` wraps `@ray.remote` and automatically:
+`cortexflow.remote` submits a job *request* (a pickled payload plus a `JobLifecycle` record) to MLflow and returns a job ID string immediately. It does not wait for the job to run or finish — use the UI at `http://<DGX_IP>:8000`, or poll `cortexflow.list_experiment_run_jobs(run_id)`, to observe status.
+
+A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
+
+Each submission captures your project's code and dependencies automatically:
 - Reads your project's `pyproject.toml` to build the pip dependency list (including `[tool.uv.sources]` git refs)
 - Sets `working_dir` to your project root
 - Excludes `.venv/`, `.git/`, `__pycache__/`, etc.
 - Injects MLflow/S3 credentials so task code running on the DGX can reach all services
+
+##### Retries
+
+Pass `retry=True` and the control plane will resubmit the job whenever Ray reports the most recent attempt as `FAILED`. Retries are **unbounded by design**: the intended way to end a retry loop is to stop the job manually from the UI (which flips the `stop_requested` latch on the lifecycle, and the control plane stops the current Ray attempt on its next poll). This keeps the retry policy simple — you don't have to predict a good `max_retries` up front — and puts the human in the loop for anything that's failing persistently.
+
+##### Stopping a job
+
+```python
+cortexflow.stop_experiment_run_jobs(run_id)   # stops every job in the run
+```
+
+`stop_experiment_run_jobs` never touches Ray directly. It only flips `stop_requested` on each job's lifecycle record in MLflow. The control plane observes the flag on its next poll and calls `ray.stop_job` for any attempt that has reached Ray. For jobs that have not yet been submitted, the same flag short-circuits the submission path inside the worker.
 
 #### Object storage (S3/MinIO)
 
@@ -94,8 +123,7 @@ Works with MinIO on the DGX today, real S3 on AWS tomorrow — same code.
 
 ```python
 mlflow_client = cortexflow.get_mlflow_client()   # mlflow.tracking.MlflowClient
-ray_client = cortexflow.get_ray_client()         # ray.job_submission.JobSubmissionClient
-s3_client = cortexflow.get_s3_client()            # boto3 S3 client
+s3_client = cortexflow.get_s3_client()           # boto3 S3 client
 ```
 
 ### API reference
@@ -107,14 +135,16 @@ s3_client = cortexflow.get_s3_client()            # boto3 S3 client
 | `cortexflow.log_metrics(metrics, step)` | Log multiple metrics |
 | `cortexflow.log_params(params)` | Log parameters |
 | `cortexflow.log_artifact(path, artifact_path)` | Log a file as an artifact |
-| `cortexflow.save_checkpoint(model, optimizer, epoch)` | Save a PyTorch checkpoint to MLflow |
-| `cortexflow.load_checkpoint(run_id, epoch)` | Load a checkpoint from MLflow |
-| `cortexflow.remote(**kwargs)` | Decorator wrapping `@ray.remote` — auto-builds runtime_env from pyproject.toml |
-| `cortexflow.get(futures)` | `ray.get()` alias |
+| `cortexflow.checkpoint()` | Context manager returning an attribute-based checkpoint saved to MLflow on exit |
+| `cortexflow.resume()` | Load the latest checkpoint for the current job, or `None` |
+| `cortexflow.remote(fn, *args, num_gpus=0, num_cpus=1, retry=False, **kwargs)` | Submit a function to the jobs control plane; returns a job ID |
+| `cortexflow.list_experiment_run_jobs(run_id)` | List `JobLifecycle` records for every cortexflow job in a run |
+| `cortexflow.stop_experiment_run_jobs(run_id)` | Request every job in a run to stop (flips the `stop_requested` latch) |
+| `cortexflow.get_ray_job_status(ray_job_id)` | Live Ray status for a submission id |
+| `cortexflow.get_ray_logs(ray_job_id)` | Tail the stdout/stderr of a Ray submission |
 | `cortexflow.upload(path, bucket, key)` | Upload a file to S3/MinIO |
 | `cortexflow.download(bucket, key, path)` | Download a file from S3/MinIO |
 | `cortexflow.get_mlflow_client()` | Raw configured MLflow client |
-| `cortexflow.get_ray_client()` | Raw configured Ray JobSubmissionClient |
 | `cortexflow.get_s3_client()` | Raw configured boto3 S3 client |
 
 ## ML compute stack
@@ -131,6 +161,3 @@ The DGX Spark runs the following services via Docker Compose:
 | Prometheus | 9090 | Metrics collection |
 | Grafana | 3000 | Dashboards (GPU, jobs, system) |
 
-## Tasks
-
-- [ ] `remote()` currently fails the whole submission if mlflow is unreachable when registering the ray_job_id. Add a graceful-degradation path (warn + continue, with retry/buffering) so transient mlflow outages don't block job submission.
