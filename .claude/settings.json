@@ -55,7 +55,8 @@
       "Bash(python -m unittest tests.cortexflow_tests.test_jobs tests.cortexflow_ui_tests.backend.test_run_endpoints)",
       "Bash(python -m unittest tests.cortexflow_ui_tests.backend.test_run_endpoints)",
       "Bash(python -m unittest tests.cortexflow_tests.test_jobs)",
-      "Bash(python -m unittest tests.cortexflow_tests.test_jobs tests.jobs_control_plane_tests.test_server tests.cortexflow_ui_tests.backend.test_run_endpoints)"
+      "Bash(python -m unittest tests.cortexflow_tests.test_jobs tests.jobs_control_plane_tests.test_server tests.cortexflow_ui_tests.backend.test_run_endpoints)",
+      "Bash(git pull *)"
     ]
   }
 }
