@@ -19,7 +19,7 @@ from cortexflow.mlflow_util import (
     list_run_metrics,
     list_run_params,
 )
-from cortexflow.ray_util import get_ray_job_url, get_ray_logs, get_ray_status
+from cortexflow.ray_util import get_ray_job_url, get_ray_logs
 from cortexflow.secrets import (
     delete_secret,
     get_secret,
@@ -103,7 +103,10 @@ def experiments() -> list[dict]:
                 "run_id": exp.run_id,
                 "run_name": exp.run_name(),
                 "jobs": [
-                    {"job_id": j.job_id, "status": get_ray_job_status(j).value}
+                    {
+                        "job_id": j.job_id,
+                        "status": get_ray_job_status(j.get_ray_job_id()).value,
+                    }
                     for j in jobs
                 ],
             }
@@ -139,7 +142,10 @@ def run_url(run_id: str) -> dict[str, str]:
 @app.get("/api/runs/{run_id}/jobs")
 def run_jobs(run_id: str) -> list[dict]:
     return [
-        {"job_id": j.job_id, "status": get_ray_job_status(j).value}
+        {
+            "job_id": j.job_id,
+            "status": get_ray_job_status(j.get_ray_job_id()).value,
+        }
         for j in list_experiment_run_jobs(run_id)
     ]
 
@@ -148,16 +154,14 @@ def run_jobs(run_id: str) -> list[dict]:
 def job_detail(run_id: str, job_id: str) -> dict:
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
     ray_job_id = lifecycle.get_ray_job_id()
-    ray_status = get_ray_status(ray_job_id)
-    ray_url = get_ray_job_url(ray_job_id)
     return {
         "job_id": lifecycle.job_id,
-        "status": str(ray_status),
+        "status": get_ray_job_status(ray_job_id).value,
         "error": lifecycle.error,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
-        "ray_status": ray_status,
-        "ray_url": ray_url,
+        "ray_job_id": ray_job_id,
+        "ray_url": get_ray_job_url(ray_job_id),
     }
 
 

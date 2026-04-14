@@ -70,14 +70,17 @@ class TestRunEndpoints(unittest.TestCase):
         "cortexflow_ui.backend.main.get_ray_job_url",
         return_value="http://test:8265/#/jobs/ray-1",
     )
-    @patch("cortexflow_ui.backend.main.get_ray_status", return_value="RUNNING")
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status",
+        return_value=JobStatus.RUNNING,
+    )
     @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_returns_lifecycle_and_ray_status(
         self,
         mock_lifecycle_cls: MagicMock,
         _mock_list_ray_jobs: MagicMock,
-        _mock_ray_status: MagicMock,
+        _mock_status: MagicMock,
         _mock_ray_url: MagicMock,
     ) -> None:
         mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
@@ -91,8 +94,8 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["job_id"], "job-1")
-        self.assertEqual(data["status"], "RUNNING")
-        self.assertEqual(data["ray_status"], "RUNNING")
+        self.assertEqual(data["status"], "running")
+        self.assertIsNone(data["ray_job_id"])
         self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
 
     @patch(
@@ -105,9 +108,13 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.json(), {"logs": "installing torch...\nDone\n"})
 
     @patch("cortexflow_ui.backend.main.get_ray_job_status")
+    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.list_experiment_run_jobs")
     def test_run_jobs_returns_list(
-        self, mock_list: MagicMock, mock_status: MagicMock
+        self,
+        mock_list: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
+        mock_status: MagicMock,
     ) -> None:
         mock_list.return_value = [
             JobLifecycle(experiment_name="alpha", run_id="run-1", job_id="j1"),
