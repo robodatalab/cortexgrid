@@ -1,8 +1,29 @@
 .job-dashboard {
   padding: 24px;
-  overflow-y: auto;
+  overflow: hidden;
   height: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.job-dashboard__header,
+.job-dashboard__meta {
+  flex-shrink: 0;
+}
+
+.job-dashboard__section--timeline {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.job-dashboard__attempts {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .job-dashboard__header {
@@ -86,4 +107,90 @@
   max-height: 500px;
   overflow: auto;
   white-space: pre;
+}
+
+.job-dashboard__meta {
+  font-size: 13px;
+  font-family: monospace;
+  margin-bottom: 16px;
+  color: #444;
+}
+
+.job-dashboard__attempt {
+  margin-bottom: 16px;
+  border: 1px solid #000;
+  padding: 12px;
+}
+
+.job-dashboard__attempt-header {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #666;
+}
+
+.job-dashboard__attempt-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.job-dashboard__event {
+  position: relative;
+  padding: 6px 10px;
+  border: 1px solid #000;
+  min-width: 120px;
+  font-size: 11px;
+}
+
+.job-dashboard__event:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: #000;
+}
+
+.job-dashboard__event-state {
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.job-dashboard__event-time {
+  font-family: monospace;
+  color: #444;
+  margin-top: 2px;
+}
+
+.job-dashboard__event-error {
+  font-family: monospace;
+  font-size: 10px;
+  color: #cc0000;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.job-dashboard__event--pending {
+  background: #eee;
+}
+
+.job-dashboard__event--running {
+  background: #d0e4ff;
+}
+
+.job-dashboard__event--finished {
+  background: #d4edda;
+}
+
+.job-dashboard__event--failed {
+  background: #f8d7da;
+  border-color: #cc0000;
+}
+
+.job-dashboard__event--stopped {
+  background: #fff3cd;
 }

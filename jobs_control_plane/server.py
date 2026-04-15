@@ -21,10 +21,12 @@ import logging
 import os
 import time
 from concurrent.futures import Future, ProcessPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cortexflow import (
     JobLifecycle,
+    LifecycleEvent,
     Payload,
     get_ray_job_status,
     list_experiment_run_jobs,
@@ -75,6 +77,31 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     )
 
 
+def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
+    """Append a lifecycle event when the observed (attempt, state) changes.
+
+    Ray owns the state machine; we only observe. On every poll we compare
+    the latest observation against the last history entry and, on a
+    mismatch, close the prior entry and append a new one. The new entry
+    records the Ray submission id observed at the time (``None`` before
+    the worker has successfully handed the job off to Ray).
+    """
+    attempt = get_ray_job_attempt(rjob)
+    state = get_ray_job_status(rjob).value
+    now = datetime.now(timezone.utc).isoformat()
+    last = cjob.history[-1] if cjob.history else None
+    if last is not None and last.attempt == attempt and last.state == state:
+        return
+    if last is not None:
+        last.end = now
+    cjob.history.append(
+        LifecycleEvent(
+            attempt=attempt, state=state, start=now, ray_job_id=rjob
+        )
+    )
+    cjob.save_to_mlflow()
+
+
 def _match_ray_jobs_to_cortexflow_jobs(
     cortexflow_jobs: list[JobLifecycle],
 ) -> list[tuple[JobLifecycle, str | None]]:
@@ -103,8 +130,9 @@ def poll_once(
             log.error("Worker for %s failed: %s", submission_id_core, exc)
             try:
                 lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-                lifecycle.error = str(exc)
-                lifecycle.save_to_mlflow()
+                if lifecycle.history:
+                    lifecycle.history[-1].error = str(exc)
+                    lifecycle.save_to_mlflow()
             except Exception:
                 log.exception(
                     "Failed to persist error for %s", submission_id_core
@@ -120,6 +148,7 @@ def poll_once(
     cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
 
     for cjob, rjob in cortexflow_to_ray_jobs:
+        _record_state(cjob, rjob)
         submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
         if submission_id_core in in_flight:
             continue

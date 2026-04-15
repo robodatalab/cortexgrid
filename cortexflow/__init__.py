@@ -39,6 +39,7 @@ from cortexflow.jobs import (
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
     JobLifecycle,
+    LifecycleEvent,
     Payload,
 )
 from cortexflow.mlflow_util import (
@@ -98,6 +99,7 @@ __all__ = [
     "stop_experiment_run_jobs",
     "JobStatus",
     "JobLifecycle",
+    "LifecycleEvent",
     "Payload",
     "get_ray_status",
     "get_ray_logs",

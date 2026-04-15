@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -163,11 +164,11 @@ def job_detail(run_id: str, job_id: str) -> dict:
     return {
         "job_id": lifecycle.job_id,
         "status": get_ray_job_status(ray_job_id).value,
-        "error": lifecycle.error,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
         "ray_job_id": ray_job_id,
         "ray_url": get_ray_job_url(ray_job_id),
+        "history": [asdict(event) for event in lifecycle.history],
     }
 
 

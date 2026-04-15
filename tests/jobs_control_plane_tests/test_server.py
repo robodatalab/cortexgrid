@@ -14,10 +14,11 @@ import cloudpickle  # type: ignore
 from parameterized import parameterized
 
 from cortexflow.experiment import Experiment
-from cortexflow.jobs import JobLifecycle, Payload
+from cortexflow.jobs import JobLifecycle, LifecycleEvent, Payload
 from cortexflow.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
     _match_ray_jobs_to_cortexflow_jobs,
+    _record_state,
     _submit_job_worker,
     poll_once,
 )
@@ -256,6 +257,7 @@ class TestPollOnce(unittest.TestCase):
                 "jobs_control_plane.server.stop_ray_job",
                 side_effect=self._stopped.append,
             ),
+            patch("cortexflow.jobs.JobLifecycle.save_to_mlflow"),
         ]
         for p in patchers:
             p.start()
@@ -428,9 +430,14 @@ class TestPollOnce(unittest.TestCase):
 
         self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), self.in_flight)
 
-    def test_worker_exception_is_persisted_to_lifecycle_error(self) -> None:
-        """A worker that raised has its error written to lifecycle.error."""
+    def test_worker_exception_is_persisted_to_last_event_error(self) -> None:
+        """A worker that raised has its error attached to the last history event."""
         lifecycle = _make_lifecycle()
+        lifecycle.history.append(
+            LifecycleEvent(
+                attempt=0, state="pending", start="2026-04-15T10:00:00+00:00"
+            )
+        )
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         failed: Future = Future()
         failed.set_exception(RuntimeError("payload download failed"))
@@ -438,11 +445,10 @@ class TestPollOnce(unittest.TestCase):
 
         with patch.object(
             JobLifecycle, "load_from_mlflow", return_value=lifecycle
-        ), patch.object(JobLifecycle, "save_to_mlflow") as mock_save:
+        ):
             poll_once(self.executor, self.in_flight)
 
-        self.assertEqual(lifecycle.error, "payload download failed")
-        mock_save.assert_called_once()
+        self.assertEqual(lifecycle.history[-1].error, "payload download failed")
         self.assertNotIn(key, self.in_flight)
 
     def test_worker_exception_does_not_block_subsequent_dispatch(self) -> None:
@@ -557,6 +563,82 @@ class TestSubmitJobWorker(unittest.TestCase):
 
 def _noop() -> None:
     pass
+
+
+class TestRecordState(unittest.TestCase):
+    """Tests for ``_record_state`` — observation-to-history recorder."""
+
+    def setUp(self) -> None:
+        patchers = [
+            patch("cortexflow.jobs.JobLifecycle.save_to_mlflow"),
+            patch("jobs_control_plane.server.get_ray_job_status"),
+            patch("jobs_control_plane.server.get_ray_job_attempt"),
+        ]
+        self._save, self._status, self._attempt = [p.start() for p in patchers]
+        for p in patchers:
+            self.addCleanup(p.stop)
+
+    def _observe(self, cjob: JobLifecycle, attempt: int, state: JobStatus) -> None:
+        self._attempt.return_value = attempt
+        self._status.return_value = state
+        _record_state(cjob, f"{cjob.run_id}-{cjob.job_id}-{attempt}")
+
+    def test_first_observation_appends_open_entry(self) -> None:
+        cjob = _make_lifecycle()
+        self._observe(cjob, 0, JobStatus.PENDING)
+        self.assertEqual(len(cjob.history), 1)
+        self.assertEqual(cjob.history[0].attempt, 0)
+        self.assertEqual(cjob.history[0].state, JobStatus.PENDING.value)
+        self.assertIsNone(cjob.history[0].end)
+        self.assertEqual(self._save.call_count, 1)
+
+    def test_same_state_is_noop(self) -> None:
+        cjob = _make_lifecycle()
+        self._observe(cjob, 0, JobStatus.RUNNING)
+        self._observe(cjob, 0, JobStatus.RUNNING)
+        self.assertEqual(len(cjob.history), 1)
+        self.assertEqual(self._save.call_count, 1)
+
+    def test_state_change_closes_and_appends(self) -> None:
+        cjob = _make_lifecycle()
+        self._observe(cjob, 0, JobStatus.PENDING)
+        self._observe(cjob, 0, JobStatus.RUNNING)
+        self.assertEqual(len(cjob.history), 2)
+        self.assertIsNotNone(cjob.history[0].end)
+        self.assertEqual(cjob.history[0].state, JobStatus.PENDING.value)
+        self.assertEqual(cjob.history[1].state, JobStatus.RUNNING.value)
+        self.assertIsNone(cjob.history[1].end)
+        self.assertEqual(self._save.call_count, 2)
+
+    def test_attempt_change_closes_and_appends(self) -> None:
+        cjob = _make_lifecycle()
+        self._observe(cjob, 0, JobStatus.FAILED)
+        self._observe(cjob, 1, JobStatus.PENDING)
+        self.assertEqual(len(cjob.history), 2)
+        self.assertEqual(cjob.history[0].attempt, 0)
+        self.assertIsNotNone(cjob.history[0].end)
+        self.assertEqual(cjob.history[1].attempt, 1)
+        self.assertIsNone(cjob.history[1].end)
+        self.assertEqual(self._save.call_count, 2)
+
+    def test_closed_entry_end_equals_next_start(self) -> None:
+        """On a transition the prior entry's end should match the new entry's start."""
+        cjob = _make_lifecycle()
+        self._observe(cjob, 0, JobStatus.PENDING)
+        self._observe(cjob, 0, JobStatus.RUNNING)
+        self.assertEqual(cjob.history[0].end, cjob.history[1].start)
+
+    def test_event_captures_ray_job_id_at_record_time(self) -> None:
+        """The ray submission id observed at record time is stored on the event."""
+        cjob = _make_lifecycle()
+        self._attempt.return_value = 0
+        self._status.return_value = JobStatus.PENDING
+        _record_state(cjob, None)
+        self._attempt.return_value = 0
+        self._status.return_value = JobStatus.RUNNING
+        _record_state(cjob, "run-1-job-1-0")
+        self.assertIsNone(cjob.history[0].ray_job_id)
+        self.assertEqual(cjob.history[1].ray_job_id, "run-1-job-1-0")
 
 
 if __name__ == "__main__":

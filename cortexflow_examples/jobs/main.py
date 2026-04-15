@@ -47,8 +47,9 @@ def main():
         lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
         ray_job_id = lifecycle.get_ray_job_id()
         print(f"\nJob failed. ray_job_id={ray_job_id}")
-        if lifecycle.error:
-            print(f"Submission error: {lifecycle.error}")
+        for event in lifecycle.history:
+            if event.error:
+                print(f"Attempt {event.attempt} submission error: {event.error}")
 
 
 if __name__ == "__main__":

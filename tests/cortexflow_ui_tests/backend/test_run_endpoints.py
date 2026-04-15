@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from cortexflow.ray_util import JobStatus
-from cortexflow.jobs import JobLifecycle
+from cortexflow.jobs import JobLifecycle, LifecycleEvent
 from cortexflow_ui.backend.main import app
 
 
@@ -97,6 +97,52 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data["status"], "running")
         self.assertIsNone(data["ray_job_id"])
         self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
+        self.assertEqual(data["history"], [])
+
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_url",
+        return_value=None,
+    )
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status",
+        return_value=JobStatus.RUNNING,
+    )
+    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow_ui.backend.main.JobLifecycle")
+    def test_job_detail_returns_history_entries(
+        self,
+        mock_lifecycle_cls: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
+        _mock_status: MagicMock,
+        _mock_ray_url: MagicMock,
+    ) -> None:
+        mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
+            experiment_name="alpha",
+            run_id="run-1",
+            job_id="job-1",
+            history=[
+                LifecycleEvent(
+                    attempt=0, state="pending", start="2026-04-15T10:00:00+00:00",
+                    end="2026-04-15T10:00:05+00:00",
+                ),
+                LifecycleEvent(
+                    attempt=0, state="running", start="2026-04-15T10:00:05+00:00",
+                    end=None,
+                ),
+            ],
+        )
+
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
+
+        self.assertEqual(response.status_code, 200)
+        history = response.json()["history"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["attempt"], 0)
+        self.assertEqual(history[0]["state"], "pending")
+        self.assertEqual(history[0]["start"], "2026-04-15T10:00:00+00:00")
+        self.assertEqual(history[0]["end"], "2026-04-15T10:00:05+00:00")
+        self.assertEqual(history[1]["state"], "running")
+        self.assertIsNone(history[1]["end"])
 
     @patch(
         "cortexflow_ui.backend.main.get_ray_logs",

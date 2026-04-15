@@ -15,6 +15,7 @@ from cortexflow.experiment import Experiment, clear_instance, set_instance
 from cortexflow.ray_util import JobStatus, get_ray_job_status
 from cortexflow.jobs import (
     JobLifecycle,
+    LifecycleEvent,
     Payload,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
@@ -187,7 +188,7 @@ class TestRemote(unittest.TestCase):
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
         self.assertFalse(lifecycle.stop_requested)
-        self.assertIsNone(lifecycle.error)
+        self.assertEqual(lifecycle.history, [])
         self.assertFalse(lifecycle.retry)
 
     def test_lifecycle_includes_retry_flag(self) -> None:
@@ -422,19 +423,27 @@ class TestListExperimentRunJobs(unittest.TestCase):
 
         self.assertEqual([j.job_id for j in result], ["j1"])
 
-    def test_error_field_round_trips_through_mlflow(self) -> None:
-        """A lifecycle with an error message survives save+load."""
+    def test_event_error_round_trips_through_mlflow(self) -> None:
+        """An event with an error message survives save+load."""
         saved = JobLifecycle(
             experiment_name=EXPERIMENT_NAME,
             run_id=RUN_ID,
             job_id="j1",
-            error="payload download failed",
+            history=[
+                LifecycleEvent(
+                    attempt=0,
+                    state="pending",
+                    start="2026-04-15T10:00:00+00:00",
+                    error="payload download failed",
+                ),
+            ],
         )
         saved.save_to_mlflow()
 
         loaded = JobLifecycle.load_from_mlflow(RUN_ID, "j1")
 
-        self.assertEqual(loaded.error, "payload download failed")
+        self.assertEqual(len(loaded.history), 1)
+        self.assertEqual(loaded.history[0].error, "payload download failed")
 
 
 class TestGetRayJobId(unittest.TestCase):
