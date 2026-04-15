@@ -41,7 +41,7 @@ from cortexflow import (
 )
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("jobs-control-plane")
 
 POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXFLOW_POLL_INTERVAL", "5"))
 STARTER_WORKERS = int(os.environ.get("CORTEXFLOW_STARTER_WORKERS", "4"))

@@ -12,7 +12,7 @@ from cortexflow.experiment import Experiment
 from cortexflow.infra import set_runs_on_server
 from cortexflow.jobs import Payload
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("ray-job-driver")
 
 
 def main(payload_path: str) -> None:
