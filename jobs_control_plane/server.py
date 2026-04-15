@@ -165,7 +165,7 @@ def poll_once(
         for job in list_experiment_run_jobs(experiment.run_id)
     ]
     cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
-    log.info("Poll once - discovered %d cjob/rjob pairs", cortexflow_to_ray_jobs)
+    log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexflow_to_ray_jobs))
 
     for pair_idx, (cjob, rjob) in enumerate(cortexflow_to_ray_jobs):
         _record_state(cjob, rjob)
