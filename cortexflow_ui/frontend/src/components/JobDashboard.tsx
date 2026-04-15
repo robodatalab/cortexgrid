@@ -177,17 +177,7 @@ export function JobDashboard({ runId, jobId }: Props) {
         )}
       </div>
 
-      <div className="job-dashboard__section">
-        <div className="job-dashboard__section-title">Lifecycle</div>
-        <table className="job-dashboard__table">
-          <tbody>
-            <tr><td>Status</td><td>{detail.status}</td></tr>
-            <tr><td>Stop requested</td><td>{detail.stop_requested ? 'yes' : 'no'}</td></tr>
-            <tr><td>Retry</td><td>{detail.retry ? 'yes' : 'no'}</td></tr>
-            <tr><td>Ray job ID</td><td>{detail.ray_job_id ?? '—'}</td></tr>
-          </tbody>
-        </table>
-      </div>
+      <div className="job-dashboard__meta">retry: {detail.retry ? 'true' : 'false'}</div>
 
       <AttemptTimeline history={detail.history} logsByRayJobId={logsByRayJobId} />
     </div>

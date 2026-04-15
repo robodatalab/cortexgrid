@@ -88,6 +88,13 @@
   white-space: pre;
 }
 
+.job-dashboard__meta {
+  font-size: 13px;
+  font-family: monospace;
+  margin-bottom: 16px;
+  color: #444;
+}
+
 .job-dashboard__attempt {
   margin-bottom: 16px;
 }
@@ -101,15 +108,27 @@
 
 .job-dashboard__attempt-row {
   display: flex;
-  gap: 4px;
+  gap: 20px;
   flex-wrap: wrap;
+  align-items: stretch;
 }
 
 .job-dashboard__event {
+  position: relative;
   padding: 6px 10px;
   border: 1px solid #000;
   min-width: 120px;
   font-size: 11px;
+}
+
+.job-dashboard__event:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: #000;
 }
 
 .job-dashboard__event-state {
