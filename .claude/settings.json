@@ -56,7 +56,19 @@
       "Bash(python -m unittest tests.cortexflow_ui_tests.backend.test_run_endpoints)",
       "Bash(python -m unittest tests.cortexflow_tests.test_jobs)",
       "Bash(python -m unittest tests.cortexflow_tests.test_jobs tests.jobs_control_plane_tests.test_server tests.cortexflow_ui_tests.backend.test_run_endpoints)",
-      "Bash(git pull *)"
+      "Bash(git pull *)",
+      "Bash(grep -E \"\\\\.\\(py|ts|tsx|js\\)$\")",
+      "Bash(python -m unittest tests.cortexflow_tests.test_jobs tests.jobs_control_plane_tests.test_server -v)",
+      "Bash(wait bcy7hkodu *)",
+      "Bash(wait)",
+      "Bash(xargs ps *)",
+      "Bash(pkill -9 -f \"unittest tests\")",
+      "Bash(python -m unittest tests.jobs_control_plane_tests.test_server.TestRecordState -v)",
+      "Bash(python -m unittest discover tests)",
+      "Bash(ps -p 1509,27390,27420,28613,45344 -o pid,command)",
+      "Bash(ps -p 29601,27423,27847 -o pid,command)",
+      "Bash(./node_modules/.bin/tsc -b --force)",
+      "Bash(./node_modules/.bin/eslint src/components/JobDashboard.tsx)"
     ]
   }
 }
