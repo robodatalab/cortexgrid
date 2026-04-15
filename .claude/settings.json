@@ -68,7 +68,8 @@
       "Bash(ps -p 1509,27390,27420,28613,45344 -o pid,command)",
       "Bash(ps -p 29601,27423,27847 -o pid,command)",
       "Bash(./node_modules/.bin/tsc -b --force)",
-      "Bash(./node_modules/.bin/eslint src/components/JobDashboard.tsx)"
+      "Bash(./node_modules/.bin/eslint src/components/JobDashboard.tsx)",
+      "Bash(grep -A 20 \"def list_experiments\" /Users/piotrtrochim/GitHub/robolab-infra/cortexflow/*.py)"
     ]
   }
 }
