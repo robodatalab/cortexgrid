@@ -1,10 +1,10 @@
-import { ReactNode } from 'react'
-import './Panel.css'
+import type { ReactNode } from 'react'
+import './LayoutPane.css'
 
-type PanelProps = {
+type LayoutPaneProps = {
   children: ReactNode
 }
 
-export function Panel({ children }: PanelProps) {
-  return <div className="panel">{children}</div>
+export function LayoutPane({ children }: LayoutPaneProps) {
+  return <div className="layout-pane">{children}</div>
 }
