@@ -10,15 +10,22 @@ type LifecycleEvent = {
   error: string | null
 }
 
+type Readiness = {
+  code: boolean
+  lifecycle: boolean
+  lifecycle_error: string | null
+}
+
 type JobDetail = {
   job_id: string
-  status: string
-  retry: boolean
-  stop_requested: boolean
-  ray_job_id: string | null
-  ray_status: string | null
-  ray_url: string | null
-  history: LifecycleEvent[]
+  readiness: Readiness
+  status?: string
+  retry?: boolean
+  stop_requested?: boolean
+  ray_job_id?: string | null
+  ray_status?: string | null
+  ray_url?: string | null
+  history?: LifecycleEvent[]
 }
 
 type Props = {
@@ -126,6 +133,29 @@ function failedAttemptRayJobIds(history: LifecycleEvent[]): string[] {
   return ids
 }
 
+function ReadinessPanel({ readiness }: { readiness: Readiness }) {
+  return (
+    <div className="job-dashboard__readiness">
+      <div className="job-dashboard__readiness-header">Job artifact readiness</div>
+      <div className="job-dashboard__readiness-row">
+        <span
+          className={`job-dashboard__pill job-dashboard__pill--${readiness.code ? 'ready' : 'missing'}`}
+        >
+          code: {readiness.code ? 'ready' : 'missing'}
+        </span>
+        <span
+          className={`job-dashboard__pill job-dashboard__pill--${readiness.lifecycle ? 'ready' : 'missing'}`}
+        >
+          lifecycle: {readiness.lifecycle ? 'ready' : 'not ready'}
+        </span>
+      </div>
+      {readiness.lifecycle_error && (
+        <div className="job-dashboard__readiness-error">{readiness.lifecycle_error}</div>
+      )}
+    </div>
+  )
+}
+
 export function JobDashboard({ runId, jobId }: Props) {
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [logsByRayJobId, setLogsByRayJobId] = useState<Record<string, string>>({})
@@ -142,7 +172,7 @@ export function JobDashboard({ runId, jobId }: Props) {
       .then((data) => {
         setDetail(data)
         setStatus('ready')
-        for (const rayJobId of failedAttemptRayJobIds(data.history)) {
+        for (const rayJobId of failedAttemptRayJobIds(data.history ?? [])) {
           fetch(`/api/ray/jobs/${rayJobId}/logs`, { signal: controller.signal })
             .then((r) => (r.ok ? r.json() as Promise<{ logs: string }> : null))
             .then((j) => {
@@ -179,9 +209,14 @@ export function JobDashboard({ runId, jobId }: Props) {
         )}
       </div>
 
-      <div className="job-dashboard__meta">retry: {detail.retry ? 'true' : 'false'}</div>
+      <ReadinessPanel readiness={detail.readiness} />
 
-      <AttemptTimeline history={detail.history} logsByRayJobId={logsByRayJobId} />
+      {detail.readiness.lifecycle && (
+        <>
+          <div className="job-dashboard__meta">retry: {detail.retry ? 'true' : 'false'}</div>
+          <AttemptTimeline history={detail.history ?? []} logsByRayJobId={logsByRayJobId} />
+        </>
+      )}
     </div>
   )
 }

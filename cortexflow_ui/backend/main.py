@@ -98,21 +98,22 @@ def experiments() -> list[dict]:
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     result = []
     for exp in list_experiments():
-        jobs = list_experiment_run_jobs(exp.run_id)
+        jobs = []
+        for job_id in exp.get_jobs():
+            try:
+                lifecycle = JobLifecycle.load_from_mlflow(exp.run_id, job_id)
+                status = get_ray_job_status(
+                    lifecycle.get_ray_job_id(all_ray_submission_ids)
+                ).value
+            except Exception:
+                status = "broken"
+            jobs.append({"job_id": job_id, "status": status})
         result.append(
             {
                 "experiment_name": exp.experiment_name,
                 "run_id": exp.run_id,
                 "run_name": exp.run_name(),
-                "jobs": [
-                    {
-                        "job_id": j.job_id,
-                        "status": get_ray_job_status(
-                            j.get_ray_job_id(all_ray_submission_ids)
-                        ).value,
-                    }
-                    for j in jobs
-                ],
+                "jobs": jobs,
             }
         )
     return result
@@ -157,12 +158,33 @@ def run_jobs(run_id: str) -> list[dict]:
     ]
 
 
+def check_job_readiness(run_id: str, job_id: str) -> dict:
+    code_entries = list_run_artifacts(run_id, f"job/{job_id}/project_code_root")
+    code_ready = len(code_entries) > 0
+    try:
+        JobLifecycle.load_from_mlflow(run_id, job_id)
+        lifecycle_ready = True
+        lifecycle_error = None
+    except Exception as exc:
+        lifecycle_ready = False
+        lifecycle_error = repr(exc)
+    return {
+        "code": code_ready,
+        "lifecycle": lifecycle_ready,
+        "lifecycle_error": lifecycle_error,
+    }
+
+
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
 def job_detail(run_id: str, job_id: str) -> dict:
+    readiness = check_job_readiness(run_id, job_id)
+    if not readiness["lifecycle"]:
+        return {"job_id": job_id, "readiness": readiness}
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
     ray_job_id = lifecycle.get_ray_job_id()
     return {
         "job_id": lifecycle.job_id,
+        "readiness": readiness,
         "status": get_ray_job_status(ray_job_id).value,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
