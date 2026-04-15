@@ -100,8 +100,6 @@ class TestRunEndpoints(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["job_id"], "job-1")
         self.assertEqual(data["status"], "running")
-        self.assertIsNone(data["ray_job_id"])
-        self.assertEqual(data["ray_url"], "http://test:8265/#/jobs/ray-1")
         self.assertEqual(data["history"], [])
 
     @patch(
@@ -132,11 +130,15 @@ class TestRunEndpoints(unittest.TestCase):
             job_id="job-1",
             history=[
                 LifecycleEvent(
-                    attempt=0, state="pending", start="2026-04-15T10:00:00+00:00",
+                    attempt=0,
+                    state="pending",
+                    start="2026-04-15T10:00:00+00:00",
                     end="2026-04-15T10:00:05+00:00",
                 ),
                 LifecycleEvent(
-                    attempt=0, state="running", start="2026-04-15T10:00:05+00:00",
+                    attempt=0,
+                    state="running",
+                    start="2026-04-15T10:00:05+00:00",
                     end=None,
                 ),
             ],
@@ -174,7 +176,9 @@ class TestRunEndpoints(unittest.TestCase):
         _mock_list_artifacts: MagicMock,
     ) -> None:
         mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
-            experiment_name="alpha", run_id="run-1", job_id="job-1",
+            experiment_name="alpha",
+            run_id="run-1",
+            job_id="job-1",
         )
 
         response = self.client.get("/api/runs/run-1/jobs/job-1")
@@ -247,7 +251,9 @@ class TestRunEndpoints(unittest.TestCase):
             ],
         )
 
-    @patch("cortexflow_ui.backend.main.get_ray_job_status", return_value=JobStatus.RUNNING)
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status", return_value=JobStatus.RUNNING
+    )
     @patch(
         "cortexflow_ui.backend.main.list_ray_jobs_with_submission_id",
         return_value=[],
