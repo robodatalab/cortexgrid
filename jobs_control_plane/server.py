@@ -65,12 +65,14 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     submission_id = ray_submission_id(run_id, job_id, attempt)
 
     payload = Payload.load_from_mlflow(run_id, job_id)
+    payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
+    requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
     submit_ray_job(
         submission_id=submission_id,
-        entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
+        entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
         runtime_env={
             "working_dir": payload.project_code_root,
-            "pip": str(Path(payload.project_code_root) / "requirements.txt"),
+            "pip": str(requirements_txt_path),
         },
         num_gpus=payload.num_gpus,
         num_cpus=payload.num_cpus,
@@ -95,9 +97,7 @@ def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
     if last is not None:
         last.end = now
     cjob.history.append(
-        LifecycleEvent(
-            attempt=attempt, state=state, start=now, ray_job_id=rjob
-        )
+        LifecycleEvent(attempt=attempt, state=state, start=now, ray_job_id=rjob)
     )
     cjob.save_to_mlflow()
 
@@ -134,9 +134,7 @@ def poll_once(
                     lifecycle.history[-1].error = str(exc)
                     lifecycle.save_to_mlflow()
             except Exception:
-                log.exception(
-                    "Failed to persist error for %s", submission_id_core
-                )
+                log.exception("Failed to persist error for %s", submission_id_core)
         del in_flight[submission_id_core]
 
     experiments = list_experiments()
