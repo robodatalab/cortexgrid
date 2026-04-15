@@ -75,8 +75,9 @@ function AttemptTimeline({
   const groups = groupByAttempt(history)
   const attempts = Array.from(groups.keys()).sort((a, b) => a - b)
   return (
-    <div className="job-dashboard__section">
+    <div className="job-dashboard__section job-dashboard__section--timeline">
       <div className="job-dashboard__section-title">Timeline</div>
+      <div className="job-dashboard__attempts">
       {attempts.map((attempt) => {
         const events = groups.get(attempt)!
         const failed = isFailedAttempt(events)
@@ -109,6 +110,7 @@ function AttemptTimeline({
           </div>
         )
       })}
+      </div>
     </div>
   )
 }

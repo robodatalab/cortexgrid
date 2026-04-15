@@ -1,8 +1,29 @@
 .job-dashboard {
   padding: 24px;
-  overflow-y: auto;
+  overflow: hidden;
   height: 100%;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.job-dashboard__header,
+.job-dashboard__meta {
+  flex-shrink: 0;
+}
+
+.job-dashboard__section--timeline {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.job-dashboard__attempts {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .job-dashboard__header {
@@ -97,6 +118,8 @@
 
 .job-dashboard__attempt {
   margin-bottom: 16px;
+  border: 1px solid #000;
+  padding: 12px;
 }
 
 .job-dashboard__attempt-header {
