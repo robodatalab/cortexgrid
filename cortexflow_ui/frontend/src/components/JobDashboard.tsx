@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { TitledFrame } from './TitledFrame'
 import './JobDashboard.css'
 
 type LifecycleEvent = {
@@ -83,7 +84,6 @@ function AttemptTimeline({
   const attempts = Array.from(groups.keys()).sort((a, b) => a - b)
   return (
     <div className="job-dashboard__section job-dashboard__section--timeline">
-      <div className="job-dashboard__section-title">Timeline</div>
       <div className="job-dashboard__attempts">
       {attempts.map((attempt) => {
         const events = groups.get(attempt)!
@@ -92,28 +92,27 @@ function AttemptTimeline({
         const logs = rayJobId ? logsByRayJobId[rayJobId] : undefined
         return (
           <div key={attempt} className="job-dashboard__attempt">
-            <div className="job-dashboard__attempt-header">
-              Attempt {attempt} — {formatDate(events[0].start)}
-            </div>
-            <div className="job-dashboard__attempt-row">
-              {events.map((event, index) => (
-                <div
-                  key={index}
-                  className={`job-dashboard__event job-dashboard__event--${event.state}`}
-                >
-                  <div className="job-dashboard__event-state">{event.state}</div>
-                  <div className="job-dashboard__event-time">
-                    {formatTime(event.start)} – {event.end ? formatTime(event.end) : '…'}
+            <TitledFrame title={`Attempt ${attempt} — ${formatDate(events[0].start)}`}>
+              <div className="job-dashboard__attempt-row">
+                {events.map((event, index) => (
+                  <div
+                    key={index}
+                    className={`job-dashboard__event job-dashboard__event--${event.state}`}
+                  >
+                    <div className="job-dashboard__event-state">{event.state}</div>
+                    <div className="job-dashboard__event-time">
+                      {formatTime(event.start)} – {event.end ? formatTime(event.end) : '…'}
+                    </div>
+                    {event.error && (
+                      <div className="job-dashboard__event-error">{event.error}</div>
+                    )}
                   </div>
-                  {event.error && (
-                    <div className="job-dashboard__event-error">{event.error}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {failed && logs !== undefined && (
-              <pre className="job-dashboard__logs">{logs || '(no logs)'}</pre>
-            )}
+                ))}
+              </div>
+              {failed && logs !== undefined && (
+                <pre className="job-dashboard__logs">{logs || '(no logs)'}</pre>
+              )}
+            </TitledFrame>
           </div>
         )
       })}
@@ -136,22 +135,23 @@ function failedAttemptRayJobIds(history: LifecycleEvent[]): string[] {
 function ReadinessPanel({ readiness }: { readiness: Readiness }) {
   return (
     <div className="job-dashboard__readiness">
-      <div className="job-dashboard__readiness-header">Job artifact readiness</div>
-      <div className="job-dashboard__readiness-row">
-        <span
-          className={`job-dashboard__pill job-dashboard__pill--${readiness.code ? 'ready' : 'missing'}`}
-        >
-          code: {readiness.code ? 'ready' : 'missing'}
-        </span>
-        <span
-          className={`job-dashboard__pill job-dashboard__pill--${readiness.lifecycle ? 'ready' : 'missing'}`}
-        >
-          lifecycle: {readiness.lifecycle ? 'ready' : 'not ready'}
-        </span>
-      </div>
-      {readiness.lifecycle_error && (
-        <div className="job-dashboard__readiness-error">{readiness.lifecycle_error}</div>
-      )}
+      <TitledFrame title="Job artifact readiness">
+        <div className="job-dashboard__readiness-row">
+          <span
+            className={`job-dashboard__pill job-dashboard__pill--${readiness.code ? 'ready' : 'missing'}`}
+          >
+            code: {readiness.code ? 'ready' : 'missing'}
+          </span>
+          <span
+            className={`job-dashboard__pill job-dashboard__pill--${readiness.lifecycle ? 'ready' : 'missing'}`}
+          >
+            lifecycle: {readiness.lifecycle ? 'ready' : 'not ready'}
+          </span>
+        </div>
+        {readiness.lifecycle_error && (
+          <div className="job-dashboard__readiness-error">{readiness.lifecycle_error}</div>
+        )}
+      </TitledFrame>
     </div>
   )
 }
@@ -213,7 +213,11 @@ export function JobDashboard({ runId, jobId }: Props) {
 
       {detail.readiness.lifecycle && (
         <>
-          <div className="job-dashboard__meta">retry: {detail.retry ? 'true' : 'false'}</div>
+          <div className="job-dashboard__meta">
+            <TitledFrame title="arguments">
+              retry: {detail.retry ? 'true' : 'false'}
+            </TitledFrame>
+          </div>
           <AttemptTimeline history={detail.history ?? []} logsByRayJobId={logsByRayJobId} />
         </>
       )}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { TitledFrame } from './TitledFrame'
 import './InfraDashboard.css'
 
 type ContainerStatus = {
@@ -47,8 +48,10 @@ function useInfraStatus(): LoadState {
 
 function ContainerCard({ c }: { c: ContainerStatus }) {
   return (
-    <div className={`infra-card infra-card--${c.healthy ? 'ok' : 'bad'}`}>
-      <div className="infra-card__name">{c.name}</div>
+    <TitledFrame
+      title={c.name}
+      titleClassName={`infra-card__title--${c.healthy ? 'ok' : 'bad'}`}
+    >
       <div className="infra-card__meta">
         <span>state: {c.state}</span>
         <span>health: {c.health}</span>
@@ -59,7 +62,7 @@ function ContainerCard({ c }: { c: ContainerStatus }) {
           <pre>{c.logs}</pre>
         </details>
       )}
-    </div>
+    </TitledFrame>
   )
 }
 

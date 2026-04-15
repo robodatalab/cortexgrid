@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush } from 'recharts'
+import { TitledFrame } from './TitledFrame'
 import './RunDashboard.css'
 
 type MetricPoint = { step: number; value: number }
@@ -141,12 +142,13 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
 
       {artifacts.length > 0 && (
         <div className="run-dashboard__section">
-          <div className="run-dashboard__section-title">Artifacts</div>
-          <ul className="run-dashboard__artifacts">
-            {artifacts.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
-          </ul>
+          <TitledFrame title="Artifacts">
+            <ul className="run-dashboard__artifacts">
+              {artifacts.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          </TitledFrame>
         </div>
       )}
     </div>

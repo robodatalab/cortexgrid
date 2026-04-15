@@ -24,24 +24,14 @@
   gap: 16px;
 }
 
-.infra-card {
-  border: 1px solid #000;
-  padding: 16px;
-  background: #fff;
+.infra-card__title--ok {
+  background: #22c55e;
+  color: #fff;
 }
 
-.infra-card--ok {
-  border-left: 4px solid #22c55e;
-}
-
-.infra-card--bad {
-  border-left: 4px solid #ef4444;
-}
-
-.infra-card__name {
-  font-weight: 500;
-  font-size: 16px;
-  margin-bottom: 8px;
+.infra-card__title--bad {
+  background: #ef4444;
+  color: #fff;
 }
 
 .infra-card__meta {

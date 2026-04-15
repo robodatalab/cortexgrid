@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import './App.css'
-import { Panel } from './components/Panel'
+import { LayoutPane } from './components/LayoutPane'
 import { ExperimentTree } from './components/ExperimentTree'
 import type { Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
@@ -96,12 +96,12 @@ function App() {
         ) : (
           <Allotment>
             <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
-              <Panel>
+              <LayoutPane>
                 <ExperimentTree onSelect={setSelection} />
-              </Panel>
+              </LayoutPane>
             </Allotment.Pane>
             <Allotment.Pane>
-              <Panel>
+              <LayoutPane>
                 {selection?.kind === 'experiment' ? (
                   <ExperimentDashboard experimentName={selection.experiment_name} />
                 ) : selection?.kind === 'run' ? (
@@ -111,7 +111,7 @@ function App() {
                 ) : (
                   <main className="main" />
                 )}
-              </Panel>
+              </LayoutPane>
             </Allotment.Pane>
           </Allotment>
         )}
