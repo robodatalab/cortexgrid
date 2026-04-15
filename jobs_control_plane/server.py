@@ -56,17 +56,35 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     truth, and the next poll observes whatever state Ray ended up in.
     """
     set_runs_on_server(True)
+    log.info("Submitting a job (%s/%s) - loading lifecycle: %s/%s", run_id, job_id)
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+    log.info("Submitting a job (%s/%s) - lifecycle loaded %s/%s", run_id, job_id)
 
     if lifecycle.stop_requested:
-        log.info("Worker skipping job %s: stop_requested is set", job_id)
+        log.info(
+            "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
+            run_id,
+            job_id,
+        )
         return
 
     submission_id = ray_submission_id(run_id, job_id, attempt)
 
+    log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
     payload = Payload.load_from_mlflow(run_id, job_id)
+    log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+
     payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
     requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
+    log.info(
+        "Submitting a job (%s/%s) - paths: %s, %s",
+        run_id,
+        job_id,
+        str(payload_pkl_path),
+        str(requirements_txt_path),
+    )
+
+    log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
     submit_ray_job(
         submission_id=submission_id,
         entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
@@ -77,6 +95,7 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         num_gpus=payload.num_gpus,
         num_cpus=payload.num_cpus,
     )
+    log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
 
 
 def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
@@ -121,13 +140,15 @@ def poll_once(
     in_flight: dict[str, tuple[str, str, Future]],
 ) -> None:
     """Single poll cycle: scan all jobs, dispatch work, handle stops."""
+    log.info("Poll once - starts")
+
     for submission_id_core in list(in_flight.keys()):
         run_id, job_id, future = in_flight[submission_id_core]
         if not future.done():
             continue
         exc = future.exception()
         if exc is not None:
-            log.error("Worker for %s failed: %s", submission_id_core, exc)
+            log.error("poll_once - Worker for %s failed: %s", submission_id_core, exc)
             try:
                 lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
                 if lifecycle.history:
@@ -144,19 +165,38 @@ def poll_once(
         for job in list_experiment_run_jobs(experiment.run_id)
     ]
     cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+    log.info("Poll once - discovered %d cjob/rjob pairs", cortexflow_to_ray_jobs)
 
-    for cjob, rjob in cortexflow_to_ray_jobs:
+    for pair_idx, (cjob, rjob) in enumerate(cortexflow_to_ray_jobs):
         _record_state(cjob, rjob)
         submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
         if submission_id_core in in_flight:
+            log.info(
+                "Poll once(pair_idx=%d) - job in flight: cjob=%s rjob=%s",
+                pair_idx,
+                cjob,
+                rjob,
+            )
             continue
 
         if cjob.stop_requested:
             if rjob is not None:
+                log.info(
+                    "Poll once(pair_idx=%d) - stopping job: cjob=%s rjob=%s",
+                    pair_idx,
+                    cjob,
+                    rjob,
+                )
                 stop_ray_job(rjob)
             continue
 
         if rjob is None:
+            log.info(
+                "Poll once(pair_idx=%d) - starting job: cjob=%s rjob=%s",
+                pair_idx,
+                cjob,
+                rjob,
+            )
             in_flight[submission_id_core] = (
                 cjob.run_id,
                 cjob.job_id,
@@ -165,6 +205,12 @@ def poll_once(
             continue
 
         if get_ray_job_status(rjob) == JobStatus.FAILED and cjob.retry:
+            log.info(
+                "Poll once(pair_idx=%d) - restarting job: cjob=%s rjob=%s",
+                pair_idx,
+                cjob,
+                rjob,
+            )
             attempt = get_ray_job_attempt(rjob)
             in_flight[submission_id_core] = (
                 cjob.run_id,
@@ -173,6 +219,8 @@ def poll_once(
                     _submit_job_worker, cjob.run_id, cjob.job_id, attempt + 1
                 ),
             )
+
+    log.info("Poll once - ends")
 
 
 def main() -> None:
