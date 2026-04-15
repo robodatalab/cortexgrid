@@ -87,3 +87,68 @@
   overflow: auto;
   white-space: pre;
 }
+
+.job-dashboard__attempt {
+  margin-bottom: 16px;
+}
+
+.job-dashboard__attempt-header {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: #666;
+}
+
+.job-dashboard__attempt-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.job-dashboard__event {
+  padding: 6px 10px;
+  border: 1px solid #000;
+  min-width: 120px;
+  font-size: 11px;
+}
+
+.job-dashboard__event-state {
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.job-dashboard__event-time {
+  font-family: monospace;
+  color: #444;
+  margin-top: 2px;
+}
+
+.job-dashboard__event-error {
+  font-family: monospace;
+  font-size: 10px;
+  color: #cc0000;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.job-dashboard__event--pending {
+  background: #eee;
+}
+
+.job-dashboard__event--running {
+  background: #d0e4ff;
+}
+
+.job-dashboard__event--finished {
+  background: #d4edda;
+}
+
+.job-dashboard__event--failed {
+  background: #f8d7da;
+  border-color: #cc0000;
+}
+
+.job-dashboard__event--stopped {
+  background: #fff3cd;
+}

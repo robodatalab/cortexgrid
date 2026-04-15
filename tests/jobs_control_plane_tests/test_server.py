@@ -14,7 +14,7 @@ import cloudpickle  # type: ignore
 from parameterized import parameterized
 
 from cortexflow.experiment import Experiment
-from cortexflow.jobs import JobLifecycle, Payload
+from cortexflow.jobs import JobLifecycle, LifecycleEvent, Payload
 from cortexflow.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
     _match_ray_jobs_to_cortexflow_jobs,
@@ -430,9 +430,14 @@ class TestPollOnce(unittest.TestCase):
 
         self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), self.in_flight)
 
-    def test_worker_exception_is_persisted_to_lifecycle_error(self) -> None:
-        """A worker that raised has its error written to lifecycle.error."""
+    def test_worker_exception_is_persisted_to_last_event_error(self) -> None:
+        """A worker that raised has its error attached to the last history event."""
         lifecycle = _make_lifecycle()
+        lifecycle.history.append(
+            LifecycleEvent(
+                attempt=0, state="pending", start="2026-04-15T10:00:00+00:00"
+            )
+        )
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         failed: Future = Future()
         failed.set_exception(RuntimeError("payload download failed"))
@@ -440,11 +445,10 @@ class TestPollOnce(unittest.TestCase):
 
         with patch.object(
             JobLifecycle, "load_from_mlflow", return_value=lifecycle
-        ), patch.object(JobLifecycle, "save_to_mlflow") as mock_save:
+        ):
             poll_once(self.executor, self.in_flight)
 
-        self.assertEqual(lifecycle.error, "payload download failed")
-        mock_save.assert_called_once()
+        self.assertEqual(lifecycle.history[-1].error, "payload download failed")
         self.assertNotIn(key, self.in_flight)
 
     def test_worker_exception_does_not_block_subsequent_dispatch(self) -> None:
@@ -623,6 +627,18 @@ class TestRecordState(unittest.TestCase):
         self._observe(cjob, 0, JobStatus.PENDING)
         self._observe(cjob, 0, JobStatus.RUNNING)
         self.assertEqual(cjob.history[0].end, cjob.history[1].start)
+
+    def test_event_captures_ray_job_id_at_record_time(self) -> None:
+        """The ray submission id observed at record time is stored on the event."""
+        cjob = _make_lifecycle()
+        self._attempt.return_value = 0
+        self._status.return_value = JobStatus.PENDING
+        _record_state(cjob, None)
+        self._attempt.return_value = 0
+        self._status.return_value = JobStatus.RUNNING
+        _record_state(cjob, "run-1-job-1-0")
+        self.assertIsNone(cjob.history[0].ray_job_id)
+        self.assertEqual(cjob.history[1].ray_job_id, "run-1-job-1-0")
 
 
 if __name__ == "__main__":

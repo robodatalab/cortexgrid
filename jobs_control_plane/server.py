@@ -82,7 +82,9 @@ def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
 
     Ray owns the state machine; we only observe. On every poll we compare
     the latest observation against the last history entry and, on a
-    mismatch, close the prior entry and append a new one.
+    mismatch, close the prior entry and append a new one. The new entry
+    records the Ray submission id observed at the time (``None`` before
+    the worker has successfully handed the job off to Ray).
     """
     attempt = get_ray_job_attempt(rjob)
     state = get_ray_job_status(rjob).value
@@ -92,7 +94,11 @@ def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
         return
     if last is not None:
         last.end = now
-    cjob.history.append(LifecycleEvent(attempt=attempt, state=state, start=now))
+    cjob.history.append(
+        LifecycleEvent(
+            attempt=attempt, state=state, start=now, ray_job_id=rjob
+        )
+    )
     cjob.save_to_mlflow()
 
 
@@ -124,8 +130,9 @@ def poll_once(
             log.error("Worker for %s failed: %s", submission_id_core, exc)
             try:
                 lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-                lifecycle.error = str(exc)
-                lifecycle.save_to_mlflow()
+                if lifecycle.history:
+                    lifecycle.history[-1].error = str(exc)
+                    lifecycle.save_to_mlflow()
             except Exception:
                 log.exception(
                     "Failed to persist error for %s", submission_id_core
