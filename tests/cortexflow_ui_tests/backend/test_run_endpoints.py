@@ -67,6 +67,10 @@ class TestRunEndpoints(unittest.TestCase):
         )
 
     @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["payload.pkl"],
+    )
+    @patch(
         "cortexflow_ui.backend.main.get_ray_job_url",
         return_value="http://test:8265/#/jobs/ray-1",
     )
@@ -82,6 +86,7 @@ class TestRunEndpoints(unittest.TestCase):
         _mock_list_ray_jobs: MagicMock,
         _mock_status: MagicMock,
         _mock_ray_url: MagicMock,
+        _mock_list_artifacts: MagicMock,
     ) -> None:
         mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
             experiment_name="alpha",
@@ -100,6 +105,10 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data["history"], [])
 
     @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["payload.pkl"],
+    )
+    @patch(
         "cortexflow_ui.backend.main.get_ray_job_url",
         return_value=None,
     )
@@ -115,6 +124,7 @@ class TestRunEndpoints(unittest.TestCase):
         _mock_list_ray_jobs: MagicMock,
         _mock_status: MagicMock,
         _mock_ray_url: MagicMock,
+        _mock_list_artifacts: MagicMock,
     ) -> None:
         mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
             experiment_name="alpha",
@@ -143,6 +153,61 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(history[0]["end"], "2026-04-15T10:00:05+00:00")
         self.assertEqual(history[1]["state"], "running")
         self.assertIsNone(history[1]["end"])
+
+    @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["payload.pkl"],
+    )
+    @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value=None)
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status",
+        return_value=JobStatus.RUNNING,
+    )
+    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow_ui.backend.main.JobLifecycle")
+    def test_job_detail_includes_readiness_when_healthy(
+        self,
+        mock_lifecycle_cls: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
+        _mock_status: MagicMock,
+        _mock_ray_url: MagicMock,
+        _mock_list_artifacts: MagicMock,
+    ) -> None:
+        mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
+            experiment_name="alpha", run_id="run-1", job_id="job-1",
+        )
+
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
+
+        self.assertEqual(response.status_code, 200)
+        readiness = response.json()["readiness"]
+        self.assertTrue(readiness["code"])
+        self.assertTrue(readiness["lifecycle"])
+        self.assertIsNone(readiness["lifecycle_error"])
+
+    @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["payload.pkl"],
+    )
+    @patch("cortexflow_ui.backend.main.JobLifecycle")
+    def test_job_detail_returns_broken_when_lifecycle_unreadable(
+        self,
+        mock_lifecycle_cls: MagicMock,
+        _mock_list_artifacts: MagicMock,
+    ) -> None:
+        mock_lifecycle_cls.load_from_mlflow.side_effect = TypeError(
+            "unexpected keyword argument 'status'"
+        )
+
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["job_id"], "job-1")
+        self.assertFalse(data["readiness"]["lifecycle"])
+        self.assertIn("TypeError", data["readiness"]["lifecycle_error"])
+        self.assertIn("status", data["readiness"]["lifecycle_error"])
+        self.assertNotIn("history", data)
 
     @patch(
         "cortexflow_ui.backend.main.get_ray_logs",
