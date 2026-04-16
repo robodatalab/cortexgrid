@@ -246,8 +246,8 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(
             response.json(),
             [
-                {"job_id": "j1", "status": "running"},
-                {"job_id": "j2", "status": "finished"},
+                {"job_id": "j1", "status": "running", "retry": False},
+                {"job_id": "j2", "status": "finished", "retry": False},
             ],
         )
 
