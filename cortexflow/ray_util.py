@@ -9,7 +9,7 @@ from ray.job_submission import JobSubmissionClient
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"
+    PENDING = "pending"  # Pending scheduling
     RUNNING = "running"
     FINISHED = "finished"
     FAILED = "failed"
@@ -33,7 +33,7 @@ def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
     to distinguish those two must check ``ray_job_id is None`` first.
     """
     ray_status = get_ray_status(ray_job_id)
-    if ray_job_id is None or ray_status == "PENDING":
+    if ray_job_id is None:
         return JobStatus.PENDING
     if ray_status == "SUCCEEDED":
         return JobStatus.FINISHED

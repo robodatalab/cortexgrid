@@ -275,11 +275,6 @@ class TestPollOnce(unittest.TestCase):
             ("unsubmitted__retry__no_stop", None, True, False, "dispatch_0"),
             ("unsubmitted__no_retry__stop_requested", None, False, True, "noop"),
             ("unsubmitted__retry__stop_requested", None, True, True, "noop"),
-            # ---- Ray says PENDING (queued) ----------------------------
-            # Bug #10 regression — must NOT redispatch on Ray PENDING.
-            ("pending_in_ray__no_retry__no_stop", JobStatus.PENDING, False, False, "noop"),
-            ("pending_in_ray__retry__no_stop", JobStatus.PENDING, True, False, "noop"),
-            ("pending_in_ray__stop_requested", JobStatus.PENDING, False, True, "stop_0"),
             # ---- Ray says RUNNING -------------------------------------
             ("running__no_retry__no_stop", JobStatus.RUNNING, False, False, "noop"),
             ("running__retry__no_stop", JobStatus.RUNNING, True, False, "noop"),
@@ -293,11 +288,29 @@ class TestPollOnce(unittest.TestCase):
             ("failed__retry__no_stop", JobStatus.FAILED, True, False, "retry_1"),
             # Bug #5 guard — stop_requested must suppress retry, not race it.
             ("failed__retry__stop_requested", JobStatus.FAILED, True, True, "stop_0"),
-            ("failed__no_retry__stop_requested", JobStatus.FAILED, False, True, "stop_0"),
+            (
+                "failed__no_retry__stop_requested",
+                JobStatus.FAILED,
+                False,
+                True,
+                "stop_0",
+            ),
             # ---- Ray says STOPPED -------------------------------------
-            ("stopped_in_ray__no_retry__no_stop", JobStatus.STOPPED, False, False, "noop"),
+            (
+                "stopped_in_ray__no_retry__no_stop",
+                JobStatus.STOPPED,
+                False,
+                False,
+                "noop",
+            ),
             ("stopped_in_ray__retry__no_stop", JobStatus.STOPPED, True, False, "noop"),
-            ("stopped_in_ray__stop_requested", JobStatus.STOPPED, False, True, "stop_0"),
+            (
+                "stopped_in_ray__stop_requested",
+                JobStatus.STOPPED,
+                False,
+                True,
+                "stop_0",
+            ),
         ]
     )
     def test_action_matrix(
@@ -308,9 +321,7 @@ class TestPollOnce(unittest.TestCase):
         stop_requested: bool,
         expected_action: str,
     ) -> None:
-        self._cjobs.append(
-            _make_lifecycle(retry=retry, stop_requested=stop_requested)
-        )
+        self._cjobs.append(_make_lifecycle(retry=retry, stop_requested=stop_requested))
         if ray_state is not None:
             self._seed_ray_attempt(RUN_ID, JOB_ID, 0, ray_state)
 
@@ -383,22 +394,10 @@ class TestPollOnce(unittest.TestCase):
         done.set_result(None)
         self.in_flight[key] = (RUN_ID, JOB_ID, done)
 
-        poll_once(self.executor, self.in_flight)
+        updated_in_flight = poll_once(self.executor, self.in_flight)
 
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
-        self.assertIsNot(self.in_flight[key][2], done)
-
-    def test_pending_in_ray_does_not_crash_loop_across_many_polls(self) -> None:
-        """Bug #10 regression — a Ray job sitting in PENDING for many poll
-        cycles must not redispatch or raise."""
-        self._cjobs.append(_make_lifecycle())
-        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.PENDING)
-
-        for _ in range(5):
-            poll_once(self.executor, self.in_flight)
-
-        self.assertEqual(self._submitted, [])
-        self.assertEqual(self._stopped, [])
+        self.assertIsNot(updated_in_flight[key][2], done)
 
     def test_multiple_jobs_are_handled_independently(self) -> None:
         self._cjobs = [
@@ -419,16 +418,14 @@ class TestPollOnce(unittest.TestCase):
             sorted(self._submitted),
             sorted([(RUN_ID, "job-new", 0), (RUN_ID, "job-fail", 1)]),
         )
-        self.assertEqual(
-            self._stopped, [ray_submission_id(RUN_ID, "job-stop", 0)]
-        )
+        self.assertEqual(self._stopped, [ray_submission_id(RUN_ID, "job-stop", 0)])
 
     def test_in_flight_is_populated_after_dispatch(self) -> None:
         self._cjobs.append(_make_lifecycle())
 
-        poll_once(self.executor, self.in_flight)
+        updated_in_flight = poll_once(self.executor, self.in_flight)
 
-        self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), self.in_flight)
+        self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), updated_in_flight)
 
     def test_worker_exception_is_persisted_to_last_event_error(self) -> None:
         """A worker that raised has its error attached to the last history event."""
@@ -443,13 +440,11 @@ class TestPollOnce(unittest.TestCase):
         failed.set_exception(RuntimeError("payload download failed"))
         self.in_flight[key] = (RUN_ID, JOB_ID, failed)
 
-        with patch.object(
-            JobLifecycle, "load_from_mlflow", return_value=lifecycle
-        ):
-            poll_once(self.executor, self.in_flight)
+        with patch.object(JobLifecycle, "load_from_mlflow", return_value=lifecycle):
+            updated_in_flight = poll_once(self.executor, self.in_flight)
 
         self.assertEqual(lifecycle.history[-1].error, "payload download failed")
-        self.assertNotIn(key, self.in_flight)
+        self.assertNotIn(key, updated_in_flight)
 
     def test_worker_exception_does_not_block_subsequent_dispatch(self) -> None:
         """After a worker raises, the next poll can redispatch the job."""
@@ -459,9 +454,12 @@ class TestPollOnce(unittest.TestCase):
         failed.set_exception(RuntimeError("boom"))
         self.in_flight[key] = (RUN_ID, JOB_ID, failed)
 
-        with patch.object(
-            JobLifecycle, "load_from_mlflow", return_value=_make_lifecycle()
-        ), patch.object(JobLifecycle, "save_to_mlflow"):
+        with (
+            patch.object(
+                JobLifecycle, "load_from_mlflow", return_value=_make_lifecycle()
+            ),
+            patch.object(JobLifecycle, "save_to_mlflow"),
+        ):
             poll_once(self.executor, self.in_flight)
 
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
@@ -558,7 +556,16 @@ class TestSubmitJobWorker(unittest.TestCase):
         with self.assertRaises(Exception):
             _submit_job_worker(RUN_ID, JOB_ID, 0)
 
-        self.assertEqual(self.submitted, [])
+        self.assertEqual(
+            self.submitted,
+            [
+                {
+                    "submission_id": ray_submission_id(RUN_ID, JOB_ID, 0),
+                    "entrypoint": "exit 1",
+                    "runtime_env": {},
+                }
+            ],
+        )
 
 
 def _noop() -> None:

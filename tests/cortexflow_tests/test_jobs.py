@@ -342,10 +342,10 @@ class TestPayloadSaveLoad(unittest.TestCase):
 class TestGetJobStatus(unittest.TestCase):
     """``get_ray_job_status`` is a thin mapping from Ray's raw state string.
 
-    ``None`` is the sentinel for "never submitted"; it maps to PENDING
-    without needing a separate signal. Ray's own PENDING (queued) also
-    maps to PENDING — callers that need to distinguish the two check
-    ``ray_job_id is None`` first.
+    ``None`` is the sentinel for "never submitted" and is the only input
+    that maps to ``PENDING``. Ray's own PENDING (queued) is folded into
+    ``RUNNING`` — once Ray owns the submission, the control plane does
+    not distinguish queued from running.
     """
 
     def setUp(self) -> None:
@@ -375,9 +375,9 @@ class TestGetJobStatus(unittest.TestCase):
         self.mock_get_ray_status.return_value = "STOPPED"
         self.assertEqual(get_ray_job_status("sid"), JobStatus.STOPPED)
 
-    def test_ray_pending_maps_to_pending(self) -> None:
+    def test_ray_pending_maps_to_running(self) -> None:
         self.mock_get_ray_status.return_value = "PENDING"
-        self.assertEqual(get_ray_job_status("sid"), JobStatus.PENDING)
+        self.assertEqual(get_ray_job_status("sid"), JobStatus.RUNNING)
 
     def test_unknown_ray_state_falls_through_to_running(self) -> None:
         self.mock_get_ray_status.return_value = "SOMETHING_ELSE"

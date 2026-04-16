@@ -56,46 +56,54 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     truth, and the next poll observes whatever state Ray ended up in.
     """
     set_runs_on_server(True)
-    log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
-    lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
-
-    if lifecycle.stop_requested:
-        log.info(
-            "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
-            run_id,
-            job_id,
-        )
-        return
-
     submission_id = ray_submission_id(run_id, job_id, attempt)
 
-    log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
-    payload = Payload.load_from_mlflow(run_id, job_id)
-    log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+    try:
+        log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
+        lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+        log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
 
-    payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
-    requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
-    log.info(
-        "Submitting a job (%s/%s) - paths: %s, %s",
-        run_id,
-        job_id,
-        str(payload_pkl_path),
-        str(requirements_txt_path),
-    )
+        if lifecycle.stop_requested:
+            log.info(
+                "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
+                run_id,
+                job_id,
+            )
+            return
 
-    log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
-    submit_ray_job(
-        submission_id=submission_id,
-        entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
-        runtime_env={
-            "working_dir": payload.project_code_root,
-            "pip": str(requirements_txt_path),
-        },
-        num_gpus=payload.num_gpus,
-        num_cpus=payload.num_cpus,
-    )
-    log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
+        log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
+        payload = Payload.load_from_mlflow(run_id, job_id)
+        log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+
+        payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
+        requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
+        log.info(
+            "Submitting a job (%s/%s) - paths: %s, %s",
+            run_id,
+            job_id,
+            str(payload_pkl_path),
+            str(requirements_txt_path),
+        )
+
+        log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
+        submit_ray_job(
+            submission_id=submission_id,
+            entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
+            runtime_env={
+                "working_dir": payload.project_code_root,
+                "pip": str(requirements_txt_path),
+            },
+            num_gpus=payload.num_gpus,
+            num_cpus=payload.num_cpus,
+        )
+        log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
+    except Exception:
+        submit_ray_job(
+            submission_id=submission_id,
+            entrypoint="exit 1",
+            runtime_env={},
+        )
+        raise
 
 
 def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
@@ -135,17 +143,17 @@ def _match_ray_jobs_to_cortexflow_jobs(
     return pairs
 
 
-def poll_once(
-    executor: ProcessPoolExecutor,
+def _process_jobs_in_flight(
     in_flight: dict[str, tuple[str, str, Future]],
-) -> None:
-    """Single poll cycle: scan all jobs, dispatch work, handle stops."""
-    log.info("Poll once - starts")
-
-    for submission_id_core in list(in_flight.keys()):
+) -> dict[str, tuple[str, str, Future]]:
+    updated_in_flight = {}
+    for submission_id_core in in_flight.keys():
         run_id, job_id, future = in_flight[submission_id_core]
+
         if not future.done():
+            updated_in_flight[submission_id_core] = (run_id, job_id, future)
             continue
+
         exc = future.exception()
         if exc is not None:
             log.error("poll_once - Worker for %s failed: %s", submission_id_core, exc)
@@ -156,28 +164,44 @@ def poll_once(
                     lifecycle.save_to_mlflow()
             except Exception:
                 log.exception("Failed to persist error for %s", submission_id_core)
-        del in_flight[submission_id_core]
 
+    return updated_in_flight
+
+
+def _get_jobs_for_processing(
+    in_flight: dict[str, tuple[str, str, Future]],
+) -> list[tuple[JobLifecycle, str | None]]:
     experiments = list_experiments()
     cortexflow_jobs = [
         job
         for experiment in experiments
         for job in list_experiment_run_jobs(experiment.run_id)
     ]
-    cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+    all_cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+
+    # filter out the jobs that are still in flight
+    not_in_flight_cortexflow_to_ray_jobs = []
+    for cjob, rjob in all_cortexflow_to_ray_jobs:
+        submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
+        if submission_id_core not in in_flight:
+            not_in_flight_cortexflow_to_ray_jobs.append((cjob, rjob))
+
+    return not_in_flight_cortexflow_to_ray_jobs
+
+
+def poll_once(
+    executor: ProcessPoolExecutor,
+    in_flight: dict[str, tuple[str, str, Future]],
+) -> dict[str, tuple[str, str, Future]]:
+    """Single poll cycle: scan all jobs, dispatch work, handle stops."""
+    log.info("Poll once - starts")
+
+    in_flight = _process_jobs_in_flight(in_flight)
+    cortexflow_to_ray_jobs = _get_jobs_for_processing(in_flight)
     log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexflow_to_ray_jobs))
 
     for pair_idx, (cjob, rjob) in enumerate(cortexflow_to_ray_jobs):
         _record_state(cjob, rjob)
-        submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
-        if submission_id_core in in_flight:
-            log.info(
-                "Poll once(pair_idx=%d) - job in flight: cjob=%s rjob=%s",
-                pair_idx,
-                cjob,
-                rjob,
-            )
-            continue
 
         if cjob.stop_requested:
             if rjob is not None:
@@ -190,21 +214,21 @@ def poll_once(
                 stop_ray_job(rjob)
             continue
 
-        if rjob is None:
+        status = get_ray_job_status(rjob)
+        if status == JobStatus.PENDING:
             log.info(
                 "Poll once(pair_idx=%d) - starting job: cjob=%s rjob=%s",
                 pair_idx,
                 cjob,
                 rjob,
             )
+            submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
             in_flight[submission_id_core] = (
                 cjob.run_id,
                 cjob.job_id,
                 executor.submit(_submit_job_worker, cjob.run_id, cjob.job_id, 0),
             )
-            continue
-
-        if get_ray_job_status(rjob) == JobStatus.FAILED and cjob.retry:
+        elif status == JobStatus.FAILED and cjob.retry:
             log.info(
                 "Poll once(pair_idx=%d) - restarting job: cjob=%s rjob=%s",
                 pair_idx,
@@ -212,6 +236,7 @@ def poll_once(
                 rjob,
             )
             attempt = get_ray_job_attempt(rjob)
+            submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
             in_flight[submission_id_core] = (
                 cjob.run_id,
                 cjob.job_id,
@@ -221,6 +246,7 @@ def poll_once(
             )
 
     log.info("Poll once - ends")
+    return in_flight
 
 
 def main() -> None:
@@ -229,7 +255,7 @@ def main() -> None:
     in_flight: dict[str, tuple[str, str, Future]] = {}
     while True:
         try:
-            poll_once(executor, in_flight)
+            in_flight = poll_once(executor, in_flight)
             HEARTBEAT_PATH.touch()
         except Exception:
             log.exception("Error during poll cycle")
