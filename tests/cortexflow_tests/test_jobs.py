@@ -458,7 +458,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_passed_list_is_used_without_querying_ray(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+            "cortexflow.ray_util.list_ray_jobs_with_submission_id"
         ) as mock_list:
             result = lifecycle.get_ray_job_id(
                 ["run-1-job-1-0", "run-1-job-1-1"]
@@ -470,7 +470,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_empty_passed_list_returns_none_without_querying_ray(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.jobs.list_ray_jobs_with_submission_id"
+            "cortexflow.ray_util.list_ray_jobs_with_submission_id"
         ) as mock_list:
             result = lifecycle.get_ray_job_id([])
 
@@ -480,7 +480,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_no_arg_queries_ray_live(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.jobs.list_ray_jobs_with_submission_id",
+            "cortexflow.ray_util.list_ray_jobs_with_submission_id",
             return_value=["run-1-job-1-0"],
         ) as mock_list:
             result = lifecycle.get_ray_job_id()
