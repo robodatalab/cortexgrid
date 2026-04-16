@@ -153,6 +153,7 @@ def run_jobs(run_id: str) -> list[dict]:
             "status": get_ray_job_status(
                 j.get_ray_job_id(all_ray_submission_ids)
             ).value,
+            "retry": j.retry,
         }
         for j in list_experiment_run_jobs(run_id)
     ]
