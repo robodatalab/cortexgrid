@@ -556,7 +556,16 @@ class TestSubmitJobWorker(unittest.TestCase):
         with self.assertRaises(Exception):
             _submit_job_worker(RUN_ID, JOB_ID, 0)
 
-        self.assertEqual(self.submitted, [])
+        self.assertEqual(
+            self.submitted,
+            [
+                {
+                    "submission_id": ray_submission_id(RUN_ID, JOB_ID, 0),
+                    "entrypoint": "exit 1",
+                    "runtime_env": {},
+                }
+            ],
+        )
 
 
 def _noop() -> None:

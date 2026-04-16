@@ -56,48 +56,54 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     truth, and the next poll observes whatever state Ray ended up in.
     """
     set_runs_on_server(True)
-    log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
-    lifecycle = JobLifecycle.load_from_mlflow(
-        run_id, job_id
-    )  ## TODO: this is where `import backend` error originates
-    log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
-
-    if lifecycle.stop_requested:
-        log.info(
-            "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
-            run_id,
-            job_id,
-        )
-        return
-
     submission_id = ray_submission_id(run_id, job_id, attempt)
 
-    log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
-    payload = Payload.load_from_mlflow(run_id, job_id)
-    log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+    try:
+        log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
+        lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+        log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
 
-    payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
-    requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
-    log.info(
-        "Submitting a job (%s/%s) - paths: %s, %s",
-        run_id,
-        job_id,
-        str(payload_pkl_path),
-        str(requirements_txt_path),
-    )
+        if lifecycle.stop_requested:
+            log.info(
+                "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
+                run_id,
+                job_id,
+            )
+            return
 
-    log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
-    submit_ray_job(
-        submission_id=submission_id,
-        entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
-        runtime_env={
-            "working_dir": payload.project_code_root,
-            "pip": str(requirements_txt_path),
-        },
-        num_gpus=payload.num_gpus,
-        num_cpus=payload.num_cpus,
-    )
-    log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
+        log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
+        payload = Payload.load_from_mlflow(run_id, job_id)
+        log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+
+        payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
+        requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
+        log.info(
+            "Submitting a job (%s/%s) - paths: %s, %s",
+            run_id,
+            job_id,
+            str(payload_pkl_path),
+            str(requirements_txt_path),
+        )
+
+        log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
+        submit_ray_job(
+            submission_id=submission_id,
+            entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
+            runtime_env={
+                "working_dir": payload.project_code_root,
+                "pip": str(requirements_txt_path),
+            },
+            num_gpus=payload.num_gpus,
+            num_cpus=payload.num_cpus,
+        )
+        log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
+    except Exception:
+        submit_ray_job(
+            submission_id=submission_id,
+            entrypoint="exit 1",
+            runtime_env={},
+        )
+        raise
 
 
 def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
