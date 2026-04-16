@@ -70,7 +70,9 @@
       "Bash(./node_modules/.bin/tsc -b --force)",
       "Bash(./node_modules/.bin/eslint src/components/JobDashboard.tsx)",
       "Bash(grep -A 20 \"def list_experiments\" /Users/piotrtrochim/GitHub/robolab-infra/cortexflow/*.py)",
-      "Bash(python -m unittest discover -s . -p \"test_*.py\")"
+      "Bash(python -m unittest discover -s . -p \"test_*.py\")",
+      "Bash(curl -s http://localhost:8000/api/experiments)",
+      "Bash(curl -s http://localhost:8000/api/runs/9c79a9bc26ed40718f0f398cd1838eec/jobs)"
     ]
   }
 }

@@ -4,9 +4,14 @@ import { TitledFrame } from './TitledFrame'
 import './RunDashboard.css'
 
 type MetricPoint = { step: number; value: number }
-type Job = { job_id: string; status: string }
+type Job = { job_id: string; status: string; retry: boolean }
 
 const STOPPABLE_STATUSES = new Set(['pending', 'running'])
+
+function isStoppable(job: Job): boolean {
+  if (STOPPABLE_STATUSES.has(job.status)) return true
+  return job.status === 'failed' && job.retry
+}
 
 type Props = {
   runId: string
@@ -62,7 +67,7 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
     return () => controller.abort()
   }, [runId])
 
-  const hasStoppableJobs = jobs.some((j) => STOPPABLE_STATUSES.has(j.status))
+  const hasStoppableJobs = jobs.some(isStoppable)
 
   async function handleStop() {
     setStopping(true)
