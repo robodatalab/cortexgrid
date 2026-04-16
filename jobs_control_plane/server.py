@@ -56,9 +56,9 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     truth, and the next poll observes whatever state Ray ended up in.
     """
     set_runs_on_server(True)
-    log.info("Submitting a job (%s/%s) - loading lifecycle: %s/%s", run_id, job_id)
+    log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    log.info("Submitting a job (%s/%s) - lifecycle loaded %s/%s", run_id, job_id)
+    log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
 
     if lifecycle.stop_requested:
         log.info(
