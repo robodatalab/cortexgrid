@@ -60,7 +60,10 @@ class FakeMLflow:
         ]
 
     def download_artifacts(self, run_id: str, artifact_path: str) -> str:
-        return str(self.artifact_root / artifact_path)
+        target = self.artifact_root / artifact_path
+        if not target.exists():
+            raise FileNotFoundError(artifact_path)
+        return str(target)
 
     def log_artifact(
         self, run_id: str, local_path: str, artifact_path: str = ""
