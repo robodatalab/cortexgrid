@@ -145,6 +145,12 @@
   color: #000;
 }
 
+.job-dashboard__attempt-row-with-url {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
 .job-dashboard__event-state {
   font-weight: 500;
   text-transform: uppercase;

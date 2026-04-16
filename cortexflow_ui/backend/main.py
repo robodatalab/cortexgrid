@@ -182,15 +182,18 @@ def job_detail(run_id: str, job_id: str) -> dict:
         return {"job_id": job_id, "readiness": readiness}
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
     ray_job_id = lifecycle.get_ray_job_id()
+
+    history = [asdict(event) for event in lifecycle.history]
+    for event in history:
+        event["ray_url"] = get_ray_job_url(event["ray_job_id"])
+
     return {
         "job_id": lifecycle.job_id,
         "readiness": readiness,
         "status": get_ray_job_status(ray_job_id).value,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
-        "ray_job_id": ray_job_id,
-        "ray_url": get_ray_job_url(ray_job_id),
-        "history": [asdict(event) for event in lifecycle.history],
+        "history": history,
     }
 
 

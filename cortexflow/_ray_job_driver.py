@@ -12,16 +12,37 @@ from cortexflow.experiment import Experiment
 from cortexflow.infra import set_runs_on_server
 from cortexflow.jobs import Payload
 
+log = logging.getLogger("ray-job-driver")
+
 
 def main(payload_path: str) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
 
+    log.info("Loading payload: %s", payload_path)
+
+    if not Path(payload_path).exists():
+        log.error("Payload not found: %s", payload_path)
+        return
+
     payload: Payload = cloudpickle.loads(Path(payload_path).read_bytes())
+    log.info("Payload loaded: %s", payload_path)
+    log.info("Loading experiment: %s/%s", payload.experiment_name, payload.run_id)
+
     set_cortexflow_job_id(payload.job_id)
     Experiment.from_experiment(payload.experiment_name, payload.run_id)
+    log.info("Experiment loaded: %s/%s", payload.experiment_name, payload.run_id)
+
     set_runs_on_server(True)
+
+    log.info(
+        "Starting job in experiment: %s/%s; args: %r; kwargs: %r",
+        payload.experiment_name,
+        payload.run_id,
+        payload.args,
+        payload.kwargs,
+    )
     payload.fn(*payload.args, **payload.kwargs)
 
 
