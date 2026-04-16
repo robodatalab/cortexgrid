@@ -74,20 +74,12 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         project_code_root = lifecycle.download_project_code_root()
         log.info("Submitting a job (%s/%s) - project code downloaded", run_id, job_id)
 
-        payload_pkl_path = Path(project_code_root) / "payload.pkl"
         requirements_txt_path = Path(project_code_root) / "requirements.txt"
-        log.info(
-            "Submitting a job (%s/%s) - paths: %s, %s",
-            run_id,
-            job_id,
-            str(payload_pkl_path),
-            str(requirements_txt_path),
-        )
 
         log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
         submit_ray_job(
             submission_id=submission_id,
-            entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
+            entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
             runtime_env={
                 "working_dir": project_code_root,
                 "pip": str(requirements_txt_path),
