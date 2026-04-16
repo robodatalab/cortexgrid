@@ -175,7 +175,13 @@ class Payload(BaseModel):
         project_code_root = client.download_artifacts(
             run_id, f"job/{job_id}/project_code_root"
         )
-        payload = cloudpickle.loads(Path(project_code_root, "payload.pkl").read_bytes())
+        sys.path.insert(0, project_code_root)
+        try:
+            payload = cloudpickle.loads(
+                Path(project_code_root, "payload.pkl").read_bytes()
+            )
+        finally:
+            sys.path.remove(project_code_root)
         payload.project_code_root = project_code_root
         log.info(
             "Payload downloaded for job %s, project_code_root=%s",
