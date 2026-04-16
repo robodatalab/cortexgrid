@@ -27,7 +27,6 @@ from pathlib import Path
 from cortexflow import (
     JobLifecycle,
     LifecycleEvent,
-    Payload,
     get_ray_job_status,
     list_experiment_run_jobs,
     list_experiments,
@@ -71,12 +70,12 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
             )
             return
 
-        log.info("Submitting a job (%s/%s) - loading payload", run_id, job_id)
-        payload = Payload.load_from_mlflow(run_id, job_id)
-        log.info("Submitting a job (%s/%s) - payload loaded", run_id, job_id)
+        log.info("Submitting a job (%s/%s) - downloading project code", run_id, job_id)
+        project_code_root = lifecycle.download_project_code_root()
+        log.info("Submitting a job (%s/%s) - project code downloaded", run_id, job_id)
 
-        payload_pkl_path = Path(payload.project_code_root) / "payload.pkl"
-        requirements_txt_path = Path(payload.project_code_root) / "requirements.txt"
+        payload_pkl_path = Path(project_code_root) / "payload.pkl"
+        requirements_txt_path = Path(project_code_root) / "requirements.txt"
         log.info(
             "Submitting a job (%s/%s) - paths: %s, %s",
             run_id,
@@ -90,11 +89,11 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
             submission_id=submission_id,
             entrypoint=f"python -m cortexflow._ray_job_driver {str(payload_pkl_path)}",
             runtime_env={
-                "working_dir": payload.project_code_root,
+                "working_dir": project_code_root,
                 "pip": str(requirements_txt_path),
             },
-            num_gpus=payload.num_gpus,
-            num_cpus=payload.num_cpus,
+            num_gpus=lifecycle.num_gpus,
+            num_cpus=lifecycle.num_cpus,
         )
         log.info("Submitting a job (%s/%s) - ray job submitted", run_id, job_id)
     except Exception:

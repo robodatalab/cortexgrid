@@ -81,6 +81,8 @@ class JobLifecycle:
     job_id: str
     stop_requested: bool = False  # latch: False -> True, never cleared
     retry: bool = False  # static flag set at job creation
+    num_gpus: int = 0
+    num_cpus: int = 1
     history: list[LifecycleEvent] = field(default_factory=list)
 
     def to_json(self) -> str:
@@ -101,6 +103,12 @@ class JobLifecycle:
         prefix = ray_submission_id(self.run_id, self.job_id, None) + "-"
         attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
         return max(attempts, key=get_ray_job_attempt) if attempts else None
+
+    def download_project_code_root(self) -> str:
+        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        return client.download_artifacts(
+            self.run_id, f"job/{self.job_id}/project_code_root"
+        )
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
@@ -221,7 +229,12 @@ def schedule_remote_job(
     payload.save_to_mlflow()
 
     lifecycle = JobLifecycle(
-        experiment_name=experiment_name, run_id=run_id, job_id=job_id, retry=retry
+        experiment_name=experiment_name,
+        run_id=run_id,
+        job_id=job_id,
+        retry=retry,
+        num_gpus=num_gpus,
+        num_cpus=num_cpus,
     )
     lifecycle.save_to_mlflow()
 
