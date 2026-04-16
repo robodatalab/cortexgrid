@@ -23,8 +23,7 @@ def main(payload_path: str) -> None:
     log.info("Loading payload: %s", payload_path)
 
     if not Path(payload_path).exists():
-        log.error("Payload not found: %s", payload_path)
-        return
+        raise FileNotFoundError(f"Payload not found: {payload_path}")
 
     payload: Payload = cloudpickle.loads(Path(payload_path).read_bytes())
     log.info("Payload loaded: %s", payload_path)
