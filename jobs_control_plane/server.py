@@ -135,17 +135,17 @@ def _match_ray_jobs_to_cortexflow_jobs(
     return pairs
 
 
-def poll_once(
-    executor: ProcessPoolExecutor,
+def _process_jobs_in_flight(
     in_flight: dict[str, tuple[str, str, Future]],
-) -> None:
-    """Single poll cycle: scan all jobs, dispatch work, handle stops."""
-    log.info("Poll once - starts")
-
-    for submission_id_core in list(in_flight.keys()):
+) -> dict[str, tuple[str, str, Future]]:
+    updated_in_flight = {}
+    for submission_id_core in in_flight.keys():
         run_id, job_id, future = in_flight[submission_id_core]
+
         if not future.done():
+            updated_in_flight[submission_id_core] = (run_id, job_id, future)
             continue
+
         exc = future.exception()
         if exc is not None:
             log.error("poll_once - Worker for %s failed: %s", submission_id_core, exc)
@@ -156,28 +156,44 @@ def poll_once(
                     lifecycle.save_to_mlflow()
             except Exception:
                 log.exception("Failed to persist error for %s", submission_id_core)
-        del in_flight[submission_id_core]
 
+    return updated_in_flight
+
+
+def _get_jobs_for_processing(
+    in_flight: dict[str, tuple[str, str, Future]],
+) -> list[tuple[JobLifecycle, str | None]]:
     experiments = list_experiments()
     cortexflow_jobs = [
         job
         for experiment in experiments
         for job in list_experiment_run_jobs(experiment.run_id)
     ]
-    cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+    all_cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+
+    # filter out the jobs that are still in flight
+    not_in_flight_cortexflow_to_ray_jobs = []
+    for cjob, rjob in all_cortexflow_to_ray_jobs:
+        submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
+        if submission_id_core not in in_flight:
+            not_in_flight_cortexflow_to_ray_jobs.append((cjob, rjob))
+
+    return not_in_flight_cortexflow_to_ray_jobs
+
+
+def poll_once(
+    executor: ProcessPoolExecutor,
+    in_flight: dict[str, tuple[str, str, Future]],
+) -> dict[str, tuple[str, str, Future]]:
+    """Single poll cycle: scan all jobs, dispatch work, handle stops."""
+    log.info("Poll once - starts")
+
+    in_flight = _process_jobs_in_flight(in_flight)
+    cortexflow_to_ray_jobs = _get_jobs_for_processing(in_flight)
     log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexflow_to_ray_jobs))
 
     for pair_idx, (cjob, rjob) in enumerate(cortexflow_to_ray_jobs):
         _record_state(cjob, rjob)
-        submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
-        if submission_id_core in in_flight:
-            log.info(
-                "Poll once(pair_idx=%d) - job in flight: cjob=%s rjob=%s",
-                pair_idx,
-                cjob,
-                rjob,
-            )
-            continue
 
         if cjob.stop_requested:
             if rjob is not None:
@@ -197,6 +213,7 @@ def poll_once(
                 cjob,
                 rjob,
             )
+            submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
             in_flight[submission_id_core] = (
                 cjob.run_id,
                 cjob.job_id,
@@ -212,6 +229,7 @@ def poll_once(
                 rjob,
             )
             attempt = get_ray_job_attempt(rjob)
+            submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
             in_flight[submission_id_core] = (
                 cjob.run_id,
                 cjob.job_id,
@@ -221,6 +239,7 @@ def poll_once(
             )
 
     log.info("Poll once - ends")
+    return in_flight
 
 
 def main() -> None:
@@ -229,7 +248,7 @@ def main() -> None:
     in_flight: dict[str, tuple[str, str, Future]] = {}
     while True:
         try:
-            poll_once(executor, in_flight)
+            in_flight = poll_once(executor, in_flight)
             HEARTBEAT_PATH.touch()
         except Exception:
             log.exception("Error during poll cycle")
