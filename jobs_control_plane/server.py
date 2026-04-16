@@ -57,7 +57,9 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     """
     set_runs_on_server(True)
     log.info("Submitting a job (%s/%s) - loading lifecycle", run_id, job_id)
-    lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+    lifecycle = JobLifecycle.load_from_mlflow(
+        run_id, job_id
+    )  ## TODO: this is where `import backend` error originates
     log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
 
     if lifecycle.stop_requested:
@@ -206,7 +208,8 @@ def poll_once(
                 stop_ray_job(rjob)
             continue
 
-        if rjob is None:
+        status = get_ray_job_status(rjob)
+        if status == JobStatus.PENDING:
             log.info(
                 "Poll once(pair_idx=%d) - starting job: cjob=%s rjob=%s",
                 pair_idx,
@@ -219,9 +222,7 @@ def poll_once(
                 cjob.job_id,
                 executor.submit(_submit_job_worker, cjob.run_id, cjob.job_id, 0),
             )
-            continue
-
-        if get_ray_job_status(rjob) == JobStatus.FAILED and cjob.retry:
+        elif status == JobStatus.FAILED and cjob.retry:
             log.info(
                 "Poll once(pair_idx=%d) - restarting job: cjob=%s rjob=%s",
                 pair_idx,

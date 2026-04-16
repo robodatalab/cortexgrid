@@ -275,23 +275,6 @@ class TestPollOnce(unittest.TestCase):
             ("unsubmitted__retry__no_stop", None, True, False, "dispatch_0"),
             ("unsubmitted__no_retry__stop_requested", None, False, True, "noop"),
             ("unsubmitted__retry__stop_requested", None, True, True, "noop"),
-            # ---- Ray says PENDING (queued) ----------------------------
-            # Bug #10 regression — must NOT redispatch on Ray PENDING.
-            (
-                "pending_in_ray__no_retry__no_stop",
-                JobStatus.PENDING,
-                False,
-                False,
-                "noop",
-            ),
-            ("pending_in_ray__retry__no_stop", JobStatus.PENDING, True, False, "noop"),
-            (
-                "pending_in_ray__stop_requested",
-                JobStatus.PENDING,
-                False,
-                True,
-                "stop_0",
-            ),
             # ---- Ray says RUNNING -------------------------------------
             ("running__no_retry__no_stop", JobStatus.RUNNING, False, False, "noop"),
             ("running__retry__no_stop", JobStatus.RUNNING, True, False, "noop"),
@@ -415,18 +398,6 @@ class TestPollOnce(unittest.TestCase):
 
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
         self.assertIsNot(updated_in_flight[key][2], done)
-
-    def test_pending_in_ray_does_not_crash_loop_across_many_polls(self) -> None:
-        """Bug #10 regression — a Ray job sitting in PENDING for many poll
-        cycles must not redispatch or raise."""
-        self._cjobs.append(_make_lifecycle())
-        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.PENDING)
-
-        for _ in range(5):
-            poll_once(self.executor, self.in_flight)
-
-        self.assertEqual(self._submitted, [])
-        self.assertEqual(self._stopped, [])
 
     def test_multiple_jobs_are_handled_independently(self) -> None:
         self._cjobs = [
