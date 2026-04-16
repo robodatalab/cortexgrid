@@ -16,6 +16,16 @@ class JobStatus(str, Enum):
     STOPPED = "stopped"
 
 
+def get_ray_job_id_for_cortexflow_job(
+    run_id: str, job_id: str, all_ray_submission_ids: list[str] | None = None
+) -> str | None:
+    if all_ray_submission_ids is None:
+        all_ray_submission_ids = list_ray_jobs_with_submission_id()
+    prefix = ray_submission_id(run_id, job_id, None) + "-"
+    attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
+    return max(attempts, key=get_ray_job_attempt) if attempts else None
+
+
 def get_ray_status(ray_job_id: str | None) -> str | None:
     """Return the current status of a previously submitted ray job."""
     if ray_job_id is None:

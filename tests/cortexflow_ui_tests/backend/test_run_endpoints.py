@@ -68,7 +68,7 @@ class TestRunEndpoints(unittest.TestCase):
 
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["payload.pkl"],
+        return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
         "cortexflow_ui.backend.main.get_ray_job_url",
@@ -78,7 +78,7 @@ class TestRunEndpoints(unittest.TestCase):
         "cortexflow_ui.backend.main.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_returns_lifecycle_and_ray_status(
         self,
@@ -104,7 +104,7 @@ class TestRunEndpoints(unittest.TestCase):
 
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["payload.pkl"],
+        return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
         "cortexflow_ui.backend.main.get_ray_job_url",
@@ -114,7 +114,7 @@ class TestRunEndpoints(unittest.TestCase):
         "cortexflow_ui.backend.main.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_returns_history_entries(
         self,
@@ -158,14 +158,14 @@ class TestRunEndpoints(unittest.TestCase):
 
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["payload.pkl"],
+        return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value=None)
     @patch(
         "cortexflow_ui.backend.main.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.jobs.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
     @patch("cortexflow_ui.backend.main.JobLifecycle")
     def test_job_detail_includes_readiness_when_healthy(
         self,
@@ -193,24 +193,17 @@ class TestRunEndpoints(unittest.TestCase):
         "cortexflow_ui.backend.main.list_run_artifacts",
         return_value=["payload.pkl"],
     )
-    @patch("cortexflow_ui.backend.main.JobLifecycle")
-    def test_job_detail_returns_broken_when_lifecycle_unreadable(
+    def test_job_detail_returns_pending_when_lifecycle_missing(
         self,
-        mock_lifecycle_cls: MagicMock,
         _mock_list_artifacts: MagicMock,
     ) -> None:
-        mock_lifecycle_cls.load_from_mlflow.side_effect = TypeError(
-            "unexpected keyword argument 'status'"
-        )
-
         response = self.client.get("/api/runs/run-1/jobs/job-1")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["job_id"], "job-1")
         self.assertFalse(data["readiness"]["lifecycle"])
-        self.assertIn("TypeError", data["readiness"]["lifecycle_error"])
-        self.assertIn("status", data["readiness"]["lifecycle_error"])
+        self.assertIn("lifecycle.json", data["readiness"]["lifecycle_error"])
         self.assertNotIn("history", data)
 
     @patch(

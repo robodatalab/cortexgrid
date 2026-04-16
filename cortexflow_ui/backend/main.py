@@ -1,3 +1,4 @@
+import logging
 from dataclasses import asdict
 from pathlib import Path
 
@@ -7,7 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from cortexflow.experiment import list_experiments
-from cortexflow.ray_util import get_ray_job_status, list_ray_jobs_with_submission_id
+from cortexflow.ray_util import (
+    get_ray_job_status,
+    list_ray_jobs_with_submission_id,
+    get_ray_job_id_for_cortexflow_job,
+)
 from cortexflow.infra import get_server_ip, get_mlflow_run_url
 from cortexflow.jobs import (
     list_experiment_run_jobs,
@@ -30,6 +35,8 @@ from cortexflow.secrets import (
 
 from cortexflow_ui.backend.config import settings
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
+
+log = logging.getLogger("cortexflow_ui_backend")
 
 app = FastAPI(title="CortexFlow UI", version="0.1.0")
 
@@ -95,16 +102,17 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.get("/api/experiments")
 def experiments() -> list[dict]:
+    log.info("Listing experiments")
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     result = []
     for exp in list_experiments():
         jobs = []
         for job_id in exp.get_jobs():
             try:
-                lifecycle = JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-                status = get_ray_job_status(
-                    lifecycle.get_ray_job_id(all_ray_submission_ids)
-                ).value
+                ray_job_id = get_ray_job_id_for_cortexflow_job(
+                    exp.run_id, job_id, all_ray_submission_ids
+                )
+                status = get_ray_job_status(ray_job_id).value
             except Exception:
                 status = "broken"
             jobs.append({"job_id": job_id, "status": status})
@@ -162,17 +170,12 @@ def run_jobs(run_id: str) -> list[dict]:
 def check_job_readiness(run_id: str, job_id: str) -> dict:
     code_entries = list_run_artifacts(run_id, f"job/{job_id}/project_code_root")
     code_ready = len(code_entries) > 0
-    try:
-        JobLifecycle.load_from_mlflow(run_id, job_id)
-        lifecycle_ready = True
-        lifecycle_error = None
-    except Exception as exc:
-        lifecycle_ready = False
-        lifecycle_error = repr(exc)
+    job_entries = list_run_artifacts(run_id, f"job/{job_id}")
+    lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
     return {
         "code": code_ready,
         "lifecycle": lifecycle_ready,
-        "lifecycle_error": lifecycle_error,
+        "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
     }
 
 

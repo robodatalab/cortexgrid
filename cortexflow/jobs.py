@@ -15,11 +15,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow.experiment import get_mlflow_tracking_uri
-from cortexflow.ray_util import (
-    list_ray_jobs_with_submission_id,
-    ray_submission_id,
-    get_ray_job_attempt,
-)
+from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -98,11 +94,9 @@ class JobLifecycle:
     def get_ray_job_id(
         self, all_ray_submission_ids: list[str] | None = None
     ) -> str | None:
-        if all_ray_submission_ids is None:
-            all_ray_submission_ids = list_ray_jobs_with_submission_id()
-        prefix = ray_submission_id(self.run_id, self.job_id, None) + "-"
-        attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
-        return max(attempts, key=get_ray_job_attempt) if attempts else None
+        return get_ray_job_id_for_cortexflow_job(
+            self.run_id, self.job_id, all_ray_submission_ids
+        )
 
     def download_project_code_root(self) -> str:
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
