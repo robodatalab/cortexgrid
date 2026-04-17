@@ -1,0 +1,36 @@
+name: mlflow
+
+on:
+  push:
+    paths:
+      - "terraform/platform/local-dgx-training/mlflow/**"
+      - ".github/workflows/mlflow.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    env:
+      ECR_REPO: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/mlflow
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::517906913330:role/robolab-github-actions
+          aws-region: us-east-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        run: |
+          docker buildx build --platform linux/arm64 -f terraform/platform/local-dgx-training/mlflow/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} --push .
