@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir \
     "ray[default,train,tune,data]==2.9.3" \
     mlflow==3.11.1 \
-    boto3==1.34.29 \
     python-dotenv==1.0.1 \
     psutil==5.9.8
 
@@ -28,11 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-
-# Copy just the secrets module — entrypoint calls it to fetch CMS values.
-COPY cortexflow/secrets.py /app/cortexflow/secrets.py
-RUN touch /app/cortexflow/__init__.py
-ENV PYTHONPATH=/app
 
 COPY terraform/platform/local-dgx-training/ray/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
