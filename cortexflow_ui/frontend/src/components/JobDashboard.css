@@ -49,6 +49,7 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
+  margin-left: auto;
 }
 
 .job-dashboard__open-button:hover {
@@ -103,7 +104,7 @@
   background: #1e1e1e;
   color: #d4d4d4;
   padding: 12px;
-  margin: 0;
+  margin: 16px 0 0;
   max-height: 500px;
   overflow: auto;
   white-space: pre;
