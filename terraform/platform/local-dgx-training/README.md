@@ -21,10 +21,10 @@ tests/               cortexflow unit tests
 ```bash
 cd terraform/platform/local-dgx-training
 
-# 1. Configure secrets and shell env vars
+# 1. Verify Mac prereqs (aws CLI + Secrets Manager access)
 make setup-mac
 
-# 2. Deploy stack to DGX (SSH)
+# 2. Deploy stack to DGX (SSH — pulls DGX IP + bootstrap creds from AWS SM)
 make setup-dgx
 
 # 3. Verify
@@ -85,12 +85,9 @@ See the [root README](../../../README.md#cortexflow) for the full API reference.
 
 | Target | Description |
 |--------|-------------|
-| `setup-mac` | Configure secrets and shell environment |
+| `setup-mac` | Verify Mac prerequisites (aws CLI + SM access) |
 | `setup-dgx` | Deploy stack to DGX via SSH |
-| `teardown-dgx` | Stop stack, remove volumes and .env on DGX |
-| `teardown-mac` | Remove shell exports and local .env |
-| `push-secrets` | Push .env secrets to AWS Secrets Manager |
-| `pull-secrets` | Pull secrets from AWS Secrets Manager |
+| `teardown-dgx` | Stop stack, remove volumes on DGX |
 | `health` | Check all services are reachable |
 | `up` | Start all services |
 | `down` | Stop all services |

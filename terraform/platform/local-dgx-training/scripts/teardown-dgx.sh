@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # DGX Spark teardown — run this FROM YOUR MAC.
-# SSHs into the DGX and stops all services, removes volumes and .env.
+# SSHs into the DGX and stops all services, removes volumes.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -14,17 +14,7 @@ fi
 
 cd "$REPO_ROOT"
 
-if [[ ! -f .env ]]; then
-    echo "Error: .env not found. Cannot determine DGX IP."
-    exit 1
-fi
-
-source .env
-DGX_IP="${DGX_TAILSCALE_IP:-}"
-if [[ -z "$DGX_IP" || "$DGX_IP" == "100.x.x.x" ]]; then
-    echo "Error: DGX_TAILSCALE_IP not set in .env"
-    exit 1
-fi
+DGX_IP="$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('DGX_TAILSCALE_IP'))")"
 
 DGX_USER="${DGX_SSH_USER:-$(whoami)}"
 DGX_HOST="${DGX_USER}@${DGX_IP}"
@@ -46,8 +36,7 @@ ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_DOWN
 set -euo pipefail
 cd "${DGX_DIR}" 2>/dev/null || { echo "Directory not found on DGX"; exit 0; }
 docker compose --profile monitoring down -v
-rm -f .env
 echo "Done."
 REMOTE_DOWN
 
-echo "DGX teardown complete. Volumes and .env removed."
+echo "DGX teardown complete. Volumes removed."

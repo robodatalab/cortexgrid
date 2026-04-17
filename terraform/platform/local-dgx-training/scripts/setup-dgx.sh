@@ -2,10 +2,13 @@
 set -euo pipefail
 
 # DGX Spark setup — run this FROM YOUR MAC.
-# Copies .env and the repo to the DGX over SSH, then starts the stack.
+# Fetches DGX_TAILSCALE_IP and the bootstrap AWS creds from the CMS,
+# SSHes into the DGX, rsyncs the repo, and starts the stack with the
+# creds injected as env vars into the compose-up shell session — no
+# secrets ever touch disk on the DGX.
 #
 # Prerequisites:
-#   - .env exists locally (run `make setup-mac` first)
+#   - `uv` installed and the CMS reachable (run `make setup-mac` to verify)
 #   - SSH access to the DGX over Tailscale
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,17 +21,11 @@ fi
 
 cd "$REPO_ROOT"
 
-if [[ ! -f .env ]]; then
-    echo "Error: .env not found. Run 'make setup-mac' first."
-    exit 1
-fi
-
-source .env
-DGX_IP="${DGX_TAILSCALE_IP:-}"
-if [[ -z "$DGX_IP" || "$DGX_IP" == "100.x.x.x" ]]; then
-    echo "Error: DGX_TAILSCALE_IP not set in .env"
-    exit 1
-fi
+echo "Fetching configuration from the CMS..."
+fetch() { uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('$1'))"; }
+DGX_IP="$(fetch DGX_TAILSCALE_IP)"
+AWS_ID="$(fetch AWS_ACCESS_KEY_ID)"
+AWS_SECRET="$(fetch AWS_SECRET_ACCESS_KEY)"
 
 DGX_USER="${DGX_SSH_USER:-$(whoami)}"
 DGX_HOST="${DGX_USER}@${DGX_IP}"
@@ -102,10 +99,9 @@ REMOTE_DOCKER_TCP
 
 echo "[4/7] Syncing files to DGX..."
 ssh $SSH_OPTS "$DGX_HOST" "mkdir -p ${DGX_DIR}"
-rsync -az -e "ssh $SSH_OPTS" --exclude='.env' --exclude='__pycache__' --exclude='.git' \
+rsync -az -e "ssh $SSH_OPTS" --exclude='__pycache__' --exclude='.git' \
     "$REPO_ROOT/" "${DGX_HOST}:${DGX_DIR}/"
-scp $SSH_OPTS -q "$REPO_ROOT/.env" "${DGX_HOST}:${DGX_DIR}/.env"
-echo "  Files synced (including .env)"
+echo "  Files synced"
 
 echo "[5/7] Logging into ECR on DGX..."
 ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1)
@@ -115,6 +111,8 @@ echo "  ECR login OK"
 echo "[6/7] Starting services on DGX..."
 ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
+export AWS_ACCESS_KEY_ID="${AWS_ID}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET}"
 cd "${DGX_DIR}"
 # Stop any existing stack (may be from a previous project name)
 docker compose --profile monitoring down 2>/dev/null || true

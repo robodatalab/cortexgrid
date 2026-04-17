@@ -1,26 +1,33 @@
 # Secrets Management
 
-All secrets are stored in **AWS Secrets Manager** as the single source of truth. Local `.env` files are either pushed to or pulled from AWS SM — never left only on disk.
+All configuration and secrets live in **AWS Secrets Manager** under the
+`robolab/infra/*` namespace. It functions as the Configuration
+Management Service — everything that isn't the bootstrap identity is
+fetched from it at runtime.
 
 ## Architecture
 
 ```
-.env (on your Mac)
+AWS Secrets Manager (source of truth)
     │
-    │  make setup-mac (first time)
-    │  push-secrets.sh
-    ▼
-AWS Secrets Manager
+    │  managed via the Platform UI or `aws secretsmanager` CLI
     │
-    ├── robolab/infra/dgx-tailscale-ip
-    ├── robolab/infra/mlflow-postgres-password
-    ├── robolab/infra/minio-root-password
-    └── robolab/infra/grafana-admin-password
+    ├── robolab/infra/AWS_ACCESS_KEY_ID       ┐ bootstrap creds
+    ├── robolab/infra/AWS_SECRET_ACCESS_KEY   ┘  (robolab-dgx IAM user)
+    ├── robolab/infra/DGX_TAILSCALE_IP
+    └── robolab/infra/GH_TOKEN
          │
-         │  make setup-dgx
-         │  pull-secrets.sh
+         │  `make setup-dgx` injects bootstrap creds as env vars into
+         │  the SSH session that runs `docker compose up` — never
+         │  persisted to disk on the DGX
          ▼
-    .env (on the DGX) → Docker Compose
+    Only containers running our Python code hold AWS creds and fetch
+    from the CMS at runtime via cortexflow.secrets.get_secret():
+      - jobs-control-plane
+      - ray-head (entrypoint fetches DGX_TAILSCALE_IP)
+    OSS services (postgres, minio, mlflow, grafana) use hardcoded
+    admin/admin creds — the DGX is an isolated single-tenant machine,
+    so those aren't secrets.
 ```
 
 ## First-Time Setup
@@ -33,60 +40,49 @@ terraform init
 terraform apply
 ```
 
-This creates:
-- `robolab-dgx` IAM user (for the DGX to pull secrets)
-- `robolab-github-actions` IAM role (for CI to read secrets)
+This provisions:
+- `robolab-dgx` IAM user (containers use this to read Secrets Manager)
+- `robolab-github-actions` IAM role (CI assumes this via OIDC)
 - GitHub OIDC provider
 
-Note the outputs:
-- `dgx_user_access_key_id` — save this for step 3
-- `dgx_user_secret_access_key` — save this for step 3
-- `github_actions_role_arn` — save this for step 4
+Grab the outputs:
+- `dgx_user_access_key_id` and `dgx_user_secret_access_key`
+- `github_actions_role_arn`
 
-### 2. Initialize secrets from your Mac
+### 2. Seed Secrets Manager
+
+Using the Platform UI or the AWS CLI, create these secrets under
+`robolab/infra/`:
+
+- `AWS_ACCESS_KEY_ID` — the `robolab-dgx` access key from step 1
+- `AWS_SECRET_ACCESS_KEY` — the `robolab-dgx` secret access key from step 1
+- `DGX_TAILSCALE_IP` — run `tailscale ip -4` on the DGX
+- `GH_TOKEN` — a GitHub personal access token for private pip installs
+
+### 3. Deploy the stack
+
+From your Mac (needs AWS creds that can read `robolab/infra/*`):
 
 ```bash
 cd terraform/platform/local-dgx-training
-cp .env.example .env
+make setup-mac   # verifies prereqs
+make setup-dgx   # SSHes to the DGX, injects bootstrap creds, runs compose up
 ```
 
-Fill in your values:
-```bash
-DGX_TAILSCALE_IP=100.x.x.x           # run `tailscale ip -4` on the DGX
-POSTGRES_PASSWORD=$(openssl rand -base64 24)
-MINIO_ROOT_PASSWORD=$(openssl rand -base64 24)
-GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)
-```
-
-Then run setup — it detects this is the first time, pushes secrets to AWS SM, and configures your Mac:
-```bash
-make setup-mac
-```
-
-### 3. Bootstrap the DGX
-
-On the DGX, configure AWS CLI with the IAM user from step 1:
-```bash
-aws configure
-# Access Key ID:     <dgx_user_access_key_id>
-# Secret Access Key: <dgx_user_secret_access_key>
-# Region:            us-east-1
-```
-
-Then run setup — it pulls secrets from AWS SM and starts the stack:
-```bash
-cd terraform/platform/local-dgx-training
-make setup-dgx
-```
+`setup-dgx.sh` fetches `DGX_TAILSCALE_IP` and the bootstrap creds from
+Secrets Manager and injects the creds as env vars into the SSH session
+that runs `docker compose up`. The creds are interpolated into the
+`${AWS_ACCESS_KEY_ID}` / `${AWS_SECRET_ACCESS_KEY}` references in
+compose and land in the `jobs-control-plane` and `ray-head` containers.
+From there, those services fetch any further values they need via
+`cortexflow.secrets.get_secret()` at runtime.
 
 ### 4. Configure GitHub Actions (for CI)
 
-In your GitHub repo settings, add this repository variable:
-```
-AWS_ROLE_ARN = <github_actions_role_arn from terraform output>
-```
+The `robolab-github-actions` IAM role trusts GitHub's OIDC provider for
+all repos in `var.github_repos`. CI workflows that need AWS access
+(e.g. ECR pushes) assume it:
 
-In your workflow:
 ```yaml
 permissions:
   id-token: write
@@ -95,37 +91,17 @@ permissions:
 steps:
   - uses: aws-actions/configure-aws-credentials@v4
     with:
-      role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+      role-to-assume: arn:aws:iam::517906913330:role/robolab-github-actions
       aws-region: us-east-1
-
-  - name: Fetch secrets
-    run: |
-      DB_PASSWORD=$(aws secretsmanager get-secret-value \
-        --secret-id robolab/auth/db-password \
-        --query SecretString --output text)
-      echo "::add-mask::$DB_PASSWORD"
-      echo "DB_PASSWORD=$DB_PASSWORD" >> $GITHUB_ENV
 ```
 
 ## Rotating Secrets
 
-1. Update the value in `.env`
-2. Push to AWS SM:
-   ```bash
-   bash scripts/push-secrets.sh
-   ```
-3. Re-pull on the DGX and restart:
-   ```bash
-   bash scripts/pull-secrets.sh
-   docker compose restart
-   ```
-
-## Scripts
-
-| Script | Direction | Purpose |
-|--------|-----------|---------|
-| `scripts/push-secrets.sh` | `.env` → AWS SM | Create or update secrets from local values |
-| `scripts/pull-secrets.sh` | AWS SM → `.env` | Generate `.env` from AWS SM |
+Update the value in Secrets Manager (via UI or CLI). Services that fetch
+at process startup (`ray-head`'s entrypoint) pick up the new value on
+`docker compose restart <service>`. Services that fetch lazily on each
+call (`jobs-control-plane` via `cortexflow.secrets`) pick it up on the
+next call without a restart.
 
 ## IAM Permissions
 
@@ -134,4 +110,3 @@ steps:
 | `robolab-dgx` IAM user | Read `robolab/infra/*` only |
 | `robolab-github-actions` IAM role | Read all `robolab/*` |
 | Website Lambda role | Read `robolab/auth/*` only |
-| Your personal AWS credentials | Full access (used for push) |

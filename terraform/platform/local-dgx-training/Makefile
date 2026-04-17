@@ -10,7 +10,7 @@ check-dir:
 	fi
 
 .PHONY: setup-dgx
-setup-dgx: check-dir ## Full DGX setup (from Mac): sync files, copy .env, start stack
+setup-dgx: check-dir ## Full DGX setup (from Mac): sync files, inject creds from CMS, start stack
 	@bash scripts/setup-dgx.sh
 
 .PHONY: setup-mac
@@ -18,21 +18,8 @@ setup-mac: check-dir ## Mac setup: configure secrets and shell env vars
 	@bash scripts/setup-mac.sh
 
 .PHONY: teardown-dgx
-teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes and .env
+teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes
 	@bash scripts/teardown-dgx.sh
-
-.PHONY: teardown-mac
-teardown-mac: check-dir ## Tear down Mac: remove local .env
-	rm -f .env
-	@echo "Mac teardown complete."
-
-.PHONY: push-secrets
-push-secrets: check-dir ## Push .env secrets to AWS Secrets Manager
-	@bash scripts/push-secrets.sh
-
-.PHONY: pull-secrets
-pull-secrets: check-dir ## Pull secrets from AWS Secrets Manager into .env
-	@bash scripts/pull-secrets.sh
 
 .PHONY: up
 up: check-dir ## Start all services on DGX
@@ -71,7 +58,6 @@ help:
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-17s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make setup-mac                              # First-time Mac setup"
+	@echo "  make setup-mac                              # Verify Mac prereqs"
 	@echo "  make setup-dgx                              # Deploy stack to DGX"
-	@echo "  make push-secrets                           # Update secrets in AWS"
 	@echo "  make health                                 # Check all services"
