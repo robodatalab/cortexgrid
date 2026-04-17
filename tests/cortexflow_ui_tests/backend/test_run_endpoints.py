@@ -38,6 +38,17 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(data[1]["value"], 0.8)
 
     @patch(
+        "cortexflow_ui.backend.main.get_metric_history",
+        return_value=[{"step": 1, "value": 0.5, "timestamp": 1000}],
+    )
+    def test_run_metric_history_supports_slashed_keys(
+        self, mock_history: MagicMock
+    ) -> None:
+        response = self.client.get("/api/runs/run-1/metrics/train/loss")
+        self.assertEqual(response.status_code, 200)
+        mock_history.assert_called_once_with("run-1", "train/loss")
+
+    @patch(
         "cortexflow_ui.backend.main.list_run_params",
         return_value={"lr": "0.001", "epochs": "10"},
     )
