@@ -87,7 +87,7 @@ See the [root README](../../../README.md#cortexflow) for the full API reference.
 |--------|-------------|
 | `setup-mac` | Verify Mac prerequisites (aws CLI + SM access) |
 | `setup-dgx` | Deploy stack to DGX via SSH |
-| `teardown-dgx` | Stop stack, remove volumes and .env on DGX |
+| `teardown-dgx` | Stop stack, remove volumes on DGX |
 | `health` | Check all services are reachable |
 | `up` | Start all services |
 | `down` | Stop all services |

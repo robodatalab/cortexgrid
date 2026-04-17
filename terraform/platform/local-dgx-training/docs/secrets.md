@@ -17,11 +17,9 @@ AWS Secrets Manager (source of truth)
     ├── robolab/infra/DGX_TAILSCALE_IP
     └── robolab/infra/GH_TOKEN
          │
-         │  `make setup-dgx` writes bootstrap creds to .env on DGX
-         ▼
-    .env on DGX — ONLY AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
-         │
-         │  docker compose up
+         │  `make setup-dgx` injects bootstrap creds as env vars into
+         │  the SSH session that runs `docker compose up` — never
+         │  persisted to disk on the DGX
          ▼
     Only containers running our Python code hold AWS creds and fetch
     from the CMS at runtime via cortexflow.secrets.get_secret():
@@ -68,14 +66,16 @@ From your Mac (needs AWS creds that can read `robolab/infra/*`):
 ```bash
 cd terraform/platform/local-dgx-training
 make setup-mac   # verifies prereqs
-make setup-dgx   # SSHes to the DGX, writes bootstrap .env, runs compose up
+make setup-dgx   # SSHes to the DGX, injects bootstrap creds, runs compose up
 ```
 
 `setup-dgx.sh` fetches `DGX_TAILSCALE_IP` and the bootstrap creds from
-Secrets Manager, writes a two-line `.env` on the DGX, and starts the
-stack. Our Python services (`jobs-control-plane`, `ray-head`) receive
-the bootstrap creds through docker-compose and fetch any further values
-they need via `cortexflow.secrets.get_secret()` at runtime.
+Secrets Manager and injects the creds as env vars into the SSH session
+that runs `docker compose up`. The creds are interpolated into the
+`${AWS_ACCESS_KEY_ID}` / `${AWS_SECRET_ACCESS_KEY}` references in
+compose and land in the `jobs-control-plane` and `ray-head` containers.
+From there, those services fetch any further values they need via
+`cortexflow.secrets.get_secret()` at runtime.
 
 ### 4. Configure GitHub Actions (for CI)
 

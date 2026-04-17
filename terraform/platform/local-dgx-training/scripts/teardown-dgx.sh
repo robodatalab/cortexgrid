@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # DGX Spark teardown — run this FROM YOUR MAC.
-# SSHs into the DGX and stops all services, removes volumes and .env.
+# SSHs into the DGX and stops all services, removes volumes.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -36,8 +36,7 @@ ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_DOWN
 set -euo pipefail
 cd "${DGX_DIR}" 2>/dev/null || { echo "Directory not found on DGX"; exit 0; }
 docker compose --profile monitoring down -v
-rm -f .env
 echo "Done."
 REMOTE_DOWN
 
-echo "DGX teardown complete. Volumes and .env removed."
+echo "DGX teardown complete. Volumes removed."

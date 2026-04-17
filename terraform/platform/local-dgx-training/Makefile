@@ -10,7 +10,7 @@ check-dir:
 	fi
 
 .PHONY: setup-dgx
-setup-dgx: check-dir ## Full DGX setup (from Mac): sync files, copy .env, start stack
+setup-dgx: check-dir ## Full DGX setup (from Mac): sync files, inject creds from CMS, start stack
 	@bash scripts/setup-dgx.sh
 
 .PHONY: setup-mac
@@ -18,7 +18,7 @@ setup-mac: check-dir ## Mac setup: configure secrets and shell env vars
 	@bash scripts/setup-mac.sh
 
 .PHONY: teardown-dgx
-teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes and .env
+teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes
 	@bash scripts/teardown-dgx.sh
 
 .PHONY: up

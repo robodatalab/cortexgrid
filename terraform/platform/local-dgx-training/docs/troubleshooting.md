@@ -18,7 +18,7 @@ This checks connectivity to all services and reports which are unreachable.
 **Causes & fixes:**
 1. **Stack not running:** `docker compose ps` on the DGX. If services are down, run `make up`.
 2. **Tailscale not connected:** Run `tailscale status` on both Mac and DGX. Ensure both are on the same network.
-3. **Wrong IP in .env:** Verify `DGX_TAILSCALE_IP` matches `tailscale ip -4` on the DGX.
+3. **Stale `DGX_TAILSCALE_IP` in CMS:** Verify the value in AWS Secrets Manager under `robolab/infra/DGX_TAILSCALE_IP` matches `tailscale ip -4` on the DGX. Update it in the UI if it changed.
 4. **Ray head crashed:** `docker compose logs ray-head` — look for OOM or GPU errors. Restart with `docker compose restart ray-head`.
 
 ### GPU not detected by Ray
