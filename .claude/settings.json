@@ -80,7 +80,10 @@
       "Bash(grep -E \"\\\\.\\(py|ts\\)$\")",
       "Bash(find /Users/piotrtrochim/GitHub/robolab-infra/.venv/lib/python3.11/site-packages/mlflow -name \"*.py\" -exec grep -l \"mlflow-artifacts\" {} \\\\;)",
       "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/mlflow/entrypoint.sh)",
-      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/ray/entrypoint.sh)"
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/ray/entrypoint.sh)",
+      "Bash(pip freeze *)",
+      "Bash(git ls-tree *)",
+      "Bash(git log *)"
     ]
   }
 }

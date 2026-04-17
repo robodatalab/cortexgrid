@@ -35,8 +35,8 @@ services:
 
   # ---------------------------------------------------------------------------
   # Ray Head Node — execution engine
-  # Entrypoint reads DGX_TAILSCALE_IP from the CMS via cortexflow.secrets
-  # and exports it as RAY_GRAFANA_IFRAME_HOST before starting Ray.
+  # DGX_TAILSCALE_IP is injected by setup-dgx.sh and used by the entrypoint
+  # to build RAY_GRAFANA_IFRAME_HOST (the browser-reachable Grafana URL).
   # ---------------------------------------------------------------------------
   ray-head:
     image: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/ray-head:latest
@@ -54,6 +54,7 @@ services:
       - RAY_GRAFANA_HOST=http://grafana:3000
       - RAY_PROMETHEUS_HOST=http://prometheus:9090
       - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - DGX_TAILSCALE_IP=${DGX_TAILSCALE_IP}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     deploy:

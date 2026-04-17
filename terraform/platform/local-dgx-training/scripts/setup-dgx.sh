@@ -113,6 +113,7 @@ ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
 set -euo pipefail
 export AWS_ACCESS_KEY_ID="${AWS_ID}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET}"
+export DGX_TAILSCALE_IP="${DGX_IP}"
 cd "${DGX_DIR}"
 # Stop any existing stack (may be from a previous project name)
 docker compose --profile monitoring down 2>/dev/null || true
