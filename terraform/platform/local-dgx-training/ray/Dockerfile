@@ -29,6 +29,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# Copy just the secrets module — entrypoint calls it to fetch CMS values.
+COPY cortexflow/secrets.py /app/cortexflow/secrets.py
+RUN touch /app/cortexflow/__init__.py
+ENV PYTHONPATH=/app
+
+COPY terraform/platform/local-dgx-training/ray/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8265 6379 8080
 
-CMD ["ray", "start", "--head", "--block"]
+ENTRYPOINT ["/entrypoint.sh"]
