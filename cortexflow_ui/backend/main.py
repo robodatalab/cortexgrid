@@ -132,7 +132,7 @@ def run_metrics(run_id: str) -> list[str]:
     return list_run_metrics(run_id)
 
 
-@app.get("/api/runs/{run_id}/metrics/{key}")
+@app.get("/api/runs/{run_id}/metrics/{key:path}")
 def run_metric_history(run_id: str, key: str) -> list[dict]:
     return get_metric_history(run_id, key)
 
