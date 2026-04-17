@@ -13,10 +13,12 @@ import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
 from cortexflow.infra import get_s3_endpoint_url
-from cortexflow.secrets import get_secret
 
 
-_S3_ACCESS_KEY = "minioadmin"
+# Hardcoded to match the MinIO creds baked into docker-compose. The DGX
+# is an isolated single-tenant machine, so these aren't real secrets.
+_S3_ACCESS_KEY = "admin"
+_S3_SECRET_KEY = "adminadmin"
 _S3_DEFAULT_BUCKET = "ray-checkpoints"
 
 
@@ -26,12 +28,8 @@ def get_s3_client() -> Any:
     endpoint_url = get_s3_endpoint_url()
     if endpoint_url:
         kwargs["endpoint_url"] = endpoint_url
-    access_key = _S3_ACCESS_KEY
-    if access_key:
-        kwargs["aws_access_key_id"] = access_key
-    secret_key = get_secret("MINIO_ROOT_PASSWORD")
-    if secret_key:
-        kwargs["aws_secret_access_key"] = secret_key
+    kwargs["aws_access_key_id"] = _S3_ACCESS_KEY
+    kwargs["aws_secret_access_key"] = _S3_SECRET_KEY
     return boto3.client("s3", **kwargs)
 
 
