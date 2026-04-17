@@ -21,19 +21,6 @@ setup-mac: check-dir ## Mac setup: configure secrets and shell env vars
 teardown-dgx: check-dir ## Tear down DGX (from Mac): stop stack, remove volumes and .env
 	@bash scripts/teardown-dgx.sh
 
-.PHONY: teardown-mac
-teardown-mac: check-dir ## Tear down Mac: remove local .env
-	rm -f .env
-	@echo "Mac teardown complete."
-
-.PHONY: push-secrets
-push-secrets: check-dir ## Push .env secrets to AWS Secrets Manager
-	@bash scripts/push-secrets.sh
-
-.PHONY: pull-secrets
-pull-secrets: check-dir ## Pull secrets from AWS Secrets Manager into .env
-	@bash scripts/pull-secrets.sh
-
 .PHONY: up
 up: check-dir ## Start all services on DGX
 	docker compose --profile monitoring up -d --build
@@ -71,7 +58,6 @@ help:
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-17s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make setup-mac                              # First-time Mac setup"
+	@echo "  make setup-mac                              # Verify Mac prereqs"
 	@echo "  make setup-dgx                              # Deploy stack to DGX"
-	@echo "  make push-secrets                           # Update secrets in AWS"
 	@echo "  make health                                 # Check all services"

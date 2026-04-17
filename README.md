@@ -55,10 +55,10 @@ See [cortexflow/README.md](cortexflow/README.md) for full reference
 ```bash
 cd terraform/platform/local-dgx-training
 
-# 1. Configure Mac (secrets, shell env vars)
+# 1. Verify Mac prerequisites (aws CLI + Secrets Manager access)
 make setup-mac
 
-# 2. Deploy stack to DGX (syncs files, starts containers)
+# 2. Deploy stack to DGX (fetches secrets from AWS SM, syncs files, starts containers)
 make setup-dgx
 
 # 3. Verify
@@ -69,12 +69,9 @@ make health
 
 | Target | Description |
 |--------|-------------|
-| `make setup-mac` | Configure secrets and shell environment |
+| `make setup-mac` | Verify Mac prerequisites (aws CLI + SM access) |
 | `make setup-dgx` | Deploy stack to DGX via SSH |
 | `make teardown-dgx` | Stop stack, delete volumes and .env on DGX |
-| `make teardown-mac` | Remove shell exports and local .env |
-| `make push-secrets` | Push .env secrets to AWS Secrets Manager |
-| `make pull-secrets` | Pull secrets from AWS Secrets Manager |
 | `make health` | Check all services are reachable |
 | `make up` | Start all services |
 | `make down` | Stop all services |
@@ -115,7 +112,7 @@ State backend: `s3://robolab-terraform-state/website/terraform.tfstate`
 
 ### `terraform/platform/secrets/` — Centralized secrets
 
-IAM users, roles, and OIDC configuration for accessing AWS Secrets Manager. Secret values are managed by `scripts/push-secrets.sh`, not Terraform.
+IAM users, roles, and OIDC configuration for accessing AWS Secrets Manager. Secret values are managed directly in AWS Secrets Manager (via the Platform UI or `aws secretsmanager` CLI), not Terraform.
 
 ### Security posture
 
