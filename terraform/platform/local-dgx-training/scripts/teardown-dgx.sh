@@ -14,17 +14,7 @@ fi
 
 cd "$REPO_ROOT"
 
-if [[ ! -f .env ]]; then
-    echo "Error: .env not found. Cannot determine DGX IP."
-    exit 1
-fi
-
-source .env
-DGX_IP="${DGX_TAILSCALE_IP:-}"
-if [[ -z "$DGX_IP" || "$DGX_IP" == "100.x.x.x" ]]; then
-    echo "Error: DGX_TAILSCALE_IP not set in .env"
-    exit 1
-fi
+DGX_IP="$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('DGX_TAILSCALE_IP'))")"
 
 DGX_USER="${DGX_SSH_USER:-$(whoami)}"
 DGX_HOST="${DGX_USER}@${DGX_IP}"
