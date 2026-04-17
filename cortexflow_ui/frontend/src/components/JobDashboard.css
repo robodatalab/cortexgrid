@@ -50,6 +50,7 @@
   font-weight: 500;
   white-space: nowrap;
   margin-left: auto;
+  align-self: flex-start;
 }
 
 .job-dashboard__open-button:hover {
