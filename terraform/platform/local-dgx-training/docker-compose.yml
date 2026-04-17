@@ -109,7 +109,7 @@ services:
       - "9001:9001" # Web Console
     environment:
       MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: admin
+      MINIO_ROOT_PASSWORD: adminadmin
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
@@ -135,7 +135,7 @@ services:
       - ./storage/minio/init-buckets.sh:/init-buckets.sh:ro
     environment:
       MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: admin
+      MINIO_ROOT_PASSWORD: adminadmin
     restart: "no"
     logging: *default-logging
 
@@ -156,7 +156,7 @@ services:
     environment:
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: admin          # minio root user
-      AWS_SECRET_ACCESS_KEY: admin      # minio root password
+      AWS_SECRET_ACCESS_KEY: adminadmin # minio root password
       MLFLOW_SERVER_ALLOWED_HOSTS: "*"
       MLFLOW_SERVER_CORS_ALLOWED_ORIGINS: "*"
     command: >
