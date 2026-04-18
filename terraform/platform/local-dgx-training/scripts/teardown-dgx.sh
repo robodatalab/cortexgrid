@@ -17,4 +17,8 @@ export SSHPASS="$PW"
 sshpass -e ssh -o StrictHostKeyChecking=accept-new "$DGX_HOST" \
   "echo '$PW' | sudo -S /usr/local/bin/k3s-uninstall.sh"
 
+kubectl config delete-context dgx 2>/dev/null || true
+kubectl config delete-cluster dgx 2>/dev/null || true
+kubectl config delete-user dgx 2>/dev/null || true
+
 echo "DGX teardown complete."
