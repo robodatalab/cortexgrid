@@ -52,6 +52,16 @@ echo "[3/4] Waiting for Argo server to come up..."
 until kubectl -n argocd get deploy argocd-server &>/dev/null; do sleep 5; done
 kubectl -n argocd rollout status deploy/argocd-server --timeout=5m
 
+echo "[4/4] Registering GitHub repo credentials with Argo..."
+GH_TOKEN="$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('GH_TOKEN'))")"
+kubectl -n argocd create secret generic argo-github-repo \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/paksas/robolab-infra.git \
+  --from-literal=username=x-access-token \
+  --from-literal=password="$GH_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl label secret argo-github-repo -n argocd argocd.argoproj.io/secret-type=repository --overwrite
+
 echo
 echo "Seeded."
 echo "  Argo UI:     http://${DGX_IP}:30080  (auth disabled)"
