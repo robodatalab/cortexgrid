@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ray-cluster
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://ray-project.github.io/kuberay-helm
+    chart: ray-cluster
+    targetRevision: 1.2.2
+    helm:
+      values: |
+        image:
+          repository: rayproject/ray
+          tag: "2.34.0"
+        head:
+          resources:
+            limits:
+              cpu: "2"
+              memory: 8Gi
+            requests:
+              cpu: "1"
+              memory: 4Gi
+          rayStartParams:
+            dashboard-host: "0.0.0.0"
+        worker:
+          replicas: 0
+        service:
+          type: NodePort
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ray
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
