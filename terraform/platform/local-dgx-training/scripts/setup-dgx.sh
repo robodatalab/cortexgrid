@@ -1,152 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# DGX Spark setup — run this FROM YOUR MAC.
-# Fetches DGX_TAILSCALE_IP and the bootstrap AWS creds from the CMS,
-# SSHes into the DGX, rsyncs the repo, and starts the stack with the
-# creds injected as env vars into the compose-up shell session — no
-# secrets ever touch disk on the DGX.
-#
-# Prerequisites:
-#   - `uv` installed and the CMS reachable (run `make setup-mac` to verify)
-#   - SSH access to the DGX over Tailscale
+# DGX seed — run FROM YOUR MAC, once per DGX lifetime.
+# Installs k3s, drops the Argo CD bootstrap manifest, fetches kubeconfig
+# and the Argo admin password back to the Mac. After this, Argo reconciles
+# everything from Git.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+BOOTSTRAP_FILE="$REPO_ROOT/k8s/argocd.yaml"
+KUBECONFIG_OUT="${KUBECONFIG_OUT:-$HOME/.kube/dgx-config}"
 
-if [[ ! -f "$REPO_ROOT/docker-compose.yml" ]]; then
-    echo "Error: Run from the local-dgx-training directory."
-    exit 1
-fi
+[[ -f "$BOOTSTRAP_FILE" ]] || { echo "Missing $BOOTSTRAP_FILE"; exit 1; }
 
-cd "$REPO_ROOT"
+DGX_IP="$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('DGX_TAILSCALE_IP'))")"
+DGX_HOST="${DGX_SSH_USER:-$(whoami)}@${DGX_IP}"
+BOOTSTRAP_B64="$(base64 < "$BOOTSTRAP_FILE" | tr -d '\n')"
 
-echo "Fetching configuration from the CMS..."
-fetch() { uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('$1'))"; }
-DGX_IP="$(fetch DGX_TAILSCALE_IP)"
-AWS_ID="$(fetch AWS_ACCESS_KEY_ID)"
-AWS_SECRET="$(fetch AWS_SECRET_ACCESS_KEY)"
-
-DGX_USER="${DGX_SSH_USER:-$(whoami)}"
-DGX_HOST="${DGX_USER}@${DGX_IP}"
-DGX_DIR="${DGX_REPO_PATH:-/home/${DGX_USER}/robolab-infra/terraform/platform/local-dgx-training}"
-
-# SSH multiplexing — authenticate once, reuse for all connections
-CTRL_SOCKET="/tmp/robolab-ssh-${DGX_USER}-${DGX_IP}"
-SSH_OPTS="-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPath=${CTRL_SOCKET} -o ControlPersist=120"
-
-cleanup() { ssh -O exit -o ControlPath="${CTRL_SOCKET}" "$DGX_HOST" 2>/dev/null || true; }
-trap cleanup EXIT
-
-echo "DGX Setup (running from Mac)"
-echo "  Target: ${DGX_HOST}:${DGX_DIR}"
+read -s -p "DGX password (SSH + sudo): " PW
 echo
 
-read -s -p "DGX password: " PW
-echo
+SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new"
+export SSHPASS="$PW"
 
-echo "[1/7] Checking SSH to DGX..."
-if ! SSHPASS="$PW" sshpass -e ssh $SSH_OPTS "$DGX_HOST" "echo ok" >/dev/null; then
-    echo "Error: Cannot SSH to ${DGX_HOST}"
-    echo "  Check Tailscale: tailscale status"
-    echo "  Check SSH:       ssh ${DGX_HOST}"
-    exit 1
-fi
-echo "  SSH connection OK"
-
-echo "[2/7] Checking DGX prerequisites..."
-ssh $SSH_OPTS "$DGX_HOST" bash -s <<'REMOTE_CHECK'
+echo "[1/4] Installing k3s + staging Argo bootstrap on DGX..."
+$SSH "$DGX_HOST" "SUDO_PW='$PW' BOOTSTRAP_B64='$BOOTSTRAP_B64' bash -s" <<'REMOTE'
 set -euo pipefail
-if ! command -v docker &>/dev/null; then
-    echo "Error: Docker not installed on DGX"
-    exit 1
-fi
-if ! docker compose version &>/dev/null; then
-    echo "Error: Docker Compose V2 not installed on DGX"
-    exit 1
-fi
-echo "  Docker $(docker --version | awk '{print $3}') — OK"
-echo "  Docker Compose $(docker compose version --short) — OK"
-if command -v nvidia-smi &>/dev/null; then
-    echo "  $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1) — OK"
-else
-    echo "  Warning: nvidia-smi not found"
-fi
-REMOTE_CHECK
+echo "$SUDO_PW" | sudo -S -v -p ''
+sudo mkdir -p /var/lib/rancher/k3s/server/manifests
+echo "$BOOTSTRAP_B64" | base64 -d | sudo tee /var/lib/rancher/k3s/server/manifests/argocd.yaml > /dev/null
+curl -sfL https://get.k3s.io | sudo sh -
+REMOTE
 
-echo "[3/7] Configuring Docker daemon TCP listener on DGX..."
-ssh $SSH_OPTS "$DGX_HOST" "SUDO_PW='$PW' bash -s" <<REMOTE_DOCKER_TCP
-set -euo pipefail
-DAEMON_FILE=/etc/systemd/system/docker.service.d/docker-override.conf
-DESIRED='[Unit]
-After=nvidia-gpu-reset.target tailscaled.service
-Wants=nvidia-gpu-reset.target tailscaled.service
+echo "[2/4] Fetching kubeconfig..."
+mkdir -p "$(dirname "$KUBECONFIG_OUT")"
+$SSH "$DGX_HOST" "echo '$PW' | sudo -S cat /etc/rancher/k3s/k3s.yaml" \
+  | sed "s|127.0.0.1|$DGX_IP|" > "$KUBECONFIG_OUT"
+chmod 600 "$KUBECONFIG_OUT"
 
-[Service]
-ExecStart=
-ExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://${DGX_IP}:2375 --containerd=/run/containerd/containerd.sock'
-if [[ -f "\$DAEMON_FILE" ]] && [[ "\$(cat "\$DAEMON_FILE")" == "\$DESIRED" ]]; then
-    echo "  Already configured"
-else
-    echo "\$SUDO_PW" | sudo -S -p '' -v
-    sudo mkdir -p "\$(dirname "\$DAEMON_FILE")"
-    echo "\$DESIRED" | sudo tee "\$DAEMON_FILE" > /dev/null
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
-    echo "  Reconfigured — daemon restarted"
-fi
-REMOTE_DOCKER_TCP
-
-echo "[4/7] Syncing files to DGX..."
-ssh $SSH_OPTS "$DGX_HOST" "mkdir -p ${DGX_DIR}"
-rsync -az -e "ssh $SSH_OPTS" --exclude='__pycache__' --exclude='.git' \
-    "$REPO_ROOT/" "${DGX_HOST}:${DGX_DIR}/"
-echo "  Files synced"
-
-echo "[5/7] Logging into ECR on DGX..."
-ECR_PASSWORD=$(aws ecr get-login-password --region us-east-1)
-echo "$ECR_PASSWORD" | ssh $SSH_OPTS "$DGX_HOST" "docker login --username AWS --password-stdin 517906913330.dkr.ecr.us-east-1.amazonaws.com"
-echo "  ECR login OK"
-
-echo "[6/7] Starting services on DGX..."
-ssh $SSH_OPTS "$DGX_HOST" bash -s <<REMOTE_UP
-set -euo pipefail
-export AWS_ACCESS_KEY_ID="${AWS_ID}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET}"
-export DGX_TAILSCALE_IP="${DGX_IP}"
-cd "${DGX_DIR}"
-# Stop any existing stack (may be from a previous project name)
-docker compose --profile monitoring down 2>/dev/null || true
-# Also clean up containers from the old 'robolab-workspace' project if present
-docker rm -f robolab-redis robolab-ray-head robolab-postgres robolab-minio robolab-minio-init robolab-mlflow robolab-node-exporter robolab-prometheus robolab-grafana 2>/dev/null || true
-docker compose --profile monitoring pull
-docker compose --profile monitoring up -d
-REMOTE_UP
-
-echo "[7/7] Waiting for Ray Dashboard..."
-MAX_WAIT=120
-ELAPSED=0
-while ! curl -sf "http://${DGX_IP}:8265" &>/dev/null; do
-    if [[ $ELAPSED -ge $MAX_WAIT ]]; then
-        echo "  Warning: Ray Dashboard not reachable after ${MAX_WAIT}s"
-        echo "  Debug:   ssh ${DGX_HOST} 'cd ${DGX_DIR} && docker compose logs ray-head'"
-        break
-    fi
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
-    echo "  Waiting... (${ELAPSED}s)"
-done
-
-if curl -sf "http://${DGX_IP}:8265" &>/dev/null; then
-    echo "  Ray Dashboard is ready!"
-fi
+echo "[3/4] Waiting for Argo server to come up..."
+export KUBECONFIG="$KUBECONFIG_OUT"
+until kubectl -n argocd get deploy argocd-server &>/dev/null; do sleep 5; done
+kubectl -n argocd rollout status deploy/argocd-server --timeout=5m
 
 echo
-echo "Setup Complete!"
-echo
-echo "  Ray Dashboard       http://${DGX_IP}:8265"
-echo "  MLflow UI           http://${DGX_IP}:5000"
-echo "  Grafana             http://${DGX_IP}:3000"
-echo "  MinIO Console       http://${DGX_IP}:9001"
-echo "  Prometheus          http://${DGX_IP}:9090"
-echo
+echo "Seeded."
+echo "  Argo UI:     http://${DGX_IP}:30080  (auth disabled)"
+echo "  Kubeconfig:  ${KUBECONFIG_OUT}  (export KUBECONFIG=${KUBECONFIG_OUT})"

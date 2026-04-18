@@ -1,0 +1,37 @@
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: argocd
+  namespace: kube-system
+spec:
+  chart: argo-cd
+  repo: https://argoproj.github.io/argo-helm
+  version: 7.7.0
+  targetNamespace: argocd
+  createNamespace: true
+  valuesContent: |-
+    server:
+      extraArgs:
+        - --insecure
+        - --disable-auth
+      service:
+        type: NodePort
+        nodePortHttp: 30080
+      additionalApplications:
+        - name: root
+          namespace: argocd
+          project: default
+          source:
+            repoURL: https://github.com/paksas/robolab-infra.git
+            targetRevision: main
+            path: k8s
+            directory:
+              recurse: true
+              exclude: argocd.yaml
+          destination:
+            server: https://kubernetes.default.svc
+            namespace: argocd
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
