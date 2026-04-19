@@ -7,30 +7,33 @@ on:
       - ".github/workflows/ray-head.yml"
 
 permissions:
-  id-token: write
   contents: read
+  packages: write
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
     env:
-      ECR_REPO: 517906913330.dkr.ecr.us-east-1.amazonaws.com/robolab/ray-head
+      IMAGE: ghcr.io/${{ github.repository_owner }}/ray-head
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::517906913330:role/robolab-github-actions
-          aws-region: us-east-1
-
-      - uses: aws-actions/amazon-ecr-login@v2
 
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push
         run: |
-          docker buildx build --platform linux/arm64 -f k8s/docker/ray/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} --push .
+          docker buildx build --platform linux/arm64 \
+            -f k8s/docker/ray/Dockerfile \
+            -t $IMAGE:latest \
+            -t $IMAGE:${{ github.sha }} \
+            --push .
