@@ -10,9 +10,9 @@ Upstream images (`rayproject/ray`, `mlflow-server`, etc.) are generic. Our workl
 
 ### ray-head — [ray/Dockerfile](ray/Dockerfile)
 
-Base: `rayproject/ray:2.9.3`. Adds `mlflow==3.11.1`, `python-dotenv==1.0.1`, `psutil==5.9.8` so training code running on Ray workers can log to MLflow without extra installs.
+Base: `python:3.11-slim`. Pip-installs `ray[default,train,tune,data]==2.9.3`, `mlflow==3.11.1`, `python-dotenv==1.0.1`, `psutil==5.9.8` so training code running on Ray workers can log to MLflow without extra installs. Python 3.11 is required because mlflow 3.x needs Python ≥3.10; `rayproject/ray` at pinned ray versions only publishes Python 3.8 + amd64, neither of which fits DGX (arm64).
 
-No custom entrypoint: the deployment (see [../argo-deployments/ray/](../argo-deployments/ray/)) invokes `ray start --head` itself via the pod's `command`. When we later switch to the KubeRay operator for multi-node / worker scaling (see the AWS path in the ray deployment README), this same image continues to work because the operator also calls `ray start` directly.
+No custom entrypoint: the deployment (see [../argo-deployments/ray/](../argo-deployments/ray/)) invokes `ray start --head` itself via the pod's `command`.
 
 Pushed by [ray-head.yml](../../.github/workflows/ray-head.yml).
 

@@ -23,7 +23,7 @@ When we add AWS and want real workers / GPU scaling:
 1. Install the KubeRay operator as a sibling Argo Application.
 2. Replace [../../workloads/ray/deployment.yaml](../../workloads/ray/deployment.yaml) + [service.yaml](../../workloads/ray/service.yaml) with a `RayCluster` CR — one head group, one or more worker groups with GPU resource requests.
 3. The existing [secrets.yaml](../../workloads/ray/secrets.yaml) (env Secret) and [metrics.yaml](../../workloads/ray/metrics.yaml) (PodMonitor) stay put; they reference the cluster by pod label, which we update to match KubeRay's scheme.
-4. The image [ghcr.io/paksas/ray-head](../../docker/ray/) stays the same — KubeRay invokes `ray start` itself, which our image supports (upstream Ray base, no custom entrypoint).
+4. The image [ghcr.io/paksas/ray-head](../../docker/ray/) stays the same — KubeRay invokes `ray start` itself, which our image supports (ray installed via pip on top of `python:3.11-slim`, no custom entrypoint).
 
 The DGX deployment can either stay on raw manifests forever (head-only doesn't need KubeRay) or migrate to KubeRay if we ever want the DGX to run workers.
 

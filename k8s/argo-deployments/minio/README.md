@@ -1,20 +1,19 @@
-# MinIO
+# MinIO — Argo Deployment
 
 ## Problem
 
-Training pipelines, MLflow, and jobs-control-plane all need durable object storage for datasets, checkpoints, artifacts, and models — but standing up S3 buckets for local experimentation is slow, and on-prem egress costs add up. A single in-cluster S3-compatible store gives every workload one endpoint to read and write to, shared across namespaces, without leaving the cluster.
+Training pipelines, MLflow, and future workloads all need durable object storage for datasets, checkpoints, artifacts, and models. A single in-cluster S3-compatible store gives every workload one endpoint to read and write to, shared across namespaces, without leaving the cluster.
 
 ## Components
 
-**stack.yaml** — Argo Application installing the Bitnami `minio` Helm chart into the `minio` namespace. Single-node deployment, 50Gi persistent volume. Exposes:
+**stack.yaml** — Argo Application pointing at raw manifests at [`k8s/workloads/minio/`](../../workloads/minio/). Deployed into the `minio` namespace. See [workloads/minio/README.md](../../workloads/minio/README.md) for the k8s spec.
 
-- S3 API on NodePort `:30900` (used by pods via `minio.minio.svc.cluster.local:9000`).
-- Web console on NodePort `:30901` for manual bucket inspection.
+## Why raw manifests (not a Helm chart)
 
-Creates one bucket at install time: `mlflow-artifacts`. More buckets can be added by extending `defaultBuckets` in the Helm values.
+Same reasoning as other deployments: one instance, one environment, no templating needs. We initially used the Bitnami MinIO Helm chart but Bitnami deleted the free image tags from Docker Hub in August 2024. The official `minio/minio` image is multi-arch (ARM64 works on DGX), stable, and has no licensing churn — much simpler as a raw Deployment.
 
 ## Dependencies
 
-- **MLflow** ([../mlflow/](../mlflow/)) — stores artifacts here. MLflow's `externalS3.host` points at `minio.minio.svc.cluster.local`; bundled MinIO inside the MLflow chart is disabled.
-- **jobs-control-plane** (future) — will read training data and write checkpoints here via the AWS SDK, pointing `AWS_S3_ENDPOINT_URL` at the same service.
-- **Any pod doing S3 I/O** — same endpoint, uses `admin` / `adminadmin` credentials (bootstrap only; rotate via the secrets pipeline once that pattern is needed).
+- **MLflow** ([../mlflow/](../mlflow/)) — stores artifacts in bucket `mlflow-artifacts` at `minio.minio.svc.cluster.local:9000`.
+- **jobs-control-plane** (future) — will read training data and write checkpoints here via the AWS SDK.
+- **Any pod doing S3 I/O** — same endpoint. Creds `admin` / `adminadmin` hardcoded (tailnet-only; tighten when we move to AWS and swap for real S3 + IAM).

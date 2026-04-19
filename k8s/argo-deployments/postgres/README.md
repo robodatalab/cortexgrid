@@ -1,4 +1,4 @@
-# PostgreSQL
+# PostgreSQL — Argo Deployment
 
 ## Problem
 
@@ -6,11 +6,13 @@ Several platform services need a relational database for metadata — MLflow sto
 
 ## Components
 
-**stack.yaml** — Argo Application installing Bitnami's `postgresql` Helm chart into the `postgres` namespace. Single primary, 10Gi persistent volume, ClusterIP-only (no NodePort — internal use only). Hardcoded creds (`admin` / `admin`) match the old docker-compose setup; tighten when we move to AWS and swap for RDS.
+**stack.yaml** — Argo Application pointing at raw manifests at [`k8s/workloads/postgres/`](../../workloads/postgres/). Deployed into the `postgres` namespace. See [workloads/postgres/README.md](../../workloads/postgres/README.md) for the k8s spec.
 
-Exposed at `postgres.postgres.svc.cluster.local:5432`. Default database `mlflow` is created at install.
+## Why raw manifests (not a Helm chart)
+
+Same reasoning as other deployments. Also: we tried Bitnami's `postgresql` chart first but its default image (`docker.io/bitnami/postgresql:*`) was pulled from Docker Hub's free tier in Bitnami's August 2024 licensing change. The official `postgres:15-alpine` image is multi-arch (ARM64 on DGX), actively maintained, and doesn't move around.
 
 ## Dependencies
 
-- **MLflow** ([../mlflow/](../mlflow/)) — metadata backend. Connection string in mlflow's deployment env: `postgresql://admin:admin@postgres.postgres.svc.cluster.local:5432/mlflow`.
-- **Future**: any service needing Postgres should either create a new database in this instance (safest) or add a new database in the Helm values.
+- **MLflow** ([../mlflow/](../mlflow/)) — metadata backend. Connection string: `postgresql://admin:admin@postgres.postgres.svc.cluster.local:5432/mlflow`.
+- **Future**: any service needing Postgres can either create a new database in this instance (safest) or run its own.
