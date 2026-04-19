@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-bucket-init
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-01-18T07-03-39Z
+          env:
+            - name: MC_HOST_local
+              value: http://admin:adminadmin@minio.minio.svc.cluster.local:9000
+          command:
+            - sh
+            - -c
+            - mc mb -p local/mlflow-artifacts || true

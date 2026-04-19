@@ -8,23 +8,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: registry-1.docker.io/bitnamicharts
-    chart: postgresql
-    targetRevision: 15.5.0
-    helm:
-      values: |
-        fullnameOverride: postgres
-        auth:
-          username: admin
-          password: admin
-          database: mlflow
-        primary:
-          service:
-            type: ClusterIP
-          persistence:
-            enabled: true
-            size: 10Gi
-          resourcesPreset: "none"
+    repoURL: https://github.com/paksas/robolab-infra.git
+    targetRevision: main
+    path: k8s/workloads/postgres
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: postgres
