@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: minio
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: registry-1.docker.io/bitnamicharts
+    chart: minio
+    targetRevision: 14.0.0
+    helm:
+      values: |
+        auth:
+          rootUser: admin
+          rootPassword: adminadmin
+        defaultBuckets: "mlflow-artifacts"
+        resourcesPreset: "none"
+        service:
+          type: NodePort
+          nodePorts:
+            api: 30900
+            console: 30901
+        persistence:
+          enabled: true
+          size: 50Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: minio
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

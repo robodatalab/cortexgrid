@@ -6,14 +6,16 @@ Experiments running on Ray need a single place to record parameters, metrics, an
 
 ## Components
 
-**stack.yaml** — Argo Application installing the Bitnami `mlflow` Helm chart into the `mlflow` namespace. The chart bundles three services that MLflow needs:
+**stack.yaml** — Argo Application installing the Bitnami `mlflow` Helm chart into the `mlflow` namespace. Deploys two services:
 
-- **MLflow tracking server** — the HTTP API + UI (NodePort `:30500`). Speaks to Postgres for metadata and MinIO (S3) for artifacts.
+- **MLflow tracking server** — the HTTP API + UI (NodePort `:30500`). Reads/writes metadata to Postgres and artifacts to the shared MinIO.
 - **PostgreSQL** — metadata backend (runs, experiments, params, metrics).
-- **MinIO** — S3-compatible artifact store (models, logged files, plots). Bundled so MLflow works without depending on external S3.
+
+The chart's bundled MinIO is disabled; artifacts go to the cluster-wide MinIO deployment instead.
 
 ## Dependencies
 
-- **Ray** ([../ray/](../ray/)) — training jobs running on Ray log into MLflow at `http://mlflow-tracking.mlflow.svc.cluster.local:80` using `MLFLOW_TRACKING_URI`.
-- **jobs-control-plane** (future) — polls MLflow for submitted runs and schedules them on Ray. Needs MLflow URL as env var.
+- **MinIO** ([../minio/](../minio/)) — MLflow's artifact store. Tracking server writes to the `mlflow-artifacts` bucket at `minio.minio.svc.cluster.local:9000`.
+- **Ray** ([../ray/](../ray/)) — training jobs log to MLflow at `http://mlflow-tracking.mlflow.svc.cluster.local:80` via `MLFLOW_TRACKING_URI`.
+- **jobs-control-plane** (future) — polls MLflow for submitted runs and schedules them on Ray. Needs the MLflow URL as an env var.
 - **Monitoring** ([../monitoring/](../monitoring/)) — adding a `ServiceMonitor` later will expose tracking-server metrics to Prometheus. Not wired yet.

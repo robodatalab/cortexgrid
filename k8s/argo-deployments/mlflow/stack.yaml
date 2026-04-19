@@ -22,11 +22,14 @@ spec:
             enabled: false
           resourcesPreset: "none"
         minio:
-          auth:
-            rootUser: admin
-            rootPassword: adminadmin
-          defaultBuckets: mlflow-artifacts
-          resourcesPreset: "none"
+          enabled: false
+        externalS3:
+          host: minio.minio.svc.cluster.local
+          port: 9000
+          protocol: http
+          accessKeyID: admin
+          accessKeySecret: adminadmin
+          bucket: mlflow-artifacts
         postgresql:
           auth:
             username: mlflow
