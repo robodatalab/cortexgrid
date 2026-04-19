@@ -9,7 +9,7 @@ on:
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
       - ".github/workflows/jobs-control-plane.yml"
-      - "terraform/platform/local-dgx-training/jobs-control-plane/**"
+      - "k8s/docker/jobs-control-plane/**"
   pull_request:
     paths:
       - "cortexflow/**"
@@ -18,7 +18,7 @@ on:
       - "tests/jobs_control_plane_tests/**"
       - "pyproject.toml"
       - ".github/workflows/**"
-      - "terraform/platform/local-dgx-training/jobs-control-plane/**"
+      - "k8s/docker/jobs-control-plane/**"
 
 permissions:
   id-token: write
@@ -75,4 +75,4 @@ jobs:
 
       - name: Build and push
         run: |
-          docker buildx build --platform linux/arm64 -f terraform/platform/local-dgx-training/jobs-control-plane/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} --push .
+          docker buildx build --platform linux/arm64 -f k8s/docker/jobs-control-plane/Dockerfile -t $ECR_REPO:latest -t $ECR_REPO:${{ github.sha }} --push .
