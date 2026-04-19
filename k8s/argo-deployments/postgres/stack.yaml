@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: registry-1.docker.io/bitnamicharts
+    chart: postgresql
+    targetRevision: 15.5.0
+    helm:
+      values: |
+        fullnameOverride: postgres
+        auth:
+          username: admin
+          password: admin
+          database: mlflow
+        primary:
+          service:
+            type: ClusterIP
+          persistence:
+            enabled: true
+            size: 10Gi
+          resourcesPreset: "none"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

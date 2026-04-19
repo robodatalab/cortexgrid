@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobs-control-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jobs-control-plane
+  template:
+    metadata:
+      labels:
+        app: jobs-control-plane
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: jobs-control-plane
+          image: ghcr.io/paksas/jobs-control-plane:latest
+          imagePullPolicy: Always
+          env:
+            - name: CORTEXFLOW_POLL_INTERVAL
+              value: "5"
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow-tracking.mlflow.svc.cluster.local:80
+            - name: RAY_ADDRESS
+              value: ray://ray-cluster-kuberay-head-svc.ray.svc.cluster.local:10001
+          envFrom:
+            - secretRef:
+                name: aws-creds
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /tmp/cp_heartbeat && [ $(( $(date +%s) - $(stat -c %Y /tmp/cp_heartbeat) )) -lt 30 ]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5

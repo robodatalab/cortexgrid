@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ray-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ray-head
+  template:
+    metadata:
+      labels:
+        app: ray-head
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: ray-head
+          image: ghcr.io/paksas/ray-head:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+          command:
+            - ray
+            - start
+            - --head
+            - --dashboard-host=0.0.0.0
+            - --metrics-export-port=8080
+            - --block
+          envFrom:
+            - secretRef:
+                name: ray-env
+          ports:
+            - name: dashboard
+              containerPort: 8265
+            - name: client
+              containerPort: 10001
+            - name: metrics
+              containerPort: 8080
+            - name: gcs
+              containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["ray", "status"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10

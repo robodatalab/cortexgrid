@@ -1,15 +1,13 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: ray-cluster
-  namespace: ray
+  name: ray-head
   annotations:
-    argocd.argoproj.io/sync-wave: "2"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   selector:
     matchLabels:
-      ray.io/node-type: head
+      app: ray-head
   podMetricsEndpoints:
     - port: metrics
       interval: 15s

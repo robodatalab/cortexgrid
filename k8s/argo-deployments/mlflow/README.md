@@ -1,21 +1,22 @@
-# MLflow
+# MLflow — Argo Deployment
 
 ## Problem
 
-Experiments running on Ray need a single place to record parameters, metrics, and artifacts; jobs scheduled by the control plane need a queue of runs to pick up. Without MLflow, every training script would have to implement its own tracking, and comparing runs across experiments would be impossible. MLflow also hosts the model registry used downstream by inference deployments.
+Experiments on Ray need a single place to record parameters, metrics, and artifacts; jobs-control-plane reads a queue of submitted runs from MLflow; MLflow also hosts the model registry used downstream by inference. Without it, every training script would implement its own tracking, and comparing runs would be impossible.
 
 ## Components
 
-**stack.yaml** — Argo Application installing the Bitnami `mlflow` Helm chart into the `mlflow` namespace. Deploys two services:
+**stack.yaml** — Argo Application pointing at raw k8s manifests at [`k8s/workloads/mlflow/`](../../workloads/mlflow/). Deployed into the `mlflow` namespace. Sync-wave `1`. See [workloads/mlflow/README.md](../../workloads/mlflow/README.md) for the k8s spec.
 
-- **MLflow tracking server** — the HTTP API + UI (NodePort `:30500`). Reads/writes metadata to Postgres and artifacts to the shared MinIO.
-- **PostgreSQL** — metadata backend (runs, experiments, params, metrics).
+## Why raw manifests (not a Helm chart)
 
-The chart's bundled MinIO is disabled; artifacts go to the cluster-wide MinIO deployment instead.
+Same reasoning as [ray/](../ray/): on DGX we have one environment, one MLflow instance, no templating needs. A plain `Deployment` + `Service` is simpler than wiring our custom image into someone else's chart (which we tried with Bitnami's `mlflow` chart — it bundled its own Postgres and MinIO we didn't want). When AWS arrives, we'll likely wrap this in our own Helm chart as per-env values emerge.
 
 ## Dependencies
 
-- **MinIO** ([../minio/](../minio/)) — MLflow's artifact store. Tracking server writes to the `mlflow-artifacts` bucket at `minio.minio.svc.cluster.local:9000`.
-- **Ray** ([../ray/](../ray/)) — training jobs log to MLflow at `http://mlflow-tracking.mlflow.svc.cluster.local:80` via `MLFLOW_TRACKING_URI`.
-- **jobs-control-plane** (future) — polls MLflow for submitted runs and schedules them on Ray. Needs the MLflow URL as an env var.
-- **Monitoring** ([../monitoring/](../monitoring/)) — adding a `ServiceMonitor` later will expose tracking-server metrics to Prometheus. Not wired yet.
+- **Custom image** ([../../docker/mlflow/](../../docker/mlflow/)) — `ghcr.io/paksas/mlflow`. Exact version pins for `mlflow`, `psycopg2-binary`, `boto3`.
+- **Postgres** ([../postgres/](../postgres/)) — metadata backend. Connection string: `postgresql://admin:admin@postgres.postgres.svc.cluster.local:5432/mlflow`.
+- **MinIO** ([../minio/](../minio/)) — artifact store. Bucket `mlflow-artifacts` (auto-created by MinIO's `defaultBuckets`). Accessed as S3 via `MLFLOW_S3_ENDPOINT_URL=http://minio.minio.svc.cluster.local:9000`.
+- **Reflector** ([../secrets/](../secrets/)) — provides the `ghcr-pull` Secret in this namespace.
+- **Ray** ([../ray/](../ray/)) — training code on Ray workers logs to MLflow at `http://mlflow.mlflow.svc.cluster.local:5000`.
+- **Jobs Control Plane** ([../jobs-control-plane/](../jobs-control-plane/)) — polls this MLflow server for submitted runs.

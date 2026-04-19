@@ -1,19 +1,21 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: kuberay-operator
+  name: ray
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: default
   source:
-    repoURL: https://ray-project.github.io/kuberay-helm
-    chart: kuberay-operator
-    targetRevision: 1.2.2
+    repoURL: https://github.com/paksas/robolab-infra.git
+    targetRevision: main
+    path: k8s/workloads/ray
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
-    namespace: kuberay
+    namespace: ray
   syncPolicy:
     automated:
       prune: true
