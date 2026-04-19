@@ -8,32 +8,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: registry-1.docker.io/bitnamicharts
-    chart: mlflow
-    targetRevision: 2.0.0
-    helm:
-      values: |
-        tracking:
-          service:
-            type: NodePort
-            nodePorts:
-              http: 30500
-          auth:
-            enabled: false
-          resourcesPreset: "none"
-        minio:
-          auth:
-            rootUser: admin
-            rootPassword: adminadmin
-          defaultBuckets: mlflow-artifacts
-          resourcesPreset: "none"
-        postgresql:
-          auth:
-            username: mlflow
-            password: mlflow
-            database: mlflow
-          primary:
-            resourcesPreset: "none"
+    repoURL: https://github.com/paksas/robolab-infra.git
+    targetRevision: main
+    path: k8s/workloads/mlflow
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: mlflow
