@@ -54,6 +54,28 @@ resource "aws_iam_user_policy" "dgx_ecr_pull" {
   policy = data.aws_iam_policy_document.dgx_ecr_pull.json
 }
 
+# ── DGX → argocd/ secrets (manage + read) ───────────────────────────────────
+# Seed publishes .env here; ESO running in-cluster reads these using the same
+# robolab-dgx credentials.
+
+data "aws_iam_policy_document" "dgx_argocd_secrets_manage" {
+  statement {
+    actions = [
+      "secretsmanager:CreateSecret",
+      "secretsmanager:PutSecretValue",
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:GetSecretValue",
+    ]
+    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/argocd/*"]
+  }
+}
+
+resource "aws_iam_user_policy" "dgx_argocd_secrets_manage" {
+  name   = "argocd-secrets-manage"
+  user   = aws_iam_user.dgx.name
+  policy = data.aws_iam_policy_document.dgx_argocd_secrets_manage.json
+}
+
 # ── GitHub Actions OIDC ──────────────────────────────────────────────────────
 # Allows CI pipelines to assume a role and read secrets — no static keys in GH.
 
