@@ -12,5 +12,4 @@ Training runs submitted through MLflow need to be picked up and scheduled on Ray
 
 - **MLflow** ([../mlflow/](../mlflow/)) — polled for submitted runs. URL set via `MLFLOW_TRACKING_URI`.
 - **Ray** ([../ray/](../ray/)) — target scheduler. Connection via `RAY_ADDRESS` (Ray client port on the head service).
-- **External Secrets Operator** ([../secrets/](../secrets/)) — materializes `aws-creds` from AWS Secrets Manager.
-- **Reflector** ([../secrets/](../secrets/)) — provides the `ghcr-pull` Secret in this namespace so the Deployment can pull the private image from GHCR.
+- **Reflector** ([../secrets/](../secrets/)) — mirrors the cluster-wide `aws-creds` (seeded by `setup-dgx.sh` in `external-secrets`) and `ghcr-pull` Secrets into this namespace. The Deployment consumes `aws-creds` via `envFrom` and references `ghcr-pull` in `imagePullSecrets`.

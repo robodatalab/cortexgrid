@@ -92,7 +92,8 @@
       "Bash(grep -B1 \"name: nvidia-device-plugin$\")",
       "Bash(grep -A1 \"name: nvidia-device-plugin$\")",
       "Bash(grep -A2 \"name: nvidia-device-plugin$\")",
-      "Bash(awk '/name: nvidia-device-plugin$/{flag=1} flag && /version:/{print; flag=0}')"
+      "Bash(awk '/name: nvidia-device-plugin$/{flag=1} flag && /version:/{print; flag=0}')",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm k8s/workloads/jobs-control-plane/secrets.yaml)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"
