@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from enum import Enum
 
-from cortexflow.infra import get_ray_job_server_uri, get_server_ip
+from cortexflow.infra import (
+    RAY_DASHBOARD_NODEPORT,
+    get_ray_job_server_uri,
+    get_server_ip,
+)
 from ray.job_submission import JobSubmissionClient
 
 
@@ -64,12 +69,15 @@ def get_ray_logs(ray_job_id: str | None) -> str | None:
 
 
 def get_ray_job_url(ray_job_id: str | None) -> str | None:
-    """Build the URL to view a job in the Ray dashboard (always via DGX tailscale IP)."""
+    """Build the browser-facing URL to view a job in the Ray dashboard."""
     if ray_job_id is None:
         return None
 
-    server_ip = get_server_ip()
-    return f"http://{server_ip}:8265/#/jobs/{ray_job_id}"
+    base = (
+        os.environ.get("PUBLIC_RAY_DASHBOARD_URL")
+        or f"http://{get_server_ip()}:{RAY_DASHBOARD_NODEPORT}"
+    )
+    return f"{base}/#/jobs/{ray_job_id}"
 
 
 def stop_ray_job(ray_job_id: str) -> None:
