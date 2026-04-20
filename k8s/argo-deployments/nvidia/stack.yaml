@@ -14,7 +14,14 @@ spec:
     helm:
       values: |
         runtimeClassName: nvidia
-        affinity: {}
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: kubernetes.io/os
+                      operator: In
+                      values: [linux]
   destination:
     server: https://kubernetes.default.svc
     namespace: nvidia-device-plugin
