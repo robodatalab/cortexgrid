@@ -33,7 +33,7 @@ from cortexflow.experiment import (
     Experiment,
     list_experiments,
 )
-from cortexflow.infra import get_ray_job_server_uri, set_runs_on_server
+from cortexflow.infra import get_ray_job_server_uri
 from cortexflow.jobs import (
     schedule_remote_job,
     list_experiment_run_jobs,
@@ -107,7 +107,6 @@ __all__ = [
     "stop_ray_job",
     "submit_ray_job",
     "get_ray_job_server_uri",
-    "set_runs_on_server",
     "list_ray_jobs_with_submission_id",
     "ray_submission_id",
     "get_ray_job_attempt",

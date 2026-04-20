@@ -8,56 +8,79 @@ from cortexflow.infra import (
     get_mlflow_tracking_uri,
     get_ray_job_server_uri,
     get_s3_endpoint_url,
-    set_runs_on_server,
 )
 
 
-class TestInfraOffServer(unittest.TestCase):
-    def setUp(self) -> None:
-        set_runs_on_server(False)
-        self.addCleanup(set_runs_on_server, False)
+class TestInfraFallsBackToServerIp(unittest.TestCase):
+    """With no env vars set, URIs fall back to DGX Tailscale IP + NodePort."""
+
+    @patch.dict("os.environ", {}, clear=False)
+    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
+    def test_mlflow_tracking_uri(self, _mock: MagicMock) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_mlflow_tracking_uri(), "http://100.80.27.32:30500")
 
     @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
-    def test_get_mlflow_tracking_uri_uses_server_ip(self, _mock: MagicMock) -> None:
-        self.assertEqual(get_mlflow_tracking_uri(), "http://100.80.27.32:5000")
+    def test_ray_job_server_uri(self, _mock: MagicMock) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_ray_job_server_uri(), "http://100.80.27.32:30265")
 
     @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
-    def test_get_ray_job_server_uri_uses_server_ip(self, _mock: MagicMock) -> None:
-        self.assertEqual(get_ray_job_server_uri(), "http://100.80.27.32:8265")
-
-    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
-    def test_get_s3_endpoint_url_uses_server_ip(self, _mock: MagicMock) -> None:
-        self.assertEqual(get_s3_endpoint_url(), "http://100.80.27.32:9000")
+    def test_s3_endpoint_url(self, _mock: MagicMock) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_s3_endpoint_url(), "http://100.80.27.32:30900")
 
     @patch("cortexflow.infra.MlflowClient")
     @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
-    def test_get_mlflow_run_url_builds_url(
+    def test_mlflow_run_url(
         self, _mock_secret: MagicMock, mock_mlflow_cls: MagicMock
     ) -> None:
-        fake_client = MagicMock()
         run = MagicMock()
         run.info.experiment_id = "7"
+        fake_client = MagicMock()
         fake_client.get_run.return_value = run
         mock_mlflow_cls.return_value = fake_client
 
-        url = get_mlflow_run_url("run-xyz")
+        with patch.dict("os.environ", {}, clear=True):
+            url = get_mlflow_run_url("run-xyz")
 
-        self.assertEqual(url, "http://100.80.27.32:5000/#/experiments/7/runs/run-xyz")
+        self.assertEqual(
+            url, "http://100.80.27.32:30500/#/experiments/7/runs/run-xyz"
+        )
 
 
-class TestInfraOnServer(unittest.TestCase):
-    def setUp(self) -> None:
-        set_runs_on_server(True)
-        self.addCleanup(set_runs_on_server, False)
+class TestInfraEnvVarsWin(unittest.TestCase):
+    """When env vars are set, they take precedence over the fallback."""
 
-    def test_get_mlflow_tracking_uri_uses_internal_dns(self) -> None:
-        self.assertEqual(get_mlflow_tracking_uri(), "http://mlflow:5000")
+    def test_mlflow_tracking_uri_from_env(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"MLFLOW_TRACKING_URI": "http://mlflow.mlflow.svc.cluster.local:5000"},
+        ):
+            self.assertEqual(
+                get_mlflow_tracking_uri(),
+                "http://mlflow.mlflow.svc.cluster.local:5000",
+            )
 
-    def test_get_ray_job_server_uri_uses_internal_dns(self) -> None:
-        self.assertEqual(get_ray_job_server_uri(), "http://ray-head:8265")
+    def test_ray_job_server_uri_from_env(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"RAY_JOB_SERVER_URI": "http://ray-head.ray.svc.cluster.local:8265"},
+        ):
+            self.assertEqual(
+                get_ray_job_server_uri(),
+                "http://ray-head.ray.svc.cluster.local:8265",
+            )
 
-    def test_get_s3_endpoint_url_uses_internal_dns(self) -> None:
-        self.assertEqual(get_s3_endpoint_url(), "http://minio:9000")
+    def test_s3_endpoint_url_from_env(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"AWS_S3_ENDPOINT_URL": "http://minio.minio.svc.cluster.local:9000"},
+        ):
+            self.assertEqual(
+                get_s3_endpoint_url(),
+                "http://minio.minio.svc.cluster.local:9000",
+            )
 
 
 if __name__ == "__main__":

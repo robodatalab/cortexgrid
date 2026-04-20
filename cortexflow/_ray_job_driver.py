@@ -9,7 +9,6 @@ from pathlib import Path
 
 from cortexflow.checkpoint import set_cortexflow_job_id
 from cortexflow.experiment import Experiment
-from cortexflow.infra import set_runs_on_server
 from cortexflow.jobs import Payload
 
 log = logging.getLogger("ray-job-driver")
@@ -32,8 +31,6 @@ def main(payload_path: str) -> None:
     set_cortexflow_job_id(payload.job_id)
     Experiment.from_experiment(payload.experiment_name, payload.run_id)
     log.info("Experiment loaded: %s/%s", payload.experiment_name, payload.run_id)
-
-    set_runs_on_server(True)
 
     log.info(
         "Starting job in experiment: %s/%s; args: %r; kwargs: %r",
