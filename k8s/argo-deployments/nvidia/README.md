@@ -8,6 +8,8 @@ Ray (and future GPU workloads) need to request GPUs from Kubernetes just like th
 
 **stack.yaml** — Argo Application installing NVIDIA's official `nvidia-device-plugin` Helm chart as a DaemonSet into the `nvidia-device-plugin` namespace. The DaemonSet runs on every node, queries local GPUs via the NVIDIA driver, and advertises them to the kubelet as `nvidia.com/gpu` resources. Uses the `nvidia` runtime class so containers that request GPUs are launched via `nvidia-container-runtime` (which auto-mounts driver libraries + `nvidia-smi` into the container).
 
+The chart's default `affinity` requires NFD (Node Feature Discovery) labels like `feature.node.kubernetes.io/pci-10de.present` to find GPU nodes. k3s doesn't ship NFD, so every node looks GPU-less and the DaemonSet schedules zero pods. We override `affinity: {}` so it runs everywhere — fine on a single-node DGX; revisit if we ever mix GPU and non-GPU nodes.
+
 ## Dependencies
 
 - **k3s configured with NVIDIA container runtime** — k3s auto-detects `nvidia-container-runtime` at install time if the host has `nvidia-container-toolkit`. No extra config needed on DGX (it was there for docker-compose). Verify with `kubectl get runtimeclass nvidia`.
