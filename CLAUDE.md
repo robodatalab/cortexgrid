@@ -7,7 +7,7 @@ Cloud infrastructure and deployment orchestration for RoboLab.
 - `terraform/` — Cloud infrastructure provisioning
   - `website/` — S3 + CloudFront + Route53 for the marketing website (deployed from `robolabwebsite` repo via GitHub Actions)
   - `platform/secrets/` — Centralized secrets management (AWS Secrets Manager + IAM)
-  - `platform/local-dgx-training/` — ML compute stack (Docker Compose on DGX Spark)
+- `k8s/` — Argo CD GitOps platform: `argocd.yaml` bootstrap, `argo-deployments/` (Argo Application CRs), `workloads/` (k8s manifests), `seed/` (one-shot DGX seed scripts)
 - `cortexflow/` — Python library for connecting ML code to the RoboLab compute cluster (Ray, MLflow, S3)
 - `lambda/auth/` — Auth Lambda source code
 

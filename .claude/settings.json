@@ -83,7 +83,10 @@
       "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/terraform/platform/local-dgx-training/ray/entrypoint.sh)",
       "Bash(pip freeze *)",
       "Bash(git ls-tree *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra status --short terraform/platform/local-dgx-training/ k8s/seed/)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra ls-files terraform/platform/local-dgx-training/)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm -r terraform/platform/local-dgx-training/)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

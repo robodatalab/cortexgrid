@@ -6,9 +6,9 @@ set -euo pipefail
 # kubeconfig into ~/.kube/config as context "dgx".
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BOOTSTRAP_FILE="$REPO_ROOT/k8s/argocd.yaml"
-ENV_FILE="$SCRIPT_DIR/../.env"
+ENV_FILE="$SCRIPT_DIR/.env"
 KUBECONFIG_FILE="$HOME/.kube/config"
 
 [[ -f "$BOOTSTRAP_FILE" ]] || { echo "Missing $BOOTSTRAP_FILE"; exit 1; }

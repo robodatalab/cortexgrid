@@ -15,8 +15,8 @@ from tqdm import tqdm  # type: ignore
 from cortexflow.infra import get_s3_endpoint_url
 
 
-# Hardcoded to match the MinIO creds baked into docker-compose. The DGX
-# is an isolated single-tenant machine, so these aren't real secrets.
+# Hardcoded to match the MinIO creds set in the k8s MinIO Deployment.
+# The DGX is an isolated single-tenant machine, so these aren't real secrets.
 _S3_ACCESS_KEY = "admin"
 _S3_SECRET_KEY = "adminadmin"
 _S3_DEFAULT_BUCKET = "ray-checkpoints"
