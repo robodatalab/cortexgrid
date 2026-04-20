@@ -7,7 +7,7 @@ ArgoCD needs credentials at runtime to provision K8s Pods — AWS keys, GitHub t
 Cortexflow assumes that:
 
 1. AWS Secrets Manager is the only source of truth and stores and manages all of the configuration of the research platform and the applications and experiments running on it.
-2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-dgx.sh](../../../terraform/platform/local-dgx-training/scripts/setup-dgx.sh) is responsible for that
+2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-dgx.sh](../../seed/setup-dgx.sh) is responsible for that
 3. Credentials rotate and cannot be cached for any longer that 12 hrs.
 
 Cortexflow library already manages a set of secrets in AWS Secrets Manager. The access to those is controlled by cortexflow.secrets module. Those secrets are completely

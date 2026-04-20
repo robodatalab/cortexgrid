@@ -39,7 +39,8 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. All 
 |--------|---------|
 | `terraform/website/` | Marketing site + investor auth infrastructure |
 | `terraform/platform/secrets/` | Centralized secrets management (AWS Secrets Manager + IAM) |
-| `terraform/platform/local-dgx-training/` | ML compute stack (Docker Compose) + `cortexflow` library |
+| `k8s/` | Argo CD GitOps platform — bootstrap manifest, Argo Applications, workload manifests, one-shot DGX seed scripts |
+| `cortexflow/` | Python library for ML code to reach Ray/MLflow/S3 |
 | `lambda/auth/` | Auth Lambda source (deployed by `terraform/website/`) |
 
 ## cortexflow
@@ -50,36 +51,28 @@ See [cortexflow/README.md](cortexflow/README.md) for full reference
 
 ### Setup
 
-**Prerequisites:** Both Mac and DGX on the same Tailscale network. DGX has Docker + NVIDIA Container Toolkit.
+**Prerequisites:** Mac and DGX on the same Tailscale network. DGX has `nvidia-container-toolkit` installed. Mac has `uv`, `kubectl`, `sshpass`, and AWS credentials with access to `robolab/*` secrets.
+
+One-shot seed (run once per DGX lifetime):
 
 ```bash
-cd terraform/platform/local-dgx-training
-
-# 1. Verify Mac prerequisites (aws CLI + Secrets Manager access)
-make setup-mac
-
-# 2. Deploy stack to DGX (fetches secrets from AWS SM, syncs files, starts containers)
-make setup-dgx
-
-# 3. Verify
-make health
+bash k8s/seed/setup-dgx.sh
 ```
 
-### Make targets
+That script installs k3s on the DGX, drops [k8s/argocd.yaml](k8s/argocd.yaml) onto the cluster, publishes [k8s/seed/.env](k8s/seed/.env) entries to AWS Secrets Manager under `robolab/argocd/*`, and merges the DGX kubeconfig into `~/.kube/config` as context `dgx`. Argo CD then reconciles everything under [k8s/argo-deployments/](k8s/argo-deployments/) from `main`. After seeding, all changes flow through git pushes.
 
-| Target | Description |
-|--------|-------------|
-| `make setup-mac` | Verify Mac prerequisites (aws CLI + SM access) |
-| `make setup-dgx` | Deploy stack to DGX via SSH |
-| `make teardown-dgx` | Stop stack, delete volumes and .env on DGX |
-| `make health` | Check all services are reachable |
-| `make up` | Start all services |
-| `make down` | Stop all services |
-| `make logs` | Tail service logs |
+Teardown (wipes the cluster):
+
+```bash
+bash k8s/seed/teardown-dgx.sh
+```
 
 ### Secrets management
 
-Secrets are stored in AWS Secrets Manager under the `robolab/infra/*` namespace. See [docs/secrets.md](terraform/platform/local-dgx-training/docs/secrets.md) for the full workflow.
+Two independent paths, both backed by AWS Secrets Manager:
+
+- **Cluster bootstrap** — `robolab/argocd/*` → [External Secrets Operator](k8s/argo-deployments/secrets/) materializes k8s Secrets (GHCR pull, repo clone creds, etc.).
+- **Application code** — `robolab/infra/*` → `cortexflow.secrets` reads directly from AWS SM at runtime.
 
 ## Website infrastructure
 
@@ -152,7 +145,6 @@ The secrets module provisions a GitHub Actions OIDC integration:
 
 ## Further documentation
 
-- [Architecture](terraform/platform/local-dgx-training/docs/architecture.md) — design decisions and data flow
-- [Secrets Management](terraform/platform/local-dgx-training/docs/secrets.md) — AWS Secrets Manager workflow
-- [Adding AWS Nodes](terraform/platform/local-dgx-training/docs/adding-aws-nodes.md) — scaling to AWS EC2
-- [Troubleshooting](terraform/platform/local-dgx-training/docs/troubleshooting.md) — common issues and fixes
+- [k8s/README.md](k8s/README.md) — GitOps overview + bootstrap FAQ
+- [k8s/argo-deployments/](k8s/argo-deployments/) — one-pager README per platform component (Ray, MLflow, MinIO, Postgres, monitoring, secrets, NVIDIA device plugin, jobs control plane)
+- [cortexflow/README.md](cortexflow/README.md) — Python library reference

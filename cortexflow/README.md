@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cortexflow = { git = "https://github.com/paksas/robolab-infra.git", subdirectory = "terraform/platform/local-dgx-training" }
+cortexflow = { git = "https://github.com/paksas/robolab-infra.git", subdirectory = "cortexflow" }
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -149,15 +149,14 @@ s3_client = cortexflow.get_s3_client()           # boto3 S3 client
 
 ## ML compute stack
 
-The DGX Spark runs the following services via Docker Compose:
+The DGX Spark runs the following services as k8s workloads managed by Argo CD (see [../k8s/argo-deployments/](../k8s/argo-deployments/)):
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| Ray | 8265 | Job scheduling, distributed compute |
+| Ray | 8265 | Dashboard + job submission (NodePort 30265) |
 | MLflow | 5000 | Experiment tracking, model registry |
 | MinIO | 9000/9001 | S3-compatible artifact storage |
 | PostgreSQL | 5432 | MLflow metadata backend |
-| Redis | 6379 | Ray GCS persistence (fault tolerance) |
 | Prometheus | 9090 | Metrics collection |
 | Grafana | 3000 | Dashboards (GPU, jobs, system) |
 
