@@ -86,7 +86,13 @@
       "Bash(git log *)",
       "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra status --short terraform/platform/local-dgx-training/ k8s/seed/)",
       "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra ls-files terraform/platform/local-dgx-training/)",
-      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm -r terraform/platform/local-dgx-training/)"
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm -r terraform/platform/local-dgx-training/)",
+      "Bash(curl -sf https://nvidia.github.io/k8s-device-plugin/index.yaml)",
+      "Bash(awk '/^  nvidia-device-plugin:$/,/^  [a-z]/')",
+      "Bash(grep -B1 \"name: nvidia-device-plugin$\")",
+      "Bash(grep -A1 \"name: nvidia-device-plugin$\")",
+      "Bash(grep -A2 \"name: nvidia-device-plugin$\")",
+      "Bash(awk '/name: nvidia-device-plugin$/{flag=1} flag && /version:/{print; flag=0}')"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"
