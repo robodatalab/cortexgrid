@@ -30,7 +30,6 @@ from cortexflow import (
     get_ray_job_status,
     list_experiment_run_jobs,
     list_experiments,
-    set_runs_on_server,
     stop_ray_job,
     submit_ray_job,
     list_ray_jobs_with_submission_id,
@@ -54,7 +53,6 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
     poll cycle. The lifecycle is never mutated here — Ray is the source of
     truth, and the next poll observes whatever state Ray ended up in.
     """
-    set_runs_on_server(True)
     submission_id = ray_submission_id(run_id, job_id, attempt)
 
     try:
@@ -241,7 +239,6 @@ def poll_once(
 
 
 def main() -> None:
-    set_runs_on_server(True)
     executor = ProcessPoolExecutor(max_workers=STARTER_WORKERS)
     in_flight: dict[str, tuple[str, str, Future]] = {}
     while True:

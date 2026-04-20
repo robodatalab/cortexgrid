@@ -493,7 +493,6 @@ class TestSubmitJobWorker(unittest.TestCase):
                 "cortexflow.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
-            patch("jobs_control_plane.server.set_runs_on_server"),
             patch(
                 "jobs_control_plane.server.submit_ray_job",
                 side_effect=_submit_ray_job,
