@@ -19,17 +19,28 @@ resource "aws_iam_access_key" "dgx" {
   user = aws_iam_user.dgx.name
 }
 
-data "aws_iam_policy_document" "dgx_secrets_read" {
+data "aws_iam_policy_document" "dgx_secrets_manage" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:CreateSecret",
+      "secretsmanager:PutSecretValue",
+      "secretsmanager:DeleteSecret",
+    ]
     resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/infra/*"]
+  }
+
+  statement {
+    actions   = ["secretsmanager:ListSecrets"]
+    resources = ["*"]
   }
 }
 
-resource "aws_iam_user_policy" "dgx_secrets_read" {
-  name   = "secrets-read"
+resource "aws_iam_user_policy" "dgx_secrets_manage" {
+  name   = "secrets-manage"
   user   = aws_iam_user.dgx.name
-  policy = data.aws_iam_policy_document.dgx_secrets_read.json
+  policy = data.aws_iam_policy_document.dgx_secrets_manage.json
 }
 
 data "aws_iam_policy_document" "dgx_ecr_pull" {
