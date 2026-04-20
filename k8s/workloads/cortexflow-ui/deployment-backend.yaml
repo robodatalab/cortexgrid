@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cortexflow-ui-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cortexflow-ui-backend
+  template:
+    metadata:
+      labels:
+        app: cortexflow-ui-backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: cortexflow-ui-backend
+          image: ghcr.io/paksas/cortexflow-ui-backend:latest
+          imagePullPolicy: Always
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.mlflow.svc.cluster.local:5000
+            - name: RAY_JOB_SERVER_URI
+              value: http://ray-head.ray.svc.cluster.local:8265
+            - name: AWS_S3_ENDPOINT_URL
+              value: http://minio.minio.svc.cluster.local:9000
+          envFrom:
+            - secretRef:
+                name: aws-creds
+            - secretRef:
+                name: cortexflow-ui-public-urls
+          ports:
+            - name: http
+              containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5

@@ -86,10 +86,20 @@ kubectl label secret argo-github-repo -n argocd argocd.argoproj.io/secret-type=r
 
 echo "[6/6] Seeding AWS credentials for External Secrets Operator..."
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n external-secrets create secret generic aws-creds \
-  --from-literal=AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
-  --from-literal=AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-  --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-creds
+  namespace: external-secrets
+  annotations:
+    reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+    reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+  AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+EOF
 
 echo
 echo "Seeded."

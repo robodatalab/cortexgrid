@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from cortexflow.ray_util import (
     list_ray_jobs_with_submission_id,
     get_ray_job_id_for_cortexflow_job,
 )
-from cortexflow.infra import get_server_ip, get_mlflow_run_url
+from cortexflow.infra import get_mlflow_run_url
 from cortexflow.jobs import (
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
@@ -75,11 +76,10 @@ def infra_status() -> InfraStatus:
 
 @app.get("/api/dashboards")
 def dashboards() -> list[Dashboard]:
-    host = get_server_ip()
     return [
-        Dashboard(id="mlflow", url=f"http://{host}:{get_secret('MLFLOW_PORT')}"),
-        Dashboard(id="ray", url=f"http://{host}:{get_secret('RAY_DASHBOARD_PORT')}"),
-        Dashboard(id="minio", url=f"http://{host}:{get_secret('MINIO_CONSOLE_PORT')}"),
+        Dashboard(id="mlflow", url=os.environ["PUBLIC_MLFLOW_URL"]),
+        Dashboard(id="ray", url=os.environ["PUBLIC_RAY_DASHBOARD_URL"]),
+        Dashboard(id="minio", url=os.environ["PUBLIC_MINIO_CONSOLE_URL"]),
     ]
 
 

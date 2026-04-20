@@ -15,5 +15,4 @@ How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo 
 
 ## Files
 
-- **deployment.yaml** — the `Deployment` described above.
-- **secrets.yaml** — `ExternalSecret` that materializes the `aws-creds` Secret in this namespace by pulling `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` from AWS Secrets Manager at `robolab/infra/*`. The Deployment consumes these via `envFrom`.
+- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../seed/setup-dgx.sh) (seeded by `setup-dgx.sh`, mirrored everywhere by [reflector](../../argo-deployments/secrets/reflector/)).
