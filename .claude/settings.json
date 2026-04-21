@@ -101,7 +101,9 @@
       "Bash(awk '/name: argocd-image-updater$/{flag=1} flag && /version: 0\\\\./{print; exit}')",
       "Bash(kubectl -n argocd get app ray -o jsonpath='{.spec.source}')",
       "Bash(jq)",
-      "Bash(kubectl get *)"
+      "Bash(kubectl get *)",
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/setup-p5.sh)",
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/teardown-p5.sh)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

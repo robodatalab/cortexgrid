@@ -98,6 +98,22 @@ stringData:
   AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
 EOF
 
+echo "Labelling DGX node as tier=prod..."
+DGX_NODE="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+kubectl label node "$DGX_NODE" tier=prod --overwrite
+
+echo "Publishing k3s join token to AWS Secrets Manager for future agent seeds..."
+K3S_NODE_TOKEN="$($SSH "$DGX_HOST" "echo '$PW' | sudo -S cat /var/lib/rancher/k3s/server/node-token" | tr -d '[:space:]')"
+uv run python - <<PYEOF
+import boto3
+client = boto3.client('secretsmanager', region_name='us-east-1')
+key = 'robolab/infra/K3S_NODE_TOKEN'
+try:
+    client.put_secret_value(SecretId=key, SecretString="${K3S_NODE_TOKEN}")
+except client.exceptions.ResourceNotFoundException:
+    client.create_secret(Name=key, SecretString="${K3S_NODE_TOKEN}")
+PYEOF
+
 echo
 echo "Seeded."
 echo "  Argo UI:     http://${DGX_IP}:30080  (auth disabled)"
