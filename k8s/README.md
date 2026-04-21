@@ -2,6 +2,27 @@
 
 GitOps manifests watched by Argo CD. See [argo-deployments/](argo-deployments/) for the actual deployment specs. [argocd.yaml](argocd.yaml) is the one-shot bootstrap applied at seed time and is not watched by Argo.
 
+## Node tiers
+
+Every node is labelled `tier=main` or `tier=dev`. The label is the one signal the scheduler uses to decide *which branch's workloads go where*.
+
+| Tier | Purpose | Current node |
+|------|---------|--------------|
+| `main` | Runs workloads deployed from the `main` branch (the stable deployment) | DGX Spark |
+| `dev` | Runs workloads from per-PR dev environments (branches in flight) | ThinkStation P5 |
+
+Nodes are seeded with [seed/setup-node.sh](seed/setup-node.sh) and torn down with [seed/teardown-node.sh](seed/teardown-node.sh). The first node seeded is also the k3s control plane and hosts the Argo CD bootstrap; that's an orthogonal concern from the tier — today it happens to be the `main`-tier node but doesn't have to be.
+
+### Why tier is independent of k3s control-plane
+
+When we later migrate main-branch workloads to AWS, the `main` tier will live on an AWS node while DGX becomes a `dev`-tier worker. At that point the AWS node becomes the k3s control plane too (k3s server migration is a separate operation). The tier label keeps the scheduling semantics the same across the move — PR-branch workloads keep a `tier=dev` nodeSelector, main-branch workloads keep `tier=main`.
+
+### Nuance: which machine hosts which branch, and what those branches represent
+
+Today the split is 1-to-1: one branch → one machine. `main` → DGX, `dev` → P5.
+
+As we add nodes and migrate to AWS, we'll likely split *infra* from *jobs* across tiers rather than by branch alone. For example, MLflow + Grafana + Prometheus (shared state, long-lived, cheap CPU) may live on AWS under `tier=main`, while Ray (GPU-bound, bursty) keeps running on DGX regardless of which branch submitted the job. When that happens, individual workload manifests will declare their own nodeSelector / affinity, and `tier` becomes one of several scheduling inputs rather than the only one.
+
 ## FAQ
 
 ### Argo sync is stuck / app stays OutOfSync after a Git push
