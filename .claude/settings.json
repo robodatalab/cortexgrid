@@ -95,7 +95,9 @@
       "Bash(awk '/name: nvidia-device-plugin$/{flag=1} flag && /version:/{print; flag=0}')",
       "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm k8s/workloads/jobs-control-plane/secrets.yaml)",
       "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra log --oneline --all -- '**/dashboard-ray*' 'terraform/platform/**/*dashboard*')",
-      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra show --stat 498f493)"
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra show --stat 498f493)",
+      "Bash(curl -sf https://argoproj.github.io/argo-helm/index.yaml)",
+      "Bash(awk '/name: argocd-image-updater$/{flag=1} flag && /version:/{print; flag=0}')"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

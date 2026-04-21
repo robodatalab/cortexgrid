@@ -17,7 +17,6 @@ spec:
       containers:
         - name: mlflow
           image: ghcr.io/paksas/mlflow:latest
-          imagePullPolicy: Always
           resources:
             requests:
               cpu: "200m"

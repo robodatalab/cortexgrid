@@ -17,7 +17,6 @@ spec:
       containers:
         - name: cortexflow-ui-backend
           image: ghcr.io/paksas/cortexflow-ui-backend:latest
-          imagePullPolicy: Always
           env:
             - name: MLFLOW_TRACKING_URI
               value: http://mlflow.mlflow.svc.cluster.local:5000

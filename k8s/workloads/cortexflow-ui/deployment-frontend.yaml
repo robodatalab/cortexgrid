@@ -17,7 +17,6 @@ spec:
       containers:
         - name: cortexflow-ui-frontend
           image: ghcr.io/paksas/cortexflow-ui-frontend:latest
-          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 80
