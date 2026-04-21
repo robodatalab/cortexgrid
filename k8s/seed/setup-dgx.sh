@@ -84,17 +84,14 @@ kubectl -n argocd create secret generic argo-github-repo \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl label secret argo-github-repo -n argocd argocd.argoproj.io/secret-type=repository --overwrite
 
-echo "[6/6] Seeding AWS credentials for External Secrets Operator..."
+echo "[6/6] Seeding AWS bootstrap credentials for External Secrets Operator..."
 kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
-  name: aws-creds
+  name: aws-bootstrap-creds
   namespace: external-secrets
-  annotations:
-    reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
-    reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
 type: Opaque
 stringData:
   AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
