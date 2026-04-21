@@ -15,7 +15,6 @@ spec:
     repoURL: https://github.com/paksas/robolab-infra.git
     targetRevision: main
     path: k8s/workloads/jobs-control-plane
-    kustomize: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: jobs-control-plane
