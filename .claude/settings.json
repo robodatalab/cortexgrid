@@ -103,7 +103,10 @@
       "Bash(jq)",
       "Bash(kubectl get *)",
       "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/setup-p5.sh)",
-      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/teardown-p5.sh)"
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/teardown-p5.sh)",
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/setup-node.sh)",
+      "Bash(chmod +x /Users/piotrtrochim/GitHub/robolab-infra/k8s/seed/teardown-node.sh)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra rm k8s/seed/setup-dgx.sh k8s/seed/teardown-dgx.sh k8s/seed/setup-p5.sh k8s/seed/teardown-p5.sh)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"
