@@ -20,7 +20,6 @@ spec:
       containers:
         - name: ray-head
           image: ghcr.io/paksas/ray-head:latest
-          imagePullPolicy: Always
           resources:
             requests:
               cpu: "1"

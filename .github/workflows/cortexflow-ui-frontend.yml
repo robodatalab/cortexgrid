@@ -37,10 +37,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute branch slug
+        id: slug
+        run: echo "value=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         run: |
           docker buildx build --platform linux/arm64 \
             -f k8s/docker/cortexflow-ui/frontend/Dockerfile \
-            -t $IMAGE:latest \
-            -t $IMAGE:${{ github.sha }} \
+            -t $IMAGE:${{ steps.slug.outputs.value }}-${{ github.sha }} \
             --push .
