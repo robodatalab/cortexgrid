@@ -10,6 +10,8 @@ Every workload in the cluster — Ray, MLflow (future), k8s itself, node OS — 
 
 Prometheus is configured with `*SelectorNilUsesHelmValues: false` so it discovers `ServiceMonitor` / `PodMonitor` resources cluster-wide, not only ones labeled for this release. Workloads elsewhere (Ray, MLflow) drop their own monitors and Prometheus picks them up automatically.
 
+All chart components (Prometheus, Alertmanager, Grafana, Operator, kube-state-metrics) are pinned to P5 via `nodeSelector: kubernetes.io/arch: amd64` in the values override — DGX was too unreliable for this stack (intermittent CNI hiccups produced hundreds of restart cycles on kube-state-metrics and node-exporter). `node-exporter` stays a DaemonSet on both nodes by design — per-node host metrics require a pod on each node.
+
 ## Dependencies
 
 - **Ray** ([../ray/](../ray/)) — Ray head pod exposes Prometheus metrics on port 8080. [../ray/metrics.yaml](../ray/metrics.yaml) declares the PodMonitor that causes Prometheus to scrape it.

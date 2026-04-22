@@ -2,26 +2,17 @@
 
 GitOps manifests watched by Argo CD. See [argo-deployments/](argo-deployments/) for the actual deployment specs. [argocd.yaml](argocd.yaml) is the one-shot bootstrap applied at seed time and is not watched by Argo.
 
-## Node tiers
+## Workload placement
 
-Every node is labelled `tier=main` or `tier=dev`. The label is the one signal the scheduler uses to decide *which branch's workloads go where*.
+**Current policy:** every first-party workload runs on P5 (`nodeSelector: kubernetes.io/arch: amd64`). The only exception is `ray-worker`, which runs as a DaemonSet on both nodes so Ray can dispatch GPU jobs to either the DGX or the P5. DGX is effectively the control-plane + GPU-execution node; P5 is the storage + CPU-workload node.
 
-| Tier | Purpose | Current node |
-|------|---------|--------------|
-| `main` | Runs workloads deployed from the `main` branch (the stable deployment) | DGX Spark |
-| `dev` | Runs dev-branch or dev-only workloads | ThinkStation P5 |
+Node tier labels (`tier=main` / `tier=dev`) still exist and are consumed by `ray-worker` and by legacy affinity rules, but the branch-per-node model is receding — new workloads use `kubernetes.io/arch` instead. See [workloads/](workloads/) for the specific manifests.
 
-Nodes are seeded with [seed/setup-node.sh](seed/setup-node.sh) and torn down with [seed/teardown-node.sh](seed/teardown-node.sh). The first node seeded is also the k3s control plane and hosts the Argo CD bootstrap; that's an orthogonal concern from the tier — today it happens to be the `main`-tier node but doesn't have to be.
+Nodes are seeded with [seed/setup-node.sh](seed/setup-node.sh) and torn down with [seed/teardown-node.sh](seed/teardown-node.sh). The first node seeded is also the k3s control plane and hosts the Argo CD bootstrap.
 
-### Why tier is independent of k3s control-plane
+### Storage routing (P5 HDD)
 
-When we later migrate main-branch workloads to AWS, the `main` tier will live on an AWS node while DGX becomes a `dev`-tier worker. At that point the AWS node becomes the k3s control plane too (k3s server migration is a separate operation). The tier label keeps the scheduling semantics the same across the move — dev workloads keep a `tier=dev` nodeSelector, main-branch workloads keep `tier=main`.
-
-### Nuance: which machine hosts which branch, and what those branches represent
-
-Today the split is 1-to-1: one branch → one machine. `main` → DGX, `dev` → P5.
-
-As we add nodes and migrate to AWS, we'll likely split *infra* from *jobs* across tiers rather than by branch alone. For example, MLflow + Grafana + Prometheus (shared state, long-lived, cheap CPU) may live on AWS under `tier=main`, while Ray (GPU-bound, bursty) keeps running on DGX regardless of which branch submitted the job. When that happens, individual workload manifests will declare their own nodeSelector / affinity, and `tier` becomes one of several scheduling inputs rather than the only one.
+P5 has a 2TB HDD mounted at `/home/ptrochim/GitHub`. All `PersistentVolumeClaim`s on P5 (MinIO, Postgres, etc.) are provisioned into `/home/ptrochim/GitHub/k3s-storage/` rather than the default `/var/lib/rancher/k3s/storage`, to keep PV data off the root NVMe. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, applied idempotently by `setup-node.sh` on every control-plane seed. The stamped path is declarative, not quota-enforced — minio's `1Ti` PVC can still physically fill the whole disk.
 
 ## Features
 
@@ -79,9 +70,21 @@ metadata:
 
 ### SSA field-ownership breakage when changing `Deployment.strategy.type`
 
-**Symptom.** Argo sync fails with `Deployment.apps ... is invalid: spec.strategy.rollingUpdate: Forbidden: may not be specified when strategy type is 'Recreate'`. Live Deployment holds stale `rollingUpdate` subfields owned by `kube-controller-manager` (default-filled when `type: RollingUpdate`). ServerSideApply can't remove them — it only touches fields it owns.
+**Symptom.** Argo sync fails with `Deployment.apps ... is invalid: spec.strategy.rollingUpdate: Forbidden: may not be specified when strategy type is 'Recreate'`. The live Deployment carries a stale `rollingUpdate: {...}` subfield that was default-filled by the API server when it was originally created with `type: RollingUpdate`. No field manager owns it, so ServerSideApply can't delete it — even an explicit `rollingUpdate: null` in the manifest is a no-op, because SSA only removes fields it owns.
 
-**Why we don't do anything preemptive.** The fix is `argocd.argoproj.io/sync-options: Replace=true` on the affected Deployment, which swaps SSA for `kubectl replace` and wipes stale fields. Applying that blanket to every Deployment costs pod churn on every manifest edit (image tag, env, probe — all trigger a full recreate). The trigger — changing `strategy.type` — is rare, so we eat the one-time pain of adding the annotation when it bites. See [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml) for the live example.
+**Fix (the simple one we use).** Delete the live Deployment and let Argo recreate it fresh:
+```bash
+kubectl -n <namespace> delete deployment <name>
+```
+Argo's next sync creates a new object from scratch with only the fields in our manifest — no stale subfields survive. Brief downtime (seconds), no ongoing cost. This is what we did for `jobs-control-plane`, `cortexflow-ui-*`, `minio`, and `postgres` when adding `strategy: Recreate`.
+
+**Alternative (annotation-based).** `argocd.argoproj.io/sync-options: Replace=true` on the Deployment swaps SSA for `kubectl replace` on every sync — wipes stale fields automatically. Cost: every manifest edit (image tag, env, probe) triggers a full object replace and a pod recreate. Worth it only when the delete-and-recreate dance is too disruptive. See [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml) for an example.
+
+**Related trap: stuck Argo sync op.** After the failing sync exceeds its retry limit, Argo keeps replaying the *same* bad payload on refresh — it doesn't re-plan against current git/cluster state until the operation is terminated. Clear it:
+```bash
+kubectl -n argocd patch app <name> --type merge -p '{"operation":null}'
+kubectl -n argocd annotate app <name> argocd.argoproj.io/refresh=hard --overwrite
+```
 
 ### Ray worker DaemonSet hardcodes GPU count to 2
 

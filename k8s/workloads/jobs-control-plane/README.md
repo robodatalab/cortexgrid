@@ -9,7 +9,9 @@ How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo 
 - **`restartPolicy: Always`** — implicit default on Deployments. If the container exits for any reason, k8s restarts it.
 - **`livenessProbe`** — file-based heartbeat (matches the current docker-compose check). If the app stops touching `/tmp/cp_heartbeat` for 30s, k8s kills the container; the Deployment replaces it.
 - **`imagePullPolicy: Always`** — on every new pod, k8s re-pulls the image (so `:latest` actually gets the latest build).
-- **`strategy: RollingUpdate`** (default) — when the Deployment spec changes (new image), k8s starts the new pod before killing the old one, giving a graceful handoff.
+- **`strategy: Recreate`** — enforces the singleton. The old pod terminates before the new one starts, so there's never more than one poller. Brief downtime during rollouts is acceptable; duplicate scheduling is not.
+- **`revisionHistoryLimit: 1`** — CI bumps the image tag on every build; without this the cluster accumulates dozens of stale ReplicaSets.
+- **`nodeSelector: kubernetes.io/arch: amd64`** — pins to P5. See [../../README.md](../../README.md) for the cluster-wide placement policy.
 - **Env vars** — MLflow URL, Ray URL, poll interval, AWS creds (via `envFrom` secret).
 - **`imagePullSecrets: ghcr-pull`** — the pull secret reflected into the namespace.
 
