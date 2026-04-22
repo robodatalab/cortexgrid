@@ -18,7 +18,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: jobs-control-plane
-          image: ghcr.io/paksas/jobs-control-plane:main-83240057512053f2769e3ff0ff65652e930c9c9d
+          image: ghcr.io/paksas/jobs-control-plane:main-85d90d56a962c3fd8cc08925452209e7769a8415
           env:
             - name: CORTEXFLOW_POLL_INTERVAL
               value: "5"
