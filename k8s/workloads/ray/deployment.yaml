@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: ray-head
-          image: ghcr.io/paksas/ray-head:main-c9396f54e7ba4bf96a388a93346d7e9add6035e5
+          image: ghcr.io/paksas/ray-head:main-83240057512053f2769e3ff0ff65652e930c9c9d
           resources:
             requests:
               cpu: "1"
@@ -62,6 +62,59 @@ spec:
               containerPort: 8080
             - name: gcs
               containerPort: 6379
+          livenessProbe:
+            exec:
+              command: ["ray", "status"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ray-worker
+spec:
+  selector:
+    matchLabels:
+      app: ray-worker
+  template:
+    metadata:
+      labels:
+        app: ray-worker
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        tier: dev
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: ray-worker
+          image: ghcr.io/paksas/ray-head:main-83240057512053f2769e3ff0ff65652e930c9c9d
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+              nvidia.com/gpu: "2"
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: "2"
+          command:
+            - ray
+            - start
+            - --address=ray-head.ray.svc.cluster.local:6379
+            - --num-gpus=2
+            - --block
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: http://mlflow.mlflow.svc.cluster.local:5000
+            - name: RAY_JOB_SERVER_URI
+              value: http://ray-head.ray.svc.cluster.local:8265
+            - name: AWS_S3_ENDPOINT_URL
+              value: http://minio.minio.svc.cluster.local:9000
+          envFrom:
+            - secretRef:
+                name: aws-creds
           livenessProbe:
             exec:
               command: ["ray", "status"]
