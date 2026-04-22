@@ -19,7 +19,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: cortexflow-ui-backend
-          image: ghcr.io/paksas/cortexflow-ui-backend:main-83240057512053f2769e3ff0ff65652e930c9c9d
+          image: ghcr.io/paksas/cortexflow-ui-backend:main-14b8206bdcb8b580e6ae51a7b495d80f1cd33d46
           env:
             - name: MLFLOW_TRACKING_URI
               value: http://mlflow.mlflow.svc.cluster.local:5000
