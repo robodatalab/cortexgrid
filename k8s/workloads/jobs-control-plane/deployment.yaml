@@ -4,6 +4,7 @@ metadata:
   name: jobs-control-plane
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   strategy:
     type: Recreate
   selector:

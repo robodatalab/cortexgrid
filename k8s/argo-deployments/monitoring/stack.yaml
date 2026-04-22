@@ -24,6 +24,8 @@ spec:
               org_role: Viewer
             security:
               allow_embedding: true
+          nodeSelector:
+            kubernetes.io/arch: amd64
         prometheus:
           service:
             type: NodePort
@@ -32,6 +34,18 @@ spec:
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false
             retention: 30d
+            nodeSelector:
+              kubernetes.io/arch: amd64
+        alertmanager:
+          alertmanagerSpec:
+            nodeSelector:
+              kubernetes.io/arch: amd64
+        prometheusOperator:
+          nodeSelector:
+            kubernetes.io/arch: amd64
+        kube-state-metrics:
+          nodeSelector:
+            kubernetes.io/arch: amd64
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
