@@ -19,3 +19,6 @@ terraform/**/terraform.tfvars
 # Lambda build artifacts
 lambda/*/node_modules
 lambda/*.zip
+
+# claude stuff
+.claude/

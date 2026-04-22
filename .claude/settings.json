@@ -139,7 +139,13 @@
       "Bash(kubectl -n argocd logs argocd-application-controller-0 --tail=10)",
       "Bash(kubectl -n cortexflow-ui get pod -l app=cortexflow-ui-backend -o jsonpath='{.items[0].spec.serviceAccountName}{\"\\\\n\"}{.items[0].spec.containers[0].image}{\"\\\\n\"}{.items[0].status.phase}{\"\\\\n\"}{range .items[*]}{.metadata.name}{\" age=\"}{.metadata.creationTimestamp}{\"\\\\n\"}{end}')",
       "Bash(kubectl -n ray describe pod ray-worker-kxrwj)",
-      "Bash(kubectl -n cortexflow-ui get pods -l app=cortexflow-ui-backend)"
+      "Bash(kubectl -n cortexflow-ui get pods -l app=cortexflow-ui-backend)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra status)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra branch --show-current)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra log --oneline -3)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra show --stat 8a7677c)",
+      "Bash(gh pr *)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra log --stat -5 --pretty=format:'%h %s')"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"
