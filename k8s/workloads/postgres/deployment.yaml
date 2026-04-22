@@ -4,6 +4,7 @@ metadata:
   name: postgres
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   strategy:
     type: Recreate
   selector:
@@ -14,6 +15,8 @@ spec:
       labels:
         app: postgres
     spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
       containers:
         - name: postgres
           image: postgres:15-alpine
