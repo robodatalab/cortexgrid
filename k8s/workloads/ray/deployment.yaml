@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: ray-head
-          image: ghcr.io/paksas/ray-head:main-83240057512053f2769e3ff0ff65652e930c9c9d
+          image: ghcr.io/paksas/ray-head:main-a0eae4bfbf1f3799953edc0b8c6f7a199646971a
           resources:
             requests:
               cpu: "1"
@@ -89,7 +89,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: ray-worker
-          image: ghcr.io/paksas/ray-head:main-83240057512053f2769e3ff0ff65652e930c9c9d
+          image: ghcr.io/paksas/ray-head:main-a0eae4bfbf1f3799953edc0b8c6f7a199646971a
           resources:
             requests:
               cpu: "1"
