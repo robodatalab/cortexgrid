@@ -4,6 +4,8 @@ metadata:
   name: cortexflow-ui-frontend
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: cortexflow-ui-frontend
