@@ -106,6 +106,20 @@ if [[ "$ROLE" == "control-plane" ]]; then
   until kubectl -n argocd get deploy argocd-server &>/dev/null; do sleep 5; done
   kubectl -n argocd rollout status deploy/argocd-server --timeout=5m
 
+  echo "Configuring local-path-provisioner to use the 2TB HDD on P5..."
+  until kubectl -n kube-system get cm local-path-config &>/dev/null; do sleep 2; done
+  kubectl -n kube-system patch cm local-path-config --type=merge --patch "$(cat <<'PATCH'
+data:
+  config.json: |
+    {
+      "nodePathMap":[
+        {"node":"DEFAULT_PATH_FOR_NON_LISTED_NODES","paths":["/var/lib/rancher/k3s/storage"]},
+        {"node":"ptrochim-thinkstation-p5","paths":["/home/ptrochim/GitHub/k3s-storage"]}
+      ]
+    }
+PATCH
+)"
+
   echo "Publishing .env entries to AWS Secrets Manager at robolab/argocd/*..."
   ENV_FILE="$ENV_FILE" uv run python - <<'PYEOF'
 import os, boto3
