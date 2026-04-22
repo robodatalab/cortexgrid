@@ -18,7 +18,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: mlflow
-          image: ghcr.io/paksas/mlflow:main-c9396f54e7ba4bf96a388a93346d7e9add6035e5
+          image: ghcr.io/paksas/mlflow:main-83240057512053f2769e3ff0ff65652e930c9c9d
           resources:
             requests:
               cpu: "200m"
