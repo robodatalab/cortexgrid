@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    "ray[default,train,tune,data]==2.9.3" \
+    "ray[default]==2.9.3" \
     mlflow==3.11.1 \
     python-dotenv==1.0.1 \
     psutil==5.9.8

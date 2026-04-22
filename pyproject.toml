@@ -10,11 +10,13 @@ dependencies = [
     "setuptools>=82.0.1",
     "tqdm>=4.60",
     "cloudpickle>=3.0",
-    "torch>=2.0.0",
     "haikunator>=2.1.0",
     "pip>=23.0",
     "pydantic-settings>=2.13.1",
 ]
+
+[project.optional-dependencies]
+training = ["torch>=2.0.0"]
 
 [build-system]
 requires = ["hatchling"]

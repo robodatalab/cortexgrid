@@ -548,8 +548,12 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "ray", extra = ["default"] },
     { name = "setuptools" },
-    { name = "torch" },
     { name = "tqdm" },
+]
+
+[package.optional-dependencies]
+training = [
+    { name = "torch" },
 ]
 
 [package.dev-dependencies]
@@ -576,9 +580,10 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.13.1" },
     { name = "ray", extras = ["default"], specifier = ">=2.9,<3" },
     { name = "setuptools", specifier = ">=82.0.1" },
-    { name = "torch", specifier = ">=2.0.0" },
+    { name = "torch", marker = "extra == 'training'", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.60" },
 ]
+provides-extras = ["training"]
 
 [package.metadata.requires-dev]
 dev = [

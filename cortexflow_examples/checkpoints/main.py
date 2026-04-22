@@ -10,10 +10,11 @@ Requires the full DGX stack: MLflow, Ray, and the jobs control plane.
 import time
 
 import cortexflow
+from cortexflow.checkpoint import checkpoint, resume
 
 
 def crashy_job():
-    ckpt = cortexflow.resume()
+    ckpt = resume()
     if ckpt:
         print(f"Resumed from checkpoint: execution_count={ckpt.execution_count}")
         cortexflow.log_metric("final_execution_count", ckpt.execution_count + 1)
@@ -21,7 +22,7 @@ def crashy_job():
         return
 
     print("First run — saving checkpoint and crashing")
-    with cortexflow.checkpoint() as ckpt:
+    with checkpoint() as ckpt:
         ckpt.execution_count = 1
 
     raise RuntimeError("Intentional crash to test retry")

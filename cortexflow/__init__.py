@@ -14,12 +14,15 @@ for job in cortexflow.list_experiment_run_jobs(run_id):
     status = cortexflow.get_ray_job_status(job.get_ray_job_id())
 
 # Inside the training function — checkpoint after each epoch
-with cortexflow.checkpoint() as ckpt:
+# (checkpointing requires the `training` extras: `pip install cortexflow[training]`)
+from cortexflow.checkpoint import checkpoint, resume
+
+with checkpoint() as ckpt:
     ckpt.epoch = epoch
     ckpt.save_training_state(model, optimizer, scheduler)
 
 # On resume — load checkpoint if it exists
-ckpt = cortexflow.resume()
+ckpt = resume()
 if ckpt:
     ckpt.restore_training_state(model, optimizer, scheduler)
 """
@@ -28,7 +31,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from cortexflow.checkpoint import checkpoint, resume, Checkpoint, get_cortexflow_job_id
 from cortexflow.experiment import (
     Experiment,
     list_experiments,
@@ -126,9 +128,4 @@ __all__ = [
     "upload_dir",
     "download",
     "get_s3_client",
-    # Checkpointing
-    "checkpoint",
-    "resume",
-    "Checkpoint",
-    "get_cortexflow_job_id",
 ]

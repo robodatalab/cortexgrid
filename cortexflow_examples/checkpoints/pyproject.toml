@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Example: checkpoint and retry with cortexflow"
 requires-python = ">=3.11"
 dependencies = [
-    "cortexflow",
+    "cortexflow[training]",
 ]
 
 [tool.uv.sources]
