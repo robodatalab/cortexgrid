@@ -13,10 +13,8 @@ dependencies = [
     "haikunator>=2.1.0",
     "pip>=23.0",
     "pydantic-settings>=2.13.1",
+    "torch>=2.0.0"
 ]
-
-[project.optional-dependencies]
-training = ["torch>=2.0.0"]
 
 [build-system]
 requires = ["hatchling"]

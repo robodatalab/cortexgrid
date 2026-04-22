@@ -22,3 +22,6 @@ lambda/*.zip
 
 # claude stuff
 .claude/
+
+# uv
+uv.lock
