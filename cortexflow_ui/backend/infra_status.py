@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from kubernetes import client, config
-from kubernetes.client.rest import ApiException
+from kubernetes import client, config  # type: ignore
+from kubernetes.client.rest import ApiException  # type: ignore
 from pydantic import BaseModel
 
 
@@ -35,7 +35,9 @@ def _classify(pod) -> tuple[bool, str]:
         return True, "succeeded"
     if phase == "Running" and statuses and all(cs.ready for cs in statuses):
         return True, "ready"
-    waiting = next((cs.state.waiting for cs in statuses if cs.state and cs.state.waiting), None)
+    waiting = next(
+        (cs.state.waiting for cs in statuses if cs.state and cs.state.waiting), None
+    )
     return False, (waiting.reason if waiting and waiting.reason else "not-ready")
 
 
