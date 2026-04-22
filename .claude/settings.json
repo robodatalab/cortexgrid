@@ -173,7 +173,11 @@
       "Bash(kubectl -n argocd get app cortexflow-ui -o jsonpath='{.status.sync.status}{\"\\\\n\"}{.operation}{\"\\\\n\"}')",
       "Bash(kubectl -n cortexflow-ui get deploy cortexflow-ui-frontend -o jsonpath='replicas:{.spec.replicas} status_replicas:{.status.replicas} ready:{.status.readyReplicas} updated:{.status.updatedReplicas}{\"\\\\n\"}')",
       "Bash(kubectl -n argocd logs deployment/argocd-image-updater-controller --tail=20)",
-      "Bash(kubectl -n argocd annotate app cortexflow-ui argocd-image-updater.argoproj.io/image-list-)"
+      "Bash(kubectl -n argocd annotate app cortexflow-ui argocd-image-updater.argoproj.io/image-list-)",
+      "Bash(kubectl -n cortexflow-ui get deploy cortexflow-ui-frontend -o jsonpath='deploy_image:{.spec.template.spec.containers[0].image} replicas:{.spec.replicas}{\"\\\\n\"}')",
+      "Bash(kubectl -n argocd get app cortexflow-ui -o jsonpath='{.metadata.annotations}')",
+      "Bash(kubectl -n argocd get app -o custom-columns='NAME:.metadata.name,PATH:.spec.source.path,SELFHEAL:.spec.syncPolicy.automated.selfHeal')",
+      "Bash(kubectl -n ray get pods -A --show-labels)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

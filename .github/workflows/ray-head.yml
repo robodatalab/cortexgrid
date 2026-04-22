@@ -36,7 +36,7 @@ jobs:
 
       - name: Build and push
         run: |
-          docker buildx build --platform linux/arm64,linux/amd64 --provenance=false \
+          docker buildx build --platform linux/arm64,linux/amd64 \
             -f k8s/docker/ray/Dockerfile \
             -t $IMAGE:${{ steps.slug.outputs.value }}-${{ github.sha }} \
             --push .
