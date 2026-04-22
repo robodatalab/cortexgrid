@@ -5,3 +5,4 @@ resources:
   - deployment-frontend.yaml
   - service.yaml
   - secrets.yaml
+  - role-based-access-control.yaml

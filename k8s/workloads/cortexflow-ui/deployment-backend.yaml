@@ -12,6 +12,7 @@ spec:
       labels:
         app: cortexflow-ui-backend
     spec:
+      serviceAccountName: cortexflow-ui-backend
       imagePullSecrets:
         - name: ghcr-pull
       containers:

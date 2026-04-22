@@ -4,12 +4,20 @@ import { InfraDashboard } from '../src/components/InfraDashboard'
 
 const sample = {
   overall: false,
-  containers: [
-    { name: 'robolab-redis', state: 'running', health: 'healthy', healthy: true, logs: null },
+  pods: [
     {
-      name: 'robolab-ray-head',
-      state: 'running',
-      health: 'unhealthy',
+      name: 'redis-0',
+      namespace: 'redis',
+      state: 'Running',
+      health: 'ready',
+      healthy: true,
+      logs: null,
+    },
+    {
+      name: 'ray-head-0',
+      namespace: 'ray',
+      state: 'Running',
+      health: 'not-ready',
       healthy: false,
       logs: 'boom\nstacktrace',
     },
@@ -34,20 +42,22 @@ describe('InfraDashboard', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders a card per container', async () => {
+  it('renders a card per pod grouped by namespace', async () => {
     stubFetch(sample)
     render(<InfraDashboard />)
     await waitFor(() => {
-      expect(screen.getByText('robolab-redis')).toBeInTheDocument()
-      expect(screen.getByText('robolab-ray-head')).toBeInTheDocument()
+      expect(screen.getByText('redis-0')).toBeInTheDocument()
+      expect(screen.getByText('ray-head-0')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: 'redis' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 2, name: 'ray' })).toBeInTheDocument()
     })
   })
 
-  it('shows logs only for unhealthy containers', async () => {
+  it('shows logs only for unhealthy pods', async () => {
     stubFetch(sample)
     render(<InfraDashboard />)
     await waitFor(() =>
-      expect(screen.getByText('robolab-ray-head')).toBeInTheDocument(),
+      expect(screen.getByText('ray-head-0')).toBeInTheDocument(),
     )
     const summaries = screen.getAllByText('Recent logs')
     expect(summaries).toHaveLength(1)
