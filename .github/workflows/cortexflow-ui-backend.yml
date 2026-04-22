@@ -47,7 +47,7 @@ jobs:
 
       - name: Build and push
         run: |
-          docker buildx build --platform linux/arm64,linux/amd64 \
+          docker buildx build --platform linux/amd64 \
             -f k8s/docker/cortexflow-ui/backend/Dockerfile \
             -t $IMAGE:${{ steps.slug.outputs.value }}-${{ github.sha }} \
             --push .

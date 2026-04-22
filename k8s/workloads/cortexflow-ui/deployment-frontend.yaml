@@ -12,6 +12,8 @@ spec:
       labels:
         app: cortexflow-ui-frontend
     spec:
+      nodeSelector:
+        kubernetes.io/arch: amd64
       imagePullSecrets:
         - name: ghcr-pull
       containers:
