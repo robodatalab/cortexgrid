@@ -177,7 +177,12 @@
       "Bash(kubectl -n cortexflow-ui get deploy cortexflow-ui-frontend -o jsonpath='deploy_image:{.spec.template.spec.containers[0].image} replicas:{.spec.replicas}{\"\\\\n\"}')",
       "Bash(kubectl -n argocd get app cortexflow-ui -o jsonpath='{.metadata.annotations}')",
       "Bash(kubectl -n argocd get app -o custom-columns='NAME:.metadata.name,PATH:.spec.source.path,SELFHEAL:.spec.syncPolicy.automated.selfHeal')",
-      "Bash(kubectl -n ray get pods -A --show-labels)"
+      "Bash(kubectl -n ray get pods -A --show-labels)",
+      "Bash(kubectl -n argocd get app argocd-image-updater -o jsonpath='{.status.sync.status}{\" | \"}{.status.health.status}{\" | \"}{.status.conditions}{\"\\\\n\"}')",
+      "Bash(kubectl -n argocd get app argocd-image-updater -o yaml)",
+      "Bash(kubectl -n argocd get deploy argocd-image-updater-controller -o jsonpath='{.spec.template.spec.containers[0].env}')",
+      "Bash(kubectl -n argocd set env deployment/argocd-image-updater-controller IMAGE_UPDATER_LOGLEVEL-)",
+      "Bash(kubectl -n argocd get app argocd-image-updater -o jsonpath='{.status.sync.status}{\" | \"}{.status.health.status}{\"\\\\n\"}')"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

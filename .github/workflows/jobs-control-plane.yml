@@ -21,7 +21,7 @@ on:
       - "k8s/docker/jobs-control-plane/**"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -82,3 +82,21 @@ jobs:
             -f k8s/docker/jobs-control-plane/Dockerfile \
             -t $IMAGE:${{ steps.slug.outputs.value }}-${{ github.sha }} \
             --push .
+
+      - name: Bump image tag in git
+        if: github.ref == 'refs/heads/main'
+        env:
+          NEW_TAG: ${{ steps.slug.outputs.value }}-${{ github.sha }}
+        working-directory: k8s/workloads/jobs-control-plane
+        run: |
+          kustomize edit set image $IMAGE=$IMAGE:$NEW_TAG
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kustomization.yaml
+          git diff --cached --quiet && exit 0
+          git commit -m "bump jobs-control-plane to $NEW_TAG"
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 3
+          done
+          exit 1

@@ -12,3 +12,6 @@ resources:
   - dashboard-ray-data-upstream.yaml
   - dashboard-ray-serve-upstream.yaml
   - dashboard-ray-serve-deployment-upstream.yaml
+images:
+  - name: ghcr.io/paksas/ray-head
+    newTag: main-0399e0dc15d7f6a6afd50533eb889b4db0cb5555

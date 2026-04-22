@@ -5,10 +5,6 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
-    argocd-image-updater.argoproj.io/image-list: ray-head=ghcr.io/paksas/ray-head
-    argocd-image-updater.argoproj.io/ray-head.update-strategy: newest-build
-    argocd-image-updater.argoproj.io/ray-head.allow-tags: regexp:^main-[0-9a-f]{40}$
-    argocd-image-updater.argoproj.io/write-back-method: argocd
 spec:
   project: default
   source:

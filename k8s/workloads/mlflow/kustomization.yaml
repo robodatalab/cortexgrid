@@ -3,3 +3,6 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+images:
+  - name: ghcr.io/paksas/mlflow
+    newTag: main-053b7272a468a3a8b7d055034ae1445eea16da9e

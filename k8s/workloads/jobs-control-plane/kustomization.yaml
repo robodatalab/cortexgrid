@@ -2,3 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - deployment.yaml
+images:
+  - name: ghcr.io/paksas/jobs-control-plane
+    newTag: main-053b7272a468a3a8b7d055034ae1445eea16da9e
