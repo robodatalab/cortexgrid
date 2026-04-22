@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { TitledFrame } from './TitledFrame'
 import './InfraDashboard.css'
 
-type ContainerStatus = {
+type PodStatus = {
   name: string
+  namespace: string
   state: string
   health: string
   healthy: boolean
@@ -12,7 +13,7 @@ type ContainerStatus = {
 
 type InfraStatus = {
   overall: boolean
-  containers: ContainerStatus[]
+  pods: PodStatus[]
 }
 
 type LoadState =
@@ -46,24 +47,34 @@ function useInfraStatus(): LoadState {
   return state
 }
 
-function ContainerCard({ c }: { c: ContainerStatus }) {
+function PodCard({ p }: { p: PodStatus }) {
   return (
     <TitledFrame
-      title={c.name}
-      titleClassName={`infra-card__title--${c.healthy ? 'ok' : 'bad'}`}
+      title={p.name}
+      titleClassName={`infra-card__title--${p.healthy ? 'ok' : 'bad'}`}
     >
       <div className="infra-card__meta">
-        <span>state: {c.state}</span>
-        <span>health: {c.health}</span>
+        <span>state: {p.state}</span>
+        <span>health: {p.health}</span>
       </div>
-      {c.logs && (
+      {p.logs && (
         <details className="infra-card__logs">
           <summary>Recent logs</summary>
-          <pre>{c.logs}</pre>
+          <pre>{p.logs}</pre>
         </details>
       )}
     </TitledFrame>
   )
+}
+
+function groupByNamespace(pods: PodStatus[]): Map<string, PodStatus[]> {
+  const groups = new Map<string, PodStatus[]>()
+  for (const p of pods) {
+    const arr = groups.get(p.namespace) ?? []
+    arr.push(p)
+    groups.set(p.namespace, arr)
+  }
+  return groups
 }
 
 export function InfraDashboard() {
@@ -74,16 +85,20 @@ export function InfraDashboard() {
   if (state.status === 'error') {
     return <div className="infra-dashboard__empty">Error: {state.message}</div>
   }
+  const groups = groupByNamespace(state.data.pods)
   return (
     <div className="infra-dashboard">
       <header className="infra-dashboard__header">
         <h1>Infrastructure Status</h1>
       </header>
-      <div className="infra-dashboard__grid">
-        {state.data.containers.map((c) => (
-          <ContainerCard key={c.name} c={c} />
-        ))}
-      </div>
+      {[...groups.entries()].map(([ns, pods]) => (
+        <section key={ns} className="infra-dashboard__namespace">
+          <h2>{ns}</h2>
+          <div className="infra-dashboard__grid">
+            {pods.map((p) => <PodCard key={`${ns}/${p.name}`} p={p} />)}
+          </div>
+        </section>
+      ))}
     </div>
   )
 }

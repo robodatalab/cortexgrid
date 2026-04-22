@@ -15,10 +15,11 @@ FastAPI can serve the built frontend via `StaticFiles` (the code at [`cortexflow
 
 ## Files
 
-- **deployment-backend.yaml** — backend `Deployment`. `envFrom` pulls `aws-creds` (reflector-mirrored) and `cortexflow-ui-public-urls` (templated below). HTTP `/health` probe.
+- **deployment-backend.yaml** — backend `Deployment`. Runs as the `cortexflow-ui-backend` ServiceAccount (see role-based-access-control.yaml). `envFrom` pulls `aws-creds` (reflector-mirrored) and `cortexflow-ui-public-urls` (templated below). HTTP `/health` probe.
 - **deployment-frontend.yaml** — frontend `Deployment`. Pure nginx — no env, no secrets. Probe on `GET /`.
 - **service.yaml** — `cortexflow-ui-backend` `ClusterIP:8000` (not browser-reachable on purpose), `cortexflow-ui-frontend` `NodePort:30088`.
 - **secrets.yaml** — `ExternalSecret` `cortexflow-ui-public-urls` templates `PUBLIC_MLFLOW_URL` / `PUBLIC_RAY_DASHBOARD_URL` / `PUBLIC_MINIO_CONSOLE_URL` as `http://<DGX_TAILSCALE_IP>:<NodePort>`. The backend reads these and returns them verbatim from `/api/dashboards` to the browser. `DGX_TAILSCALE_IP` comes from AWS SM (`robolab/infra/DGX_TAILSCALE_IP`).
+- **role-based-access-control.yaml** — `ServiceAccount` `cortexflow-ui-backend` + cluster-wide `ClusterRole`/`ClusterRoleBinding` granting `get`/`list` on `pods` and `get` on `pods/log`. Powers `/api/infra/status`, which queries the Kubernetes API to report pod health across every namespace for the Infrastructure dashboard.
 
 ## Two kinds of URLs
 

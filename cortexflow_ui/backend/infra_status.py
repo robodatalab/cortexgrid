@@ -1,16 +1,15 @@
-"""Infrastructure status — queries docker on the DGX over TCP."""
+"""Infrastructure status — queries the kubernetes API for pod health across all namespaces."""
 
 from __future__ import annotations
 
-import docker  # type: ignore
-from docker.models.containers import Container  # type: ignore
+from kubernetes import client, config  # type: ignore
+from kubernetes.client.rest import ApiException  # type: ignore
 from pydantic import BaseModel
 
-from cortexflow.infra import get_server_ip
 
-
-class ContainerStatus(BaseModel):
+class PodStatus(BaseModel):
     name: str
+    namespace: str
     state: str
     health: str
     healthy: bool
@@ -19,30 +18,59 @@ class ContainerStatus(BaseModel):
 
 class InfraStatus(BaseModel):
     overall: bool
-    containers: list[ContainerStatus]
+    pods: list[PodStatus]
 
 
-def _container_to_status(container: Container) -> ContainerStatus:
-    attrs = container.attrs["State"]
-    state: str = attrs["Status"]
-    health: str = attrs.get("Health", {}).get("Status", "none")
-    exit_code: int = attrs.get("ExitCode", 0)
-    ok = (state == "running" and health in ("healthy", "none")) or (
-        state == "exited" and exit_code == 0
+def _load_kube_config() -> None:
+    try:
+        config.load_incluster_config()
+    except config.ConfigException:
+        config.load_kube_config()
+
+
+def _classify(pod) -> tuple[bool, str]:
+    phase = pod.status.phase or "Unknown"
+    statuses = pod.status.container_statuses or []
+    if phase == "Succeeded":
+        return True, "succeeded"
+    if phase == "Running" and statuses and all(cs.ready for cs in statuses):
+        return True, "ready"
+    waiting = next(
+        (cs.state.waiting for cs in statuses if cs.state and cs.state.waiting), None
     )
-    logs = None if ok else container.logs(tail=50).decode("utf-8", errors="replace")
-    return ContainerStatus(
-        name=container.name or "Anonymous",
-        state=state,
+    return False, (waiting.reason if waiting and waiting.reason else "not-ready")
+
+
+def _fetch_logs(v1: client.CoreV1Api, pod) -> str | None:
+    try:
+        return v1.read_namespaced_pod_log(
+            name=pod.metadata.name,
+            namespace=pod.metadata.namespace,
+            tail_lines=50,
+        )
+    except ApiException:
+        return None
+
+
+def _pod_to_status(pod, v1: client.CoreV1Api) -> PodStatus:
+    healthy, health = _classify(pod)
+    return PodStatus(
+        name=pod.metadata.name,
+        namespace=pod.metadata.namespace,
+        state=pod.status.phase or "Unknown",
         health=health,
-        healthy=ok,
-        logs=logs,
+        healthy=healthy,
+        logs=None if healthy else _fetch_logs(v1, pod),
     )
 
 
 def get_infra_status() -> InfraStatus:
-    client = docker.DockerClient(base_url=f"tcp://{get_server_ip()}:2375")
-    containers = client.containers.list(all=True, filters={"name": "robolab-"})
-    statuses = [_container_to_status(c) for c in containers]
+    _load_kube_config()
+    v1 = client.CoreV1Api()
+    pods = v1.list_pod_for_all_namespaces(watch=False).items
+    statuses = sorted(
+        (_pod_to_status(p, v1) for p in pods),
+        key=lambda s: (s.namespace, s.name),
+    )
     overall = all(s.healthy for s in statuses)
-    return InfraStatus(overall=overall, containers=statuses)
+    return InfraStatus(overall=overall, pods=statuses)
