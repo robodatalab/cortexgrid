@@ -23,6 +23,22 @@ Today the split is 1-to-1: one branch → one machine. `main` → DGX, `dev` →
 
 As we add nodes and migrate to AWS, we'll likely split *infra* from *jobs* across tiers rather than by branch alone. For example, MLflow + Grafana + Prometheus (shared state, long-lived, cheap CPU) may live on AWS under `tier=main`, while Ray (GPU-bound, bursty) keeps running on DGX regardless of which branch submitted the job. When that happens, individual workload manifests will declare their own nodeSelector / affinity, and `tier` becomes one of several scheduling inputs rather than the only one.
 
+## Branch dev-environments
+
+### What this is for
+
+Changes to `robolab-infra` (this repo) shouldn't block downstream repositories that depend on its `main` branch. The `cortexflow` library users — experiment code in other repos — need a stable MLflow, Ray, and S3 reachable on `main` at all times. We, as infra developers, want to iterate on an infra branch and test the result end-to-end without pushing to `main` first. Branch dev-environments give every open `robolab-infra` PR its own isolated deployment of whichever components are under test, leaving `main` untouched.
+
+### How it's implemented
+
+One `ApplicationSet` per component we want to replicate per PR. Each uses Argo's `pullRequest` generator to poll GitHub, emitting one Argo Application per open PR sourced from that branch, into a namespace like `dev-pr-<N>`. CI tags images as `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags.
+
+Not every component gets a per-branch copy. Shared state (MLflow + its Postgres, MinIO buckets) and GPU-heavy workloads (Ray) stay on `main` and are consumed by the PR namespace via cross-namespace service DNS. Only workloads actively under test — typically `cortexflow-ui` and `jobs-control-plane` — get per-branch copies. The concrete list lives as files in [argo-deployments/](argo-deployments/) — add or remove an `ApplicationSet` to change it.
+
+### Future extension — AWS
+
+When `main` migrates to AWS, dev-envs stay on DGX/P5 (`tier=dev`), production on AWS (`tier=main`). The ApplicationSet's template can parameterise `destination.server` so PR Applications land on the dev cluster while main-sourced Applications land on AWS — same manifest shape, routed by tier.
+
 ## FAQ
 
 ### Argo sync is stuck / app stays OutOfSync after a Git push
