@@ -26,6 +26,12 @@ SSH="sshpass -e ssh -o StrictHostKeyChecking=accept-new"
 
 NODE_NAME="$(kubectl get nodes -o json 2>/dev/null | jq -r --arg ip "$NODE_IP" '.items[] | select(.status.addresses[].address==$ip) | .metadata.name' | head -1 || true)"
 
+DGX_IP="$(uv run python -c "
+from cortexflow.secrets import get_secret
+try: print(get_secret('DGX_TAILSCALE_IP'))
+except Exception: pass
+" 2>/dev/null)"
+
 $SSH "$NODE_HOST" "SUDO_PW='$PW' bash -s" <<'REMOTE'
 set -euo pipefail
 run_sudo() { echo "$SUDO_PW" | sudo -S "$@"; }
@@ -58,6 +64,20 @@ if ! kubectl cluster-info &>/dev/null; then
   kubectl config delete-context dgx 2>/dev/null || true
   kubectl config delete-cluster dgx 2>/dev/null || true
   kubectl config delete-user dgx 2>/dev/null || true
+fi
+
+if [[ -n "${DGX_IP:-}" && "$DGX_IP" == "$NODE_IP" ]]; then
+  echo "Deleting cluster-seed secrets from AWS Secrets Manager..."
+  uv run python - <<'PYEOF'
+import boto3
+client = boto3.client('secretsmanager', region_name='us-east-1')
+for sec in ('robolab/infra/K3S_NODE_TOKEN', 'robolab/infra/DGX_TAILSCALE_IP'):
+    try:
+        client.delete_secret(SecretId=sec, ForceDeleteWithoutRecovery=True)
+        print(f'  deleted {sec}')
+    except client.exceptions.ResourceNotFoundException:
+        pass
+PYEOF
 fi
 
 echo "Node teardown complete."
