@@ -1,13 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - deployment-backend.yaml
-  - deployment-frontend.yaml
-  - service.yaml
-  - secrets.yaml
-  - role-based-access-control.yaml
+- deployment-backend.yaml
+- deployment-frontend.yaml
+- service.yaml
+- secrets.yaml
+- role-based-access-control.yaml
 images:
-  - name: ghcr.io/paksas/cortexflow-ui-backend
-    newTag: main-053b7272a468a3a8b7d055034ae1445eea16da9e
-  - name: ghcr.io/paksas/cortexflow-ui-frontend
-    newTag: main-94249b3b3bc447ee641003b207da93bfb2a47fcd
+- name: ghcr.io/paksas/cortexflow-ui-backend
+  newTag: main-053b7272a468a3a8b7d055034ae1445eea16da9e
+- name: ghcr.io/paksas/cortexflow-ui-frontend
+  newName: ghcr.io/paksas/cortexflow-ui-frontend
+  newTag: main-c9396f54e7ba4bf96a388a93346d7e9add6035e5
