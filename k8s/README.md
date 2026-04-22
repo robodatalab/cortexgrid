@@ -9,13 +9,13 @@ Every node is labelled `tier=main` or `tier=dev`. The label is the one signal th
 | Tier | Purpose | Current node |
 |------|---------|--------------|
 | `main` | Runs workloads deployed from the `main` branch (the stable deployment) | DGX Spark |
-| `dev` | Runs workloads from per-PR dev environments (branches in flight) | ThinkStation P5 |
+| `dev` | Runs dev-branch or dev-only workloads | ThinkStation P5 |
 
 Nodes are seeded with [seed/setup-node.sh](seed/setup-node.sh) and torn down with [seed/teardown-node.sh](seed/teardown-node.sh). The first node seeded is also the k3s control plane and hosts the Argo CD bootstrap; that's an orthogonal concern from the tier — today it happens to be the `main`-tier node but doesn't have to be.
 
 ### Why tier is independent of k3s control-plane
 
-When we later migrate main-branch workloads to AWS, the `main` tier will live on an AWS node while DGX becomes a `dev`-tier worker. At that point the AWS node becomes the k3s control plane too (k3s server migration is a separate operation). The tier label keeps the scheduling semantics the same across the move — PR-branch workloads keep a `tier=dev` nodeSelector, main-branch workloads keep `tier=main`.
+When we later migrate main-branch workloads to AWS, the `main` tier will live on an AWS node while DGX becomes a `dev`-tier worker. At that point the AWS node becomes the k3s control plane too (k3s server migration is a separate operation). The tier label keeps the scheduling semantics the same across the move — dev workloads keep a `tier=dev` nodeSelector, main-branch workloads keep `tier=main`.
 
 ### Nuance: which machine hosts which branch, and what those branches represent
 
@@ -23,29 +23,27 @@ Today the split is 1-to-1: one branch → one machine. `main` → DGX, `dev` →
 
 As we add nodes and migrate to AWS, we'll likely split *infra* from *jobs* across tiers rather than by branch alone. For example, MLflow + Grafana + Prometheus (shared state, long-lived, cheap CPU) may live on AWS under `tier=main`, while Ray (GPU-bound, bursty) keeps running on DGX regardless of which branch submitted the job. When that happens, individual workload manifests will declare their own nodeSelector / affinity, and `tier` becomes one of several scheduling inputs rather than the only one.
 
-## Branch dev-environments
+## Features
 
-### What this is for
+### Multi-node Ray
 
-Changes to `robolab-infra` (this repo) shouldn't block downstream repositories that depend on its `main` branch. The `cortexflow` library users — experiment code in other repos — need a stable MLflow, Ray, and S3 reachable on `main` at all times. We, as infra developers, want to iterate on an infra branch and test the result end-to-end without pushing to `main` first. Branch dev-environments give every open `robolab-infra` PR its own isolated deployment of whichever components are under test, leaving `main` untouched.
+`ray-head` is pinned to `tier=main` (DGX) via `nodeSelector`. A `ray-worker` DaemonSet runs on every `tier=dev` node, registering to the head via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. All GPUs (1 on DGX + 2 on P5 today) join one Ray pool — a submitted Ray job asking for 1 GPU can land on any of them; a job asking for 2 or 3 GPUs parallelises across nodes. No code change at the cortexflow submission site; Ray handles GPU assignment transparently. See [workloads/ray/](workloads/ray/).
 
-### How it's implemented
+## Future extensions
 
-One `ApplicationSet` per component we want to replicate per PR. Each uses Argo's `pullRequest` generator to poll GitHub, emitting one Argo Application per open PR sourced from that branch, into a namespace like `dev-pr-<N>`. CI tags images as `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags.
+### Branch dev-environments
 
-Not every component gets a per-branch copy. Shared state (MLflow + its Postgres, MinIO buckets) and GPU-heavy workloads (Ray) stay on `main` and are consumed by the PR namespace via cross-namespace service DNS. Only workloads actively under test — typically `cortexflow-ui` and `jobs-control-plane` — get per-branch copies. The concrete list lives as files in [argo-deployments/](argo-deployments/) — add or remove an `ApplicationSet` to change it.
+**Problem.** Changes to `robolab-infra` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexflow` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
 
-### Future extension — AWS
+**Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexflow-ui, jobs-control-plane) get per-branch copies.
 
-When `main` migrates to AWS, dev-envs stay on DGX/P5 (`tier=dev`), production on AWS (`tier=main`). The ApplicationSet's template can parameterise `destination.server` so PR Applications land on the dev cluster while main-sourced Applications land on AWS — same manifest shape, routed by tier.
+### Opportunistic dev-node utilisation
 
-### Future extension — opportunistic dev-node utilisation
+When no dev-branch work is active, `tier=dev` nodes sit idle. Strict `nodeSelector: tier=dev` on dev workloads + unconstrained main workloads lets main spread onto dev nodes opportunistically, retreating the moment a dev workload claims a GPU.
 
-When no infra branches are open, P5 (tier=dev) sits idle. We'd pin PR workloads with a hard `nodeSelector: tier=dev` but leave main workloads *unconstrained* so k8s schedules them wherever capacity is free. Main therefore spreads onto P5 whenever dev is otherwise quiet, and retreats to DGX the moment a PR env claims P5's GPU.
+### AWS migration
 
-### Future extension — Ray jobs spanning DGX + P5
-
-Today `ray-head` is a single-node Deployment with one GPU. To let a single Ray job use DGX + P5's GPUs as one pool, add a `ray-worker` Deployment/DaemonSet that joins the head via a headless Service, one worker per node, each requesting `nvidia.com/gpu: 1` with topology-spread or pod anti-affinity. Ray's scheduler then treats all GPUs as a single pool — submitted jobs parallelise across nodes with no change at the submission site.
+When `main` migrates to AWS, dev-envs stay on DGX/P5 (`tier=dev`), production on AWS (`tier=main`). ApplicationSet templates parameterise `destination.server` so PR Applications land on the dev cluster while main Applications land on AWS — same manifest shape, routed by tier.
 
 ## FAQ
 
