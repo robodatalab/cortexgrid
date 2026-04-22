@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: ray-head
-          image: ghcr.io/paksas/ray-head:latest
+          image: ghcr.io/paksas/ray-head:main-c9396f54e7ba4bf96a388a93346d7e9add6035e5
           resources:
             requests:
               cpu: "1"

@@ -58,14 +58,16 @@ jobs:
           NEW_TAG: ${{ steps.slug.outputs.value }}-${{ github.sha }}
         working-directory: k8s/workloads/cortexflow-ui
         run: |
-          kustomize edit set image $IMAGE=$IMAGE:$NEW_TAG
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add kustomization.yaml
-          git diff --cached --quiet && exit 0
-          git commit -m "bump cortexflow-ui-backend to $NEW_TAG"
           for i in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            git fetch origin main
+            git reset --hard origin/main
+            NEW_IMAGE="$IMAGE:$NEW_TAG" yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' deployment-backend.yaml
+            git add deployment-backend.yaml
+            git diff --cached --quiet && exit 0
+            git commit -m "bump cortexflow-ui-backend to $NEW_TAG"
+            git push origin HEAD:main && exit 0
             sleep 3
           done
           exit 1

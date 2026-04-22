@@ -182,7 +182,12 @@
       "Bash(kubectl -n argocd get app argocd-image-updater -o yaml)",
       "Bash(kubectl -n argocd get deploy argocd-image-updater-controller -o jsonpath='{.spec.template.spec.containers[0].env}')",
       "Bash(kubectl -n argocd set env deployment/argocd-image-updater-controller IMAGE_UPDATER_LOGLEVEL-)",
-      "Bash(kubectl -n argocd get app argocd-image-updater -o jsonpath='{.status.sync.status}{\" | \"}{.status.health.status}{\"\\\\n\"}')"
+      "Bash(kubectl -n argocd get app argocd-image-updater -o jsonpath='{.status.sync.status}{\" | \"}{.status.health.status}{\"\\\\n\"}')",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra log --all --diff-filter=A --format='%h %ai %s' -- 'k8s/workloads/*/kustomization.yaml')",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra log --all --format='%h %ai %s' --follow -- 'k8s/workloads/cortexflow-ui/kustomization.yaml')",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra show 7a25623 --stat)",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra show 7a25623 -- 'k8s/workloads/cortexflow-ui/kustomization.yaml')",
+      "Bash(git -C /Users/piotrtrochim/GitHub/robolab-infra status --short)"
     ],
     "additionalDirectories": [
       "/Users/piotrtrochim/.kube"

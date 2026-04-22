@@ -1,9 +1,0 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-- deployment.yaml
-- service.yaml
-images:
-- name: ghcr.io/paksas/mlflow
-  newName: ghcr.io/paksas/mlflow
-  newTag: main-c9396f54e7ba4bf96a388a93346d7e9add6035e5
