@@ -39,6 +39,14 @@ Not every component gets a per-branch copy. Shared state (MLflow + its Postgres,
 
 When `main` migrates to AWS, dev-envs stay on DGX/P5 (`tier=dev`), production on AWS (`tier=main`). The ApplicationSet's template can parameterise `destination.server` so PR Applications land on the dev cluster while main-sourced Applications land on AWS — same manifest shape, routed by tier.
 
+### Future extension — opportunistic dev-node utilisation
+
+When no infra branches are open, P5 (tier=dev) sits idle. We'd pin PR workloads with a hard `nodeSelector: tier=dev` but leave main workloads *unconstrained* so k8s schedules them wherever capacity is free. Main therefore spreads onto P5 whenever dev is otherwise quiet, and retreats to DGX the moment a PR env claims P5's GPU.
+
+### Future extension — Ray jobs spanning DGX + P5
+
+Today `ray-head` is a single-node Deployment with one GPU. To let a single Ray job use DGX + P5's GPUs as one pool, add a `ray-worker` Deployment/DaemonSet that joins the head via a headless Service, one worker per node, each requesting `nvidia.com/gpu: 1` with topology-spread or pod anti-affinity. Ray's scheduler then treats all GPUs as a single pool — submitted jobs parallelise across nodes with no change at the submission site.
+
 ## FAQ
 
 ### Argo sync is stuck / app stays OutOfSync after a Git push
