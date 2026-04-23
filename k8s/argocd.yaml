@@ -10,6 +10,9 @@ spec:
   targetNamespace: argocd
   createNamespace: true
   valuesContent: |-
+    global:
+      nodeSelector:
+        kubernetes.io/arch: amd64
     server:
       extraArgs:
         - --insecure
