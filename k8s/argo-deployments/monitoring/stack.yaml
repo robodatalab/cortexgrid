@@ -46,6 +46,9 @@ spec:
         kube-state-metrics:
           nodeSelector:
             kubernetes.io/arch: amd64
+        prometheus-node-exporter:
+          nodeSelector:
+            kubernetes.io/arch: amd64
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
