@@ -6,7 +6,7 @@ How the Postgres server runs inside Kubernetes. Applied by the Argo Application 
 
 - **`kind: Deployment` (replicas: 1)** — single Postgres pod backed by a PersistentVolumeClaim. Could be a `StatefulSet`, but with one replica there's no benefit; we'd switch to a StatefulSet (or CloudNativePG) only when we need replication.
 - **`strategy: Recreate`** — only one pod can mount a RWO volume at a time.
-- **`nodeSelector: kubernetes.io/arch: amd64`** — pins to P5 where the 2TB HDD lives. See [../../README.md](../../README.md) for the cluster-wide storage setup.
+- **`nodeSelector: role: head`** — pins to the head node where the 2TB HDD lives. See [../../README.md](../../README.md) for the cluster-wide storage setup.
 - **Image** — official `postgres:15-alpine`, multi-arch.
 - **Env** — `POSTGRES_USER=admin`, `POSTGRES_PASSWORD=admin`, `POSTGRES_DB=mlflow`. `PGDATA=/var/lib/postgresql/data/pgdata` so the data directory is a sub-path, avoiding conflicts with mount metadata on the PVC root.
 - **Probes** — `pg_isready` exec on port 5432.

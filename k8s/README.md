@@ -4,21 +4,29 @@ GitOps manifests watched by Argo CD. See [argo-deployments/](argo-deployments/) 
 
 ## Workload placement
 
-**Current policy:** every first-party workload runs on P5 (`nodeSelector: kubernetes.io/arch: amd64`). The only exception is `ray-worker`, which runs as a DaemonSet on both nodes so Ray can dispatch GPU jobs to either the DGX or the P5. DGX is effectively the control-plane + GPU-execution node; P5 is the storage + CPU-workload node.
+**Current policy:** every first-party workload pins to the head node (`nodeSelector: role: head`). The only exception is `ray-worker`, which runs as a DaemonSet on every node so Ray can dispatch GPU jobs anywhere. The head hosts the k3s control plane, storage, and all CPU workloads; workers are there for extra GPU capacity only.
 
-Node tier labels (`tier=main` / `tier=dev`) still exist and are consumed by `ray-worker` and by legacy affinity rules, but the branch-per-node model is receding — new workloads use `kubernetes.io/arch` instead. See [workloads/](workloads/) for the specific manifests.
+Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../infra-config.yaml) at the repo root. That file is written by `setup-node` and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs.
 
-Nodes are seeded with [seed/setup-node.sh](seed/setup-node.sh) and torn down with [seed/teardown-node.sh](seed/teardown-node.sh). The first node seeded is also the k3s control plane and hosts the Argo CD bootstrap.
+Nodes are seeded and torn down via the repo-root Makefile:
 
-### Storage routing (P5 HDD)
+```bash
+make setup-head   IP=<head-ip>   STORAGE_PATH=<hdd-mount>   [SSH_USER=<user>]
+make setup-worker IP=<worker-ip>                            [SSH_USER=<user>]
+make teardown-node IP=<any-ip>                              [SSH_USER=<user>]
+```
 
-P5 has a 2TB HDD mounted at `/home/ptrochim/GitHub`. All `PersistentVolumeClaim`s on P5 (MinIO, Postgres, etc.) are provisioned into `/home/ptrochim/GitHub/k3s-storage/` rather than the default `/var/lib/rancher/k3s/storage`, to keep PV data off the root NVMe. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, applied idempotently by `setup-node.sh` on every control-plane seed. The stamped path is declarative, not quota-enforced — minio's `1Ti` PVC can still physically fill the whole disk.
+Worker-before-head is supported: if the head hasn't been seeded yet, `make setup-worker` installs node prerequisites and drops a systemd timer on the worker that polls AWS Secrets Manager for the head's credentials and joins automatically once the head appears. Command returns immediately.
+
+### Storage routing (head HDD)
+
+The head node has an HDD mounted at whatever path you pass as `STORAGE_PATH` to `make setup-head`. All `PersistentVolumeClaim`s (MinIO, Postgres, etc.) land there instead of the default `/var/lib/rancher/k3s/storage`, keeping PV data off the root NVMe. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, patched idempotently by `setup-node.py` using the value from `infra-config.yaml`. The stamped path is declarative, not quota-enforced — minio's `1Ti` PVC can still physically fill the whole disk.
 
 ## Features
 
 ### Multi-node Ray
 
-`ray-head` is pinned to `tier=main` (DGX) via `nodeSelector`. A `ray-worker` DaemonSet runs on every `tier=dev` node, registering to the head via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. All GPUs (1 on DGX + 2 on P5 today) join one Ray pool — a submitted Ray job asking for 1 GPU can land on any of them; a job asking for 2 or 3 GPUs parallelises across nodes. No code change at the cortexflow submission site; Ray handles GPU assignment transparently. See [workloads/ray/](workloads/ray/).
+`ray-head` is pinned to `role=head` via `nodeSelector`. A `ray-worker` DaemonSet runs on every node (head + workers), registering to the head via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Each `ray-worker` pod requests 1 GPU; Ray pools them all into one scheduler — a job asking for 1 GPU can land on any node, a job asking for more parallelises across nodes. No code change at the cortexflow submission site; Ray handles GPU assignment transparently. See [workloads/ray/](workloads/ray/).
 
 ## Future extensions
 
@@ -28,13 +36,9 @@ P5 has a 2TB HDD mounted at `/home/ptrochim/GitHub`. All `PersistentVolumeClaim`
 
 **Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexflow-ui, jobs-control-plane) get per-branch copies.
 
-### Opportunistic dev-node utilisation
-
-When no dev-branch work is active, `tier=dev` nodes sit idle. Strict `nodeSelector: tier=dev` on dev workloads + unconstrained main workloads lets main spread onto dev nodes opportunistically, retreating the moment a dev workload claims a GPU.
-
 ### AWS migration
 
-When `main` migrates to AWS, dev-envs stay on DGX/P5 (`tier=dev`), production on AWS (`tier=main`). ApplicationSet templates parameterise `destination.server` so PR Applications land on the dev cluster while main Applications land on AWS — same manifest shape, routed by tier.
+When `main` migrates to AWS, on-prem stays as the dev cluster, production on AWS. ApplicationSet templates parameterise `destination.server` so PR Applications land on the dev cluster while main Applications land on AWS — same manifest shape, routed by destination.
 
 ## FAQ
 
@@ -86,8 +90,8 @@ kubectl -n argocd patch app <name> --type merge -p '{"operation":null}'
 kubectl -n argocd annotate app <name> argocd.argoproj.io/refresh=hard --overwrite
 ```
 
-### Ray worker DaemonSet hardcodes GPU count to 2
+### Ray worker DaemonSet hardcodes GPU count to 1
 
-**Symptom.** [workloads/ray/worker-daemonset.yaml](workloads/ray/worker-daemonset.yaml) requests `nvidia.com/gpu: 2` and passes `--num-gpus=2` on every dev-tier node. This matches P5 exactly. If a future `tier=dev` node has 1 GPU the pod won't schedule; if it has 4 GPUs the pod will only use 2.
+**Symptom.** [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml) requests `nvidia.com/gpu: 1` and passes `--num-gpus=1` on every node. One GPU per node is the common denominator that fits everywhere (head shares its GPUs with `ray-head`). If a future node has more GPUs, this DaemonSet only uses one of them.
 
-**Why we don't do anything preemptive.** Without KubeRay there's no clean k8s-native way to say "one worker per GPU on each node with variable count." Two realistic fixes when it bites: (a) swap the DaemonSet for a per-node Deployment with explicit replicas/GPU requests, or (b) multiple DaemonSets filtered by an extra label like `gpu-count=2`. Both are fine; neither's worth doing until we actually add a dev node with a different GPU count.
+**Why we don't do anything preemptive.** Without KubeRay there's no clean k8s-native way to say "one worker per GPU on each node with variable count." Two realistic fixes when it bites: (a) swap the DaemonSet for a per-node Deployment with explicit replicas/GPU requests, or (b) multiple DaemonSets filtered by an extra label like `gpu-count=N`. Neither's worth doing until we actually add a node with a different GPU count that we want to exploit fully.

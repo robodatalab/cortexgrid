@@ -6,7 +6,7 @@ How the MinIO server runs inside Kubernetes. Applied by the Argo Application at 
 
 - **`kind: Deployment` (replicas: 1)** — single MinIO pod backed by a PersistentVolumeClaim.
 - **`strategy: Recreate`** — only one pod can mount a RWO volume at a time, so we tear the old one down before starting the new one.
-- **`nodeSelector: kubernetes.io/arch: amd64`** — pins to P5 where the 2TB HDD lives. See [../../README.md](../../README.md) for the cluster-wide storage setup.
+- **`nodeSelector: role: head`** — pins to the head node where the 2TB HDD lives. See [../../README.md](../../README.md) for the cluster-wide storage setup.
 - **`args: server /data --console-address :9001`** — identical to the old docker-compose command.
 - **Env** — `MINIO_ROOT_USER=admin` / `MINIO_ROOT_PASSWORD=adminadmin` (hardcoded; tailnet-only security model).
 - **Ports** — 9000 (S3 API), 9001 (web console). Both exposed via NodePort (30900 / 30901) so they're reachable from the Mac over Tailscale.

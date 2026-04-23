@@ -1,0 +1,110 @@
+"""Shared helpers for setup-node.py and teardown-node.py.
+
+Holds everything both scripts touch: paths, constants, infra-config.yaml I/O,
+.env loading, Fabric SSH helpers, and kubectl wrappers.
+"""
+
+import io
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import yaml  # type: ignore
+from fabric import Connection  # type: ignore
+from paramiko import AutoAddPolicy  # type: ignore
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CONFIG_FILE = REPO_ROOT / "infra-config.yaml"
+ENV_FILE = REPO_ROOT / ".env"
+KUBE_CONTEXT = "robolab"
+
+# cortexflow.secrets prefixes these with "robolab/infra/".
+SECRET_K3S_TOKEN = "K3S_NODE_TOKEN"
+SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
+
+JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.sh"
+JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"
+JOIN_SERVICE_PATH = "/etc/systemd/system/robolab-join.service"
+JOIN_TIMER_PATH = "/etc/systemd/system/robolab-join.timer"
+
+
+def load_config() -> dict:
+    if not CONFIG_FILE.exists():
+        return {"nodes": []}
+    with open(CONFIG_FILE) as f:
+        return yaml.safe_load(f) or {"nodes": []}
+
+
+def save_config(cfg: dict) -> None:
+    with open(CONFIG_FILE, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def connect(user: str, ip: str, password: str) -> Connection:
+    """Open a Fabric SSH connection with password auth + auto-add host key + sudo password."""
+    c = Connection(
+        host=ip,
+        user=user,
+        connect_kwargs={
+            "password": password,
+            "look_for_keys": False,
+            "allow_agent": False,
+        },
+    )
+    c.config.sudo.password = password
+    c.client.set_missing_host_key_policy(AutoAddPolicy())
+    return c
+
+
+def sudo_script(c: Connection, script: str, hide: bool | str = False) -> str:
+    """Pipe `script` to `sudo bash -s` on the remote and return stdout."""
+    result = c.sudo("bash -s", in_stream=io.StringIO(script), hide=hide, warn=False)
+    return result.stdout
+
+
+def write_remote_file(
+    c: Connection, content: str, path: str, mode: str | None = None
+) -> None:
+    """Write `content` to `path` on the remote node as root; optionally chmod."""
+    c.sudo(f"tee {path} > /dev/null", in_stream=io.StringIO(content), hide=True)
+    if mode:
+        c.sudo(f"chmod {mode} {path}", hide=True)
+
+
+def resolve_node_name(node_ip: str, wait_for: float = 0.0) -> str | None:
+    """Return the k8s node name whose status.addresses contains `node_ip`.
+
+    With `wait_for > 0`, poll the API server for that many seconds before giving up.
+    Returns None if the node is not found within the window.
+    """
+    deadline = time.monotonic() + wait_for
+    while True:
+        result = subprocess.run(
+            ["kubectl", "get", "nodes", "-o", "json"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            for item in data["items"]:
+                for addr in item["status"]["addresses"]:
+                    if addr["address"] == node_ip:
+                        return item["metadata"]["name"]
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(2)
+
+
+def kubectl(
+    *args: str, check: bool = True, input: str | None = None, capture: bool = True
+) -> str:
+    result = subprocess.run(
+        ["kubectl", *args], input=input, capture_output=capture, text=True,
+    )
+    if check and result.returncode != 0:
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="")
+        result.check_returncode()
+    return result.stdout if capture else ""

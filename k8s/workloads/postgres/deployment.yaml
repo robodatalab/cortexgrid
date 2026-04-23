@@ -16,7 +16,7 @@ spec:
         app: postgres
     spec:
       nodeSelector:
-        kubernetes.io/arch: amd64
+        role: head
       containers:
         - name: postgres
           image: postgres:15-alpine

@@ -14,7 +14,7 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. All 
   |                              |                   |
   |                     VPC [ RDS + NAT ]            |
   |                                                  |
-  |  Secrets Manager (robolab/auth/*, robolab/infra/*)|
+  |  Secrets Manager (robolab/auth/*, robolab/infra/*) |
   |       ^                                          |
   |       |  OIDC                                    |
   |  GitHub Actions                                  |
@@ -51,28 +51,33 @@ See [cortexflow/README.md](cortexflow/README.md) for full reference
 
 ### Setup
 
-**Prerequisites:** Mac and DGX on the same Tailscale network. DGX has `nvidia-container-toolkit` installed. Mac has `uv`, `kubectl`, `sshpass`, and AWS credentials with access to `robolab/*` secrets.
+**Prerequisites:** Mac and cluster nodes on the same Tailscale network. Mac has `uv`, `kubectl`, and AWS credentials with access to `robolab/*` secrets. A `.env` file at the repo root with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GH_TOKEN`.
 
-One-shot seed (run once per DGX lifetime):
-
-```bash
-bash k8s/seed/setup-dgx.sh
-```
-
-That script installs k3s on the DGX, drops [k8s/argocd.yaml](k8s/argocd.yaml) onto the cluster, publishes [k8s/seed/.env](k8s/seed/.env) entries to AWS Secrets Manager under `robolab/argocd/*`, and merges the DGX kubeconfig into `~/.kube/config` as context `dgx`. Argo CD then reconciles everything under [k8s/argo-deployments/](k8s/argo-deployments/) from `main`. After seeding, all changes flow through git pushes.
-
-Teardown (wipes the cluster):
+Seed the head node (once per cluster lifetime):
 
 ```bash
-bash k8s/seed/teardown-dgx.sh
+make setup-head IP=<tailscale-ip> STORAGE_PATH=/path/to/hdd [SSH_USER=<user>]
 ```
+
+Seed a worker (after the head is up, or before — worker installs a systemd timer that joins once the head appears):
+
+```bash
+make setup-worker IP=<tailscale-ip> [SSH_USER=<user>]
+```
+
+Teardown (any node):
+
+```bash
+make teardown-node IP=<tailscale-ip> [SSH_USER=<user>]
+```
+
+`setup-head` installs k3s, stages [k8s/argocd.yaml](k8s/argocd.yaml), publishes `.env` entries and the k3s token to AWS Secrets Manager under `robolab/infra/*`, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo-deployments/](k8s/argo-deployments/) from `main`. Topology is recorded in [infra-config.yaml](infra-config.yaml) at the repo root.
 
 ### Secrets management
 
-Two independent paths, both backed by AWS Secrets Manager:
+One namespace, backed by AWS Secrets Manager:
 
-- **Cluster bootstrap** — `robolab/argocd/*` → [External Secrets Operator](k8s/argo-deployments/secrets/) materializes k8s Secrets (GHCR pull, repo clone creds, etc.).
-- **Application code** — `robolab/infra/*` → `cortexflow.secrets` reads directly from AWS SM at runtime.
+- **`robolab/infra/*`** → written by `setup-node` from `.env`; read at cluster level by [External Secrets Operator](k8s/argo-deployments/secrets/) (which materializes k8s Secrets for GHCR pull, repo clone creds, AWS access) and at application level by [`cortexflow.secrets`](cortexflow/secrets.py).
 
 ## Website infrastructure
 

@@ -12,7 +12,7 @@ spec:
   valuesContent: |-
     global:
       nodeSelector:
-        kubernetes.io/arch: amd64
+        role: head
     server:
       extraArgs:
         - --insecure

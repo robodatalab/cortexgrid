@@ -13,7 +13,7 @@ spec:
         app: mlflow
     spec:
       nodeSelector:
-        kubernetes.io/arch: amd64
+        role: head
       imagePullSecrets:
         - name: ghcr-pull
       containers:

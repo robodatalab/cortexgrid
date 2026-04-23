@@ -13,13 +13,13 @@ How the Ray head runs inside Kubernetes. Applied by the Argo Application at [../
 - **`imagePullSecrets: ghcr-pull`** — reflected into the namespace by reflector, allows pulling the private image.
 - **`imagePullPolicy: Always`** — every new pod re-pulls `:latest` so CI builds take effect.
 - **`livenessProbe: ray status`** — if `ray status` fails for 30s, k8s kills the pod; the Deployment replaces it.
-- **No workers** — single-node on DGX. When workers arrive (AWS), we'll switch to KubeRay (see the argo-deployments README).
+- **Workers via DaemonSet** — one `ray-worker` pod per cluster node (head + workers), each requesting 1 GPU. All pods register against `ray-head.ray.svc.cluster.local:6379` and share one GPU pool.
 
 ## Files
 
 - **deployment.yaml** — the `Deployment` described above.
 - **service.yaml** — `NodePort` Service exposing dashboard (`:30265`), Ray client (`:30001`), GCS (internal only), metrics (internal only, scraped via PodMonitor).
-- **secrets.yaml** — `ExternalSecret` that templates a Secret containing the three `RAY_*` env vars. Pulls `DGX_TAILSCALE_IP` from Secrets Manager and composes URLs from it.
+- **secrets.yaml** — `ExternalSecret` that templates a Secret containing the three `RAY_*` env vars. Pulls `CONTROL_PLANE_TAILSCALE_IP` from Secrets Manager and composes URLs from it.
 - **metrics.yaml** — `PodMonitor` telling Prometheus to scrape pods with label `app: ray-head` on port `metrics` (8080) every 15s.
 
 ## Port map
