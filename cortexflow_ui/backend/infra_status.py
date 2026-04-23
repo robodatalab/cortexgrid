@@ -10,6 +10,8 @@ from pydantic import BaseModel
 class PodStatus(BaseModel):
     name: str
     namespace: str
+    kind: str = "pod"
+    node: str | None = None
     state: str
     health: str
     healthy: bool
@@ -57,6 +59,7 @@ def _pod_to_status(pod, v1: client.CoreV1Api) -> PodStatus:
     return PodStatus(
         name=pod.metadata.name,
         namespace=pod.metadata.namespace,
+        node=pod.spec.node_name,
         state=pod.status.phase or "Unknown",
         health=health,
         healthy=healthy,

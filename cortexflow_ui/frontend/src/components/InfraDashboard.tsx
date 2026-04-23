@@ -5,6 +5,8 @@ import './InfraDashboard.css'
 type PodStatus = {
   name: string
   namespace: string
+  kind: string
+  node: string | null
   state: string
   health: string
   healthy: boolean
@@ -48,14 +50,14 @@ function useInfraStatus(): LoadState {
 }
 
 function PodCard({ p }: { p: PodStatus }) {
+  const heartClass = p.healthy ? 'infra-card__heart--ok' : 'infra-card__heart--bad'
   return (
-    <TitledFrame
-      title={p.name}
-      titleClassName={`infra-card__title--${p.healthy ? 'ok' : 'bad'}`}
-    >
+    <TitledFrame title={p.name}>
       <div className="infra-card__meta">
+        <span className={`infra-card__heart ${heartClass}`}>♥</span>
         <span>state: {p.state}</span>
         <span>health: {p.health}</span>
+        <span>node: {p.node ?? '—'}</span>
       </div>
       {p.logs && (
         <details className="infra-card__logs">
@@ -63,6 +65,9 @@ function PodCard({ p }: { p: PodStatus }) {
           <pre>{p.logs}</pre>
         </details>
       )}
+      <div className="infra-card__footer">
+        <span className="infra-card__kind">{p.kind}</span>
+      </div>
     </TitledFrame>
   )
 }
