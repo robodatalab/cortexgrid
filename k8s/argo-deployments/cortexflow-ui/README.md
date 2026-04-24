@@ -19,4 +19,4 @@ FastAPI can serve a built SPA, but splitting them keeps CI triggers narrow: a Ty
 - **Ray** ([../ray/](../ray/)) — source of job status and logs. Accessed at `http://ray-head.ray.svc.cluster.local:8265`.
 - **MinIO** ([../minio/](../minio/)) — artifact bucket read-through. Accessed at `http://minio.minio.svc.cluster.local:9000`.
 - **Reflector** ([../secrets/](../secrets/)) — mirrors `aws-creds` (for `cortexflow.secrets`) and `ghcr-pull` (to pull the private images) into this namespace.
-- **External Secrets Operator** ([../secrets/](../secrets/)) — materializes `cortexflow-ui-public-urls` from `DGX_TAILSCALE_IP` at `robolab/infra/*`.
+- **External Secrets Operator** ([../secrets/](../secrets/)) — materializes `cortexflow-ui-public-urls` from `CONTROL_PLANE_TAILSCALE_IP` at `robolab/infra/*`.

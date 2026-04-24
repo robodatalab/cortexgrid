@@ -12,9 +12,9 @@ Training code needs a distributed compute runtime that can place tasks across CP
 
 The recommended production way to run Ray on k8s is the [KubeRay operator](https://github.com/ray-project/kuberay): a `RayCluster` CRD that spawns head and worker pods, autoscales workers, and handles lifecycle. We deliberately chose NOT to use it **yet** because:
 
-- On the DGX today we run a **single-node** Ray — head only, zero workers. All of KubeRay's payoff (worker scaling, multi-node orchestration, autoscaling, failover) is unused.
+- Our topology is fixed: one head on the head node, one worker per cluster node (DaemonSet). No autoscaling, no elastic worker groups — none of KubeRay's payoff is exercised.
 - KubeRay adds two Helm charts (operator + ray-cluster), a CRD, and the "chart values can't add arbitrary resources" problem — which forced a second Argo Application just for our ExternalSecret + PodMonitor.
-- A plain `Deployment` + `Service` does the exact same job on the DGX with much less machinery.
+- A plain `Deployment` + `DaemonSet` does the exact same job with much less machinery.
 
 ## The AWS migration plan
 
@@ -25,7 +25,7 @@ When we add AWS and want real workers / GPU scaling:
 3. The existing [secrets.yaml](../../workloads/ray/secrets.yaml) (env Secret) and [metrics.yaml](../../workloads/ray/metrics.yaml) (PodMonitor) stay put; they reference the cluster by pod label, which we update to match KubeRay's scheme.
 4. The image [ghcr.io/paksas/ray-head](../../docker/ray/) stays the same — KubeRay invokes `ray start` itself, which our image supports (ray installed via pip on top of `python:3.11-slim`, no custom entrypoint).
 
-The DGX deployment can either stay on raw manifests forever (head-only doesn't need KubeRay) or migrate to KubeRay if we ever want the DGX to run workers.
+The on-prem deployment can stay on raw manifests (the fixed head + DaemonSet-worker shape doesn't need KubeRay) or migrate to KubeRay if we ever want autoscaling worker groups.
 
 ## Dependencies
 

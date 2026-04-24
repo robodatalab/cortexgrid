@@ -18,7 +18,7 @@ FastAPI can serve the built frontend via `StaticFiles` (the code at [`cortexflow
 - **deployment-backend.yaml** — backend `Deployment`. Runs as the `cortexflow-ui-backend` ServiceAccount (see role-based-access-control.yaml). `envFrom` pulls `aws-creds` (reflector-mirrored) and `cortexflow-ui-public-urls` (templated below). HTTP `/health` probe.
 - **deployment-frontend.yaml** — frontend `Deployment`. Pure nginx — no env, no secrets. Probe on `GET /`.
 - **service.yaml** — `cortexflow-ui-backend` `ClusterIP:8000` (not browser-reachable on purpose), `cortexflow-ui-frontend` `NodePort:30088`.
-- **secrets.yaml** — `ExternalSecret` `cortexflow-ui-public-urls` templates `PUBLIC_MLFLOW_URL` / `PUBLIC_RAY_DASHBOARD_URL` / `PUBLIC_MINIO_CONSOLE_URL` as `http://<DGX_TAILSCALE_IP>:<NodePort>`. The backend reads these and returns them verbatim from `/api/dashboards` to the browser. `DGX_TAILSCALE_IP` comes from AWS SM (`robolab/infra/DGX_TAILSCALE_IP`).
+- **secrets.yaml** — `ExternalSecret` `cortexflow-ui-public-urls` templates `PUBLIC_MLFLOW_URL` / `PUBLIC_RAY_DASHBOARD_URL` / `PUBLIC_MINIO_CONSOLE_URL` as `http://<CONTROL_PLANE_TAILSCALE_IP>:<NodePort>`. The backend reads these and returns them verbatim from `/api/dashboards` to the browser. `CONTROL_PLANE_TAILSCALE_IP` comes from AWS SM (`robolab/infra/CONTROL_PLANE_TAILSCALE_IP`).
 - **role-based-access-control.yaml** — `ServiceAccount` `cortexflow-ui-backend` + cluster-wide `ClusterRole`/`ClusterRoleBinding` granting `get`/`list` on `pods` and `get` on `pods/log`. Powers `/api/infra/status`, which queries the Kubernetes API to report pod health across every namespace for the Infrastructure dashboard.
 
 ## Two kinds of URLs
@@ -28,7 +28,7 @@ The backend deals with two orthogonal sets of URLs:
 - **In-cluster** (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `AWS_S3_ENDPOINT_URL`) — where the backend talks to Ray/MLflow/MinIO. Plain env vars on the Deployment, point at `*.svc.cluster.local`.
 - **Browser-facing** (`PUBLIC_*_URL`) — what the UI hands back to the user's browser so they can open the MLflow/Ray/MinIO dashboards in a tab. `http://<DGX_IP>:<NodePort>`, reachable over Tailscale.
 
-Keeping them separate means the in-cluster wiring can ignore Tailscale entirely, and the Tailscale-facing URLs only depend on one external input (`DGX_TAILSCALE_IP`), templated once by ESO.
+Keeping them separate means the in-cluster wiring can ignore Tailscale entirely, and the Tailscale-facing URLs only depend on one external input (`CONTROL_PLANE_TAILSCALE_IP`), templated once by ESO.
 
 ## Port map
 

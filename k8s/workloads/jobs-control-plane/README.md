@@ -11,10 +11,10 @@ How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo 
 - **`imagePullPolicy: Always`** — on every new pod, k8s re-pulls the image (so `:latest` actually gets the latest build).
 - **`strategy: Recreate`** — enforces the singleton. The old pod terminates before the new one starts, so there's never more than one poller. Brief downtime during rollouts is acceptable; duplicate scheduling is not.
 - **`revisionHistoryLimit: 1`** — CI bumps the image tag on every build; without this the cluster accumulates dozens of stale ReplicaSets.
-- **`nodeSelector: kubernetes.io/arch: amd64`** — pins to P5. See [../../README.md](../../README.md) for the cluster-wide placement policy.
+- **`nodeSelector: role: head`** — pins to the head node. See [../../README.md](../../README.md) for the cluster-wide placement policy.
 - **Env vars** — MLflow URL, Ray URL, poll interval, AWS creds (via `envFrom` secret).
 - **`imagePullSecrets: ghcr-pull`** — the pull secret reflected into the namespace.
 
 ## Files
 
-- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../seed/setup-dgx.sh) (seeded by `setup-dgx.sh`, mirrored everywhere by [reflector](../../argo-deployments/secrets/reflector/)).
+- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../seed/setup-node.py) (seeded by `setup-node.py`, mirrored everywhere by [reflector](../../argo-deployments/secrets/reflector/)).

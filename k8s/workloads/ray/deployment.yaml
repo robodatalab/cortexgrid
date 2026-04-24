@@ -19,7 +19,7 @@ spec:
     spec:
       runtimeClassName: nvidia
       nodeSelector:
-        tier: main
+        role: head
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -84,8 +84,6 @@ spec:
         app: ray-worker
     spec:
       runtimeClassName: nvidia
-      nodeSelector:
-        tier: dev
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -95,16 +93,16 @@ spec:
             requests:
               cpu: "1"
               memory: 4Gi
-              nvidia.com/gpu: "2"
+              nvidia.com/gpu: "1"
             limits:
               cpu: "8"
               memory: 32Gi
-              nvidia.com/gpu: "2"
+              nvidia.com/gpu: "1"
           command:
             - ray
             - start
             - --address=ray-head.ray.svc.cluster.local:6379
-            - --num-gpus=2
+            - --num-gpus=1
             - --block
           env:
             - name: MLFLOW_TRACKING_URI

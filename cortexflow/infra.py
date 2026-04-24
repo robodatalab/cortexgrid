@@ -13,12 +13,11 @@ MINIO_API_NODEPORT = 30900
 
 
 def get_server_ip() -> str:
-    dgx_ip = get_secret("DGX_TAILSCALE_IP")
-    return dgx_ip
+    return get_secret("CONTROL_PLANE_TAILSCALE_IP")
 
 
 def get_mlflow_run_url(run_id: str) -> str:
-    """Build the URL to view a run in the MLflow UI (always via DGX tailscale IP)."""
+    """Build the URL to view a run in the MLflow UI (always via control-plane tailscale IP)."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     run = client.get_run(run_id)
     server_ip = get_server_ip()

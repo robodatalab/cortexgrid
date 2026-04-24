@@ -29,7 +29,7 @@ import cortexflow
 cortexflow.init(experiment="weather-forecast")
 ```
 
-That single call fetches `DGX_TAILSCALE_IP` from AWS Secrets Manager (using your local AWS credentials) and connects to all services via its Tailscale-derived URLs. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
+That single call fetches `CONTROL_PLANE_TAILSCALE_IP` from AWS Secrets Manager (using your local AWS credentials) and connects to all services via its Tailscale-derived URLs. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
 
 **One experiment per binary run.** `cortexflow.init()` may only be called once per process. Every subsequent `cortexflow.log_metric`, `cortexflow.log_artifact`, checkpoint, and `cortexflow.remote()` submission is scoped to that experiment+run. Remote jobs dispatched by the control plane inherit the experiment+run via the pickled payload, so their logging flows into the same MLflow run as the parent binary.
 

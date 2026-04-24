@@ -16,7 +16,7 @@ spec:
         app: cortexflow-ui-backend
     spec:
       nodeSelector:
-        kubernetes.io/arch: amd64
+        role: head
       serviceAccountName: cortexflow-ui-backend
       imagePullSecrets:
         - name: ghcr-pull
