@@ -43,15 +43,37 @@ class FakeMLflow:
         return str(local)
 
 
+class FakeS3:
+    """Fake s3_util backed by a temp directory."""
+
+    def __init__(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+
+    def upload(self, local_path: str, bucket: str | None = None, key: str | None = None) -> str:
+        bucket = bucket or "ray-checkpoints"
+        key = key or Path(local_path).name
+        dest = self.root / bucket / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_path, dest)
+        return f"s3://{bucket}/{key}"
+
+    def download(self, bucket: str, key: str, local_path: str | None = None) -> str:
+        local_path = local_path or Path(key).name
+        shutil.copy2(self.root / bucket / key, local_path)
+        return local_path
+
+
 class TestCheckpointPrefix(unittest.TestCase):
     
     def setUp(self) -> None:
         clear_instance()
         set_instance(_make_experiment())
         self.fake_mlflow = FakeMLflow()
+        self.fake_s3 = FakeS3()
         patchers = [
             patch("cortexflow.checkpoint.MlflowClient", return_value=self.fake_mlflow),
             patch("cortexflow.checkpoint.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch("cortexflow.checkpoint.s3_util", self.fake_s3),
         ]
         for p in patchers:
             p.start()
@@ -80,8 +102,10 @@ class TestCheckpointPrefix(unittest.TestCase):
         self.assertIn("epoch", manifest["attrs"])
         self.assertIn("lr", manifest["attrs"])
 
-        epoch_file = self.fake_mlflow.root / prefix / manifest["attrs"]["epoch"]["file"]
-        self.assertTrue(epoch_file.exists())
+        uri = manifest["attrs"]["epoch"]["uri"]
+        self.assertTrue(uri.startswith("s3://"))
+        bucket, _, key = uri.removeprefix("s3://").partition("/")
+        self.assertTrue((self.fake_s3.root / bucket / key).exists())
 
     def test_load_restores_attributes(self) -> None:
         with checkpoint() as ckpt:

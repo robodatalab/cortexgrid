@@ -31,6 +31,7 @@ import cloudpickle  # type: ignore
 import torch
 from mlflow.tracking import MlflowClient
 
+from cortexflow import s3_util
 from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
 
 log = logging.getLogger(__name__)
@@ -143,7 +144,7 @@ class Checkpoint:
             self._persist()
 
     def _persist(self) -> None:
-        """Serialize each attribute and upload via MLflow artifacts."""
+        """Upload attr blobs to MinIO; log manifest.json via MLflow."""
         exp = Experiment.get_instance()
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         tmpdir = Path(tempfile.mkdtemp())
@@ -154,8 +155,8 @@ class Checkpoint:
             data, fmt = _serialize(value)
             filename = f"{name}{_ext_for(fmt)}"
             (tmpdir / filename).write_bytes(data)
-            client.log_artifact(exp.run_id, str(tmpdir / filename), artifact_path=self._prefix)
-            manifest["attrs"][name] = {"file": filename, "format": fmt}
+            uri = s3_util.upload(str(tmpdir / filename), key=f"{self._prefix}/{filename}")
+            manifest["attrs"][name] = {"uri": uri, "format": fmt}
 
         (tmpdir / "manifest.json").write_text(json.dumps(manifest))
         client.log_artifact(exp.run_id, str(tmpdir / "manifest.json"), artifact_path=self._prefix)
@@ -163,7 +164,7 @@ class Checkpoint:
 
     @classmethod
     def _load(cls, prefix: str) -> Checkpoint | None:
-        """Download and deserialize a checkpoint from MLflow artifacts."""
+        """Download manifest via MLflow; download attr blobs from MinIO."""
         exp = Experiment.get_instance()
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
@@ -174,9 +175,11 @@ class Checkpoint:
             return None
 
         data: dict[str, Any] = {}
+        tmpdir = Path(tempfile.mkdtemp())
         for name, info in manifest["attrs"].items():
             try:
-                file_path = client.download_artifacts(exp.run_id, f"{prefix}/{info['file']}")
+                bucket, _, key = info["uri"].removeprefix("s3://").partition("/")
+                file_path = s3_util.download(bucket, key, str(tmpdir / Path(key).name))
                 raw = Path(file_path).read_bytes()
                 data[name] = _deserialize(raw, info["format"])
             except Exception:
