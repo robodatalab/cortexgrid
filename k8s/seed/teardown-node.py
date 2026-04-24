@@ -104,10 +104,16 @@ def main() -> None:
     if node_name:
         subprocess.run(["kubectl", "delete", "node", node_name], check=False)
 
-    cluster_info = subprocess.run(["kubectl", "cluster-info"], capture_output=True)
-    head_gone = cluster_info.returncode != 0
+    # Probe the robolab context specifically. The current kubectl context may point
+    # at an unrelated cluster (e.g. docker-desktop), so `kubectl cluster-info` without
+    # --context would falsely report the robolab head is alive.
+    cluster_info = subprocess.run(
+        ["kubectl", "--context", util.KUBE_CONTEXT, "cluster-info"],
+        capture_output=True,
+    )
+    cluster_gone = cluster_info.returncode != 0
 
-    if head_gone or role == "head":
+    if cluster_gone or role == "head":
         for verb in ("delete-context", "delete-cluster", "delete-user"):
             subprocess.run(
                 ["kubectl", "config", verb, util.KUBE_CONTEXT],
