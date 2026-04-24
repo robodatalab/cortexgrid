@@ -32,8 +32,10 @@ class K3sServer(Operator):
         node_ip = deps["node_ip"]
         log.info(f"Installing k3s server on {c.host} + staging argocd bootstrap...")
         bootstrap_b64 = base64.b64encode(bootstrap_file.read_bytes()).decode()
-        # `tls-san` tells k3s to include node_ip in the API server's TLS cert
-        # SANs; without it, kubectl over Tailscale fails verification.
+        # `tls-san` adds node_ip to the API server's TLS cert SANs.
+        # `node-ip` tells k3s to register the node under node_ip instead of the
+        # default LAN interface; otherwise pod networking and every script
+        # that looks up the node by Tailscale IP (await_node) misses it.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
@@ -43,6 +45,7 @@ class K3sServer(Operator):
             cat > /etc/rancher/k3s/config.yaml <<EOF
 tls-san:
   - {node_ip}
+node-ip: {node_ip}
 EOF
             if [[ ! -x /usr/local/bin/k3s ]]; then
                 curl -sfL https://get.k3s.io | sh -
