@@ -48,9 +48,13 @@ def set_secret(id: str, value: str) -> None:
 
 
 def delete_secret(id: str) -> None:
+    """Idempotent: already-gone is treated as success, matching HTTP DELETE semantics."""
     client = boto3.client("secretsmanager", region_name=_SM_REGION)
     secret_id = f"{_SM_PREFIX}/{id}"
-    client.delete_secret(SecretId=secret_id, ForceDeleteWithoutRecovery=True)
+    try:
+        client.delete_secret(SecretId=secret_id, ForceDeleteWithoutRecovery=True)
+    except client.exceptions.ResourceNotFoundException:
+        return
     deadline = time.monotonic() + _DELETE_WAIT_TIMEOUT_S
     while time.monotonic() < deadline:
         try:
