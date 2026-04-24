@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import tarfile
 import tempfile
 import unittest
 from concurrent.futures import Future
@@ -83,18 +85,42 @@ class FakeMLflow:
         job_id: str,
         lifecycle: JobLifecycle,
         payload: Payload | None = None,
+        fake_s3: "FakeS3 | None" = None,
     ) -> None:
         job_dir = self.artifact_root / "job" / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         (job_dir / "lifecycle.json").write_text(lifecycle.to_json())
         if payload is not None:
-            project_dest = job_dir / "project_code_root"
-            shutil.copytree(
-                payload.project_code_root,
-                str(project_dest),
-                dirs_exist_ok=True,
-            )
+            assert fake_s3 is not None, "fake_s3 is required when seeding a payload"
+            staging = Path(tempfile.mkdtemp())
+            project_dest = staging / "project_code_root"
+            shutil.copytree(payload.project_code_root, str(project_dest), dirs_exist_ok=True)
             (project_dest / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
+            tarball = staging / "project_code_root.tar.gz"
+            with tarfile.open(tarball, "w:gz") as tar:
+                tar.add(str(project_dest), arcname="project_code_root")
+            uri = fake_s3.upload(str(tarball), key=f"job/{job_id}/project_code_root.tar.gz")
+            (job_dir / "manifest.json").write_text(json.dumps({"code_tarball_uri": uri}))
+
+
+class FakeS3:
+    """Fake s3_util backed by a temp directory."""
+
+    def __init__(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+
+    def upload(self, local_path: str, bucket: str | None = None, key: str | None = None) -> str:
+        bucket = bucket or "ray-checkpoints"
+        key = key or Path(local_path).name
+        dest = self.root / bucket / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_path, dest)
+        return f"s3://{bucket}/{key}"
+
+    def download(self, bucket: str, key: str, local_path: str | None = None) -> str:
+        local_path = local_path or Path(key).name
+        shutil.copy2(self.root / bucket / key, local_path)
+        return local_path
 
 
 class TestMatchRayJobsToCortexflowJobs(unittest.TestCase):
@@ -478,6 +504,7 @@ class TestSubmitJobWorker(unittest.TestCase):
 
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
+        self.fake_s3 = FakeS3()
         self.submitted: list[dict[str, Any]] = []
         self.project_root = Path(tempfile.mkdtemp())
         (self.project_root / "pyproject.toml").write_text("[project]\nname='t'\n")
@@ -493,6 +520,7 @@ class TestSubmitJobWorker(unittest.TestCase):
                 "cortexflow.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
+            patch("cortexflow.jobs.s3_util", self.fake_s3),
             patch(
                 "jobs_control_plane.server.submit_ray_job",
                 side_effect=_submit_ray_job,
@@ -522,7 +550,7 @@ class TestSubmitJobWorker(unittest.TestCase):
                 kwargs={},
                 project_code_root=str(self.project_root),
             )
-        self.fake_mlflow.add_job(JOB_ID, lifecycle, payload)
+        self.fake_mlflow.add_job(JOB_ID, lifecycle, payload, fake_s3=self.fake_s3)
 
     def test_happy_path_submits_to_ray_with_attempt_suffix(self) -> None:
         self._seed()
