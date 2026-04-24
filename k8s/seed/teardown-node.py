@@ -29,8 +29,11 @@ from k8s.seed import util
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Tear down a robolab cluster node.")
     p.add_argument("--ip", required=True)
-    p.add_argument("--ssh-user", default=getpass.getuser())
-    return p.parse_args()
+    p.add_argument("--ssh-user", default=None)
+    args = p.parse_args()
+    if args.ssh_user is None:
+        args.ssh_user = util.ssh_user_for_ip(args.ip) or getpass.getuser()
+    return args
 
 
 def wipe_node(c: Connection) -> None:

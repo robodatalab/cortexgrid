@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml  # type: ignore
 from fabric import Connection  # type: ignore
-from paramiko import AutoAddPolicy  # type: ignore
+from paramiko import AutoAddPolicy, SSHConfig  # type: ignore
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,16 +44,29 @@ def save_config(cfg: dict) -> None:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
 
+def ssh_user_for_ip(ip: str) -> str | None:
+    """Look up the SSH user for `ip` in ~/.ssh/config by matching HostName entries."""
+    path = Path.home() / ".ssh" / "config"
+    if not path.exists():
+        return None
+    cfg = SSHConfig.from_path(str(path))
+    for host in cfg.get_hostnames():
+        if host == "*":
+            continue
+        opts = cfg.lookup(host)
+        if opts.get("hostname") == ip and opts.get("user"):
+            return opts["user"]
+    return None
+
+
 def connect(user: str, ip: str, password: str) -> Connection:
-    """Open a Fabric SSH connection with password auth + auto-add host key + sudo password."""
+    """Open a Fabric SSH connection. Paramiko tries SSH agent + key files first; if
+    none authenticate, falls back to the supplied password. Same password is reused
+    for sudo on the remote."""
     c = Connection(
         host=ip,
         user=user,
-        connect_kwargs={
-            "password": password,
-            "look_for_keys": False,
-            "allow_agent": False,
-        },
+        connect_kwargs={"password": password},
     )
     c.config.sudo.password = password
     c.client.set_missing_host_key_policy(AutoAddPolicy())

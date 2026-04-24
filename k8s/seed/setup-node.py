@@ -46,13 +46,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--storage-path", help="Required for --type=head; rejected for --type=worker"
     )
-    p.add_argument("--ssh-user", default=getpass.getuser())
+    p.add_argument("--ssh-user", default=None)
     args = p.parse_args()
 
     if args.type == "head" and not args.storage_path:
         p.error("--storage-path is required when --type=head")
     if args.type == "worker" and args.storage_path:
         p.error("--storage-path is only valid when --type=head")
+
+    if args.ssh_user is None:
+        args.ssh_user = util.ssh_user_for_ip(args.ip) or getpass.getuser()
 
     return args
 
