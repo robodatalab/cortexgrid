@@ -11,7 +11,6 @@ import logging
 import shlex
 import subprocess
 import textwrap
-import time
 
 import yaml  # type: ignore
 
@@ -29,15 +28,20 @@ class LocalPath(Operator):
         log.info(
             f"Configuring local-path-provisioner to use {storage_path} on {node_ip}..."
         )
-        while True:
+
+        def _configmap_ready() -> tuple[bool, str]:
             result = subprocess.run(
                 ["kubectl", "-n", "kube-system", "get", "cm", "local-path-config"],
                 capture_output=True,
                 text=True,
             )
-            if result.returncode == 0:
-                break
-            time.sleep(2)
+            return result.returncode == 0, result.stderr
+
+        util.poll_until(
+            _configmap_ready,
+            "local-path-config configmap in kube-system",
+            timeout_s=60,
+        )
         node_name = util.await_node(node_ip)
         config_json = json.dumps(
             {

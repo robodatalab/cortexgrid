@@ -13,6 +13,7 @@ import sys
 import textwrap
 import time
 import uuid
+from typing import Callable
 
 import yaml  # type: ignore
 from fabric import Connection  # type: ignore
@@ -142,13 +143,47 @@ def write_remote_file(
         c.sudo(f"chmod {mode} {path}", hide=True)
 
 
+def poll_until(
+    check: Callable[[], tuple[bool, str]],
+    description: str,
+    timeout_s: float = 60.0,
+    poll_s: float = 2.0,
+) -> None:
+    """Poll `check()` every `poll_s` seconds until it returns (True, _) or
+    `timeout_s` elapses. On timeout, raises TimeoutError with the last error
+    string returned by `check()` — so a consistently-failing probe surfaces
+    loudly instead of spinning silently forever.
+
+    `check()` returns (ok: bool, last_error: str). The caller decides which
+    probe failures are retryable vs. hard — poll_until just times-them-out.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_error = "(probe never ran)"
+    while time.monotonic() < deadline:
+        ok, last_error = check()
+        if ok:
+            return
+        time.sleep(poll_s)
+    raise TimeoutError(
+        f"{description}: timed out after {timeout_s:.0f}s.\n"
+        f"Last error:\n{last_error}"
+    )
+
+
 def resolve_node_name(node_ip: str, wait_for: float = 0.0) -> str | None:
     """Return the k8s node name whose status.addresses contains `node_ip`.
 
     With `wait_for > 0`, poll the API server for that many seconds before giving up.
-    Returns None if the node is not found within the window.
+    Returns None if the node is genuinely not in the cluster within the window.
+
+    Raises RuntimeError if `kubectl get nodes` fails consistently for the whole
+    window — a broken API / TLS / auth error is a different failure mode from
+    "node hasn't registered yet" and must surface loudly rather than masquerade
+    as a missing node.
     """
     deadline = time.monotonic() + wait_for
+    kubectl_ever_succeeded = False
+    last_error = ""
     while True:
         result = subprocess.run(
             ["kubectl", "get", "nodes", "-o", "json"],
@@ -156,12 +191,20 @@ def resolve_node_name(node_ip: str, wait_for: float = 0.0) -> str | None:
             text=True,
         )
         if result.returncode == 0:
+            kubectl_ever_succeeded = True
             data = json.loads(result.stdout)
             for item in data["items"]:
                 for addr in item["status"]["addresses"]:
                     if addr["address"] == node_ip:
                         return item["metadata"]["name"]
+        else:
+            last_error = result.stderr
         if time.monotonic() >= deadline:
+            if wait_for > 0 and not kubectl_ever_succeeded:
+                raise RuntimeError(
+                    f"kubectl get nodes failed consistently for {wait_for:.0f}s "
+                    f"(cluster unreachable / TLS / auth). Last error:\n{last_error}"
+                )
             return None
         time.sleep(2)
 

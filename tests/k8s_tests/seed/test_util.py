@@ -129,6 +129,49 @@ class TestResolveNodeName(unittest.TestCase):
             self.assertEqual(util.resolve_node_name(ip), "the-node")
 
 
+class TestPollUntil(unittest.TestCase):
+    """poll_until surfaces a persistent probe failure as TimeoutError with
+    the last error message — instead of spinning silently forever."""
+
+    def test_returns_when_check_eventually_ok(self) -> None:
+        calls = {"n": 0}
+
+        def check():
+            calls["n"] += 1
+            return (calls["n"] >= 2, "not yet")
+
+        with patch("time.sleep"):
+            util.poll_until(check, "thing", timeout_s=10, poll_s=0.01)
+        self.assertEqual(calls["n"], 2)
+
+    def test_raises_timeout_with_last_error(self) -> None:
+        def check():
+            return False, "TLS: bad cert"
+
+        with patch("time.sleep"):
+            with self.assertRaises(TimeoutError) as ctx:
+                util.poll_until(check, "argocd", timeout_s=0.01, poll_s=0.01)
+        self.assertIn("argocd", str(ctx.exception))
+        self.assertIn("TLS: bad cert", str(ctx.exception))
+
+
+class TestResolveNodeNameKubectlBroken(unittest.TestCase):
+    """resolve_node_name distinguishes 'kubectl broken' from 'node not there'.
+    With wait_for>0, a consistent kubectl failure must raise, not return None."""
+
+    def test_raises_when_kubectl_never_succeeded_and_waited(self) -> None:
+        fail = MagicMock()
+        fail.returncode = 1
+        fail.stdout = ""
+        fail.stderr = "x509: certificate invalid"
+        with patch("subprocess.run", return_value=fail):
+            with patch("time.sleep"):
+                with self.assertRaises(RuntimeError) as ctx:
+                    util.resolve_node_name("10.0.0.99", wait_for=0.01)
+        self.assertIn("kubectl", str(ctx.exception))
+        self.assertIn("x509", str(ctx.exception))
+
+
 class TestCheckpointStepDone(unittest.TestCase):
     """checkpoint_step_done tracks pipeline progress on the node entry.
 
