@@ -28,7 +28,7 @@ KUBE_CONTEXT = "robolab"
 SECRET_K3S_TOKEN = "K3S_NODE_TOKEN"
 SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
 
-JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.sh"
+JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.py"
 JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"
 JOIN_SERVICE_PATH = "/etc/systemd/system/robolab-join.service"
 JOIN_TIMER_PATH = "/etc/systemd/system/robolab-join.timer"
@@ -181,10 +181,6 @@ def install_prereqs(c: Connection) -> None:
             apt-get update
             apt-get install -y nvidia-container-toolkit
         fi
-        if ! command -v aws &>/dev/null; then
-            apt-get update
-            apt-get install -y awscli
-        fi
     """),
     )
 
@@ -201,7 +197,7 @@ def wipe_k3s_residue(c: Connection) -> None:
 
 
 def wipe_host_packages(c: Connection) -> None:
-    """Inverse of install_prereqs: remove nvidia-container-toolkit, awscli, apt entries."""
+    """Inverse of install_prereqs: remove nvidia-container-toolkit + apt entries."""
     log.info(f"Removing host prerequisites on {c.host}...")
     sudo_script(
         c,
@@ -209,9 +205,6 @@ def wipe_host_packages(c: Connection) -> None:
         set -euo pipefail
         if dpkg -l nvidia-container-toolkit &>/dev/null; then
             apt-get remove --purge -y nvidia-container-toolkit
-        fi
-        if dpkg -l awscli &>/dev/null; then
-            apt-get remove --purge -y awscli
         fi
         apt-get autoremove -y || true
         rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list

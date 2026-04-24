@@ -2,10 +2,14 @@
 
 Has two setup modes chosen at construction time:
   - mode="direct":   install k3s-agent now, pointing at the already-running head
-  - mode="deferred": drop a systemd timer that will join once the head appears
+  - mode="deferred": install python3-boto3 and drop a systemd timer that polls
+                     AWS SM; the timer runs scripts/robolab_join.py, which
+                     installs k3s-agent and self-removes once the head's
+                     token + IP appear in Secrets Manager.
 
-Teardown always runs both cleanups (uninstall k3s-agent + remove deferred timer);
-they're idempotent, and we may not know which setup path was actually used.
+Teardown always runs both cleanups (uninstall k3s-agent + remove deferred timer
+and python3-boto3); they're idempotent, and we may not know which setup path
+was actually used.
 
 Required deps (setup, mode="direct"):   connection, head_ip, head_token
 Required deps (setup, mode="deferred"): connection, aws_access_key_id, aws_secret_access_key
@@ -16,9 +20,13 @@ import logging
 import shlex
 import sys
 import textwrap
+from pathlib import Path
 
 from k8s.seed import util
 from k8s.seed.pipeline import Operator
+
+
+JOIN_SCRIPT_SRC = Path(__file__).resolve().parent.parent / "scripts" / "robolab_join.py"
 
 
 log = logging.getLogger("k8s.seed.operators.join_cluster")
@@ -66,32 +74,25 @@ class JoinCluster(Operator):
             f"This command will now exit; the worker will join automatically."
         )
 
-        join_script = textwrap.dedent(f"""\
-            #!/usr/bin/env bash
-            set -u
-            [ -f {util.JOIN_ENV_PATH} ] || exit 0
-            . {util.JOIN_ENV_PATH}
-            export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=us-east-1
+        # python3-boto3 is the external dep that lets the timer script query AWS SM.
+        util.sudo_script(
+            c,
+            textwrap.dedent("""\
+            set -euo pipefail
+            apt-get update
+            apt-get install -y python3-boto3
+        """),
+        )
 
-            TOKEN=$(aws secretsmanager get-secret-value --secret-id robolab/infra/{util.SECRET_K3S_TOKEN} --query SecretString --output text 2>/dev/null) || exit 0
-            HEAD_IP=$(aws secretsmanager get-secret-value --secret-id robolab/infra/{util.SECRET_CONTROL_PLANE_IP} --query SecretString --output text 2>/dev/null) || exit 0
-            [ -z "$TOKEN" ] || [ -z "$HEAD_IP" ] && exit 0
+        join_script = JOIN_SCRIPT_SRC.read_text()
 
-            curl -sfL https://get.k3s.io | K3S_URL="https://${{HEAD_IP}}:6443" K3S_TOKEN="$TOKEN" sh -
-
-            systemctl disable --now robolab-join.timer
-            rm -f {util.JOIN_ENV_PATH} {util.JOIN_SCRIPT_PATH} {util.JOIN_SERVICE_PATH} {util.JOIN_TIMER_PATH}
-            systemctl daemon-reload
-            echo "Joined robolab cluster."
-        """)
-
-        service_unit = textwrap.dedent("""\
+        service_unit = textwrap.dedent(f"""\
             [Unit]
             Description=robolab: join cluster when head is available
 
             [Service]
             Type=oneshot
-            ExecStart=/usr/local/bin/robolab-join.sh
+            ExecStart=/usr/bin/python3 {util.JOIN_SCRIPT_PATH}
         """)
 
         timer_unit = textwrap.dedent("""\
@@ -152,5 +153,6 @@ class JoinCluster(Operator):
             fi
             rm -f {util.JOIN_ENV_PATH} {util.JOIN_SCRIPT_PATH} {util.JOIN_SERVICE_PATH} {util.JOIN_TIMER_PATH}
             systemctl daemon-reload || true
+            apt-get remove --purge -y python3-boto3 || true
         """),
         )
