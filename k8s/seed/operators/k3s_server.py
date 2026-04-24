@@ -56,7 +56,11 @@ class K3sServer(Operator):
     def _await_bootstrap_applied(self, c) -> None:
         log.info("Waiting for k3s to apply the argocd bootstrap manifest...")
         while True:
-            result = c.sudo("k3s kubectl get ns argocd", hide=True, warn=True)
+            result = c.sudo(
+                "k3s kubectl -n argocd get deploy argocd-server",
+                hide=True,
+                warn=True,
+            )
             if result.ok:
                 break
             time.sleep(5)
