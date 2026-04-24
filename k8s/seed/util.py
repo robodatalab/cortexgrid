@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import yaml  # type: ignore
@@ -60,16 +61,32 @@ def connect(user: str, ip: str, password: str) -> Connection:
 
 
 def sudo_script(c: Connection, script: str, hide: bool | str = False) -> str:
-    """Pipe `script` to `sudo bash -s` on the remote and return stdout."""
-    result = c.sudo("bash -s", in_stream=io.StringIO(script), hide=hide, warn=False)
-    return result.stdout
+    """Upload `script` to a temp file on the remote, run it as root, return stdout.
+
+    Uploading via SFTP first avoids fabric's stdin race — piping a script through
+    `in_stream` while `sudo -S` is reading stdin for the password leads to the
+    script's first line being consumed as a password attempt.
+    """
+    tmp = f"/tmp/robolab-seed-{uuid.uuid4().hex}.sh"
+    c.put(io.BytesIO(script.encode()), remote=tmp)
+    try:
+        result = c.sudo(f"bash {tmp}", hide=hide, warn=False)
+        return result.stdout
+    finally:
+        c.sudo(f"rm -f {tmp}", hide=True, warn=True)
 
 
 def write_remote_file(
     c: Connection, content: str, path: str, mode: str | None = None
 ) -> None:
-    """Write `content` to `path` on the remote node as root; optionally chmod."""
-    c.sudo(f"tee {path} > /dev/null", in_stream=io.StringIO(content), hide=True)
+    """Write `content` to `path` on the remote as root; optionally chmod.
+
+    SFTP-upload to /tmp as the SSH user, then `sudo mv` into place. Avoids the
+    same stdin race that sudo_script avoids.
+    """
+    tmp = f"/tmp/robolab-file-{uuid.uuid4().hex}"
+    c.put(io.BytesIO(content.encode()), remote=tmp)
+    c.sudo(f"mv {tmp} {path}", hide=True)
     if mode:
         c.sudo(f"chmod {mode} {path}", hide=True)
 
