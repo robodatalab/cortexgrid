@@ -2,8 +2,6 @@
 
 import cortexflow
 
-cortexflow.init()
-
 # Fire-and-forget training on the DGX; returns a job id immediately.
 # The jobs control plane picks up the submission and dispatches it to Ray.
 job_id = cortexflow.remote(my_train, config, num_gpus=1, retry=True)
@@ -14,15 +12,12 @@ for job in cortexflow.list_experiment_run_jobs(run_id):
     status = cortexflow.get_ray_job_status(job.get_ray_job_id())
 
 # Inside the training function — checkpoint after each epoch
-# (checkpointing requires the `training` extras: `pip install cortexflow[training]`)
-from cortexflow.checkpoint import checkpoint, resume
-
-with checkpoint() as ckpt:
+with cortexflow.checkpoint() as ckpt:
     ckpt.epoch = epoch
     ckpt.save_training_state(model, optimizer, scheduler)
 
 # On resume — load checkpoint if it exists
-ckpt = resume()
+ckpt = cortexflow.resume()
 if ckpt:
     ckpt.restore_training_state(model, optimizer, scheduler)
 """
@@ -31,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from cortexflow.checkpoint import checkpoint, resume
 from cortexflow.experiment import (
     Experiment,
     list_experiments,
@@ -123,6 +119,9 @@ __all__ = [
     "list_run_params",
     "list_run_artifacts",
     "list_experiments",
+    # Checkpointing
+    "checkpoint",
+    "resume",
     # S3
     "upload",
     "upload_dir",
