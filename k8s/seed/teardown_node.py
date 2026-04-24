@@ -16,6 +16,7 @@ import logging
 import sys
 
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 from k8s.seed import head, util, worker
 
@@ -37,7 +38,16 @@ def parse_args() -> argparse.Namespace:
 
 def _run_head(args: argparse.Namespace, entry: dict, cfg: dict, sudo_pw: str) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+    pipeline = head.build()
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+        total=len(pipeline.operators), desc=f"Head teardown {args.ip}"
+    ) as bar:
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "teardown")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
         deps = {
             "connection": c,
             "node_ip": args.ip,
@@ -46,19 +56,28 @@ def _run_head(args: argparse.Namespace, entry: dict, cfg: dict, sudo_pw: str) ->
             "storage_path": entry["storage_path"],
             "workers": workers,
         }
-        head.build().teardown(deps)
+        pipeline.teardown(deps)
     log.info("Head teardown complete.")
 
 
 def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
     # Mode is irrelevant for teardown — JoinCluster.teardown runs both cleanups.
     # We still need to pick *some* valid mode to construct the pipeline.
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+    pipeline = worker.build(mode="direct")
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+        total=len(pipeline.operators), desc=f"Worker teardown {args.ip}"
+    ) as bar:
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "teardown")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
         deps = {
             "connection": c,
             "node_ip": args.ip,
         }
-        worker.build(mode="direct").teardown(deps)
+        pipeline.teardown(deps)
     log.info("Worker teardown complete.")
 
 

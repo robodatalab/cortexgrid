@@ -20,6 +20,7 @@ import sys
 from typing import Literal
 
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 from cortexflow.secrets import get_secret, list_secrets
 from k8s.seed import head, util, worker
@@ -81,6 +82,9 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
     entry = {"ip": args.ip, "role": args.type}
     if args.type == "head":
         entry["storage_path"] = args.storage_path
+    if existing is not None and "progress" in existing:
+        # Carry the checkpoint across re-runs so a prior failure's state is visible.
+        entry["progress"] = existing["progress"]
 
     if existing is not None:
         cfg["nodes"] = [entry if n["ip"] == args.ip else n for n in cfg["nodes"]]
@@ -93,13 +97,24 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
 def _lookup_head_creds() -> tuple[str | None, str | None]:
     available = set(list_secrets())
     if util.SECRET_K3S_TOKEN in available and util.SECRET_CONTROL_PLANE_IP in available:
-        return get_secret(util.SECRET_K3S_TOKEN), get_secret(util.SECRET_CONTROL_PLANE_IP)
+        return get_secret(util.SECRET_K3S_TOKEN), get_secret(
+            util.SECRET_CONTROL_PLANE_IP
+        )
     return None, None
 
 
 def _run_head(args: argparse.Namespace, cfg: dict, sudo_pw: str) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+    pipeline = head.build()
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+        total=len(pipeline.operators), desc=f"Head setup {args.ip}"
+    ) as bar:
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "setup")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
         deps = {
             "connection": c,
             "node_ip": args.ip,
@@ -111,7 +126,7 @@ def _run_head(args: argparse.Namespace, cfg: dict, sudo_pw: str) -> None:
             "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
             "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
         }
-        head.build().setup(deps)
+        pipeline.setup(deps)
     log.info(
         f"\nHead seeded.\n  Argo UI: http://{args.ip}:30080 (auth disabled, via Tailscale)"
     )
@@ -122,8 +137,17 @@ def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
     head_ready = head_token is not None and head_ip is not None
     mode: Literal["direct", "deferred"] = "direct" if head_ready else "deferred"
 
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
-        deps = {
+    pipeline = worker.build(mode=mode)
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+        total=len(pipeline.operators), desc=f"Worker setup {args.ip}"
+    ) as bar:
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "setup")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
+        deps: dict = {
             "connection": c,
             "node_ip": args.ip,
         }
@@ -133,7 +157,7 @@ def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
         else:
             deps["aws_access_key_id"] = os.environ["AWS_ACCESS_KEY_ID"]
             deps["aws_secret_access_key"] = os.environ["AWS_SECRET_ACCESS_KEY"]
-        worker.build(mode=mode).setup(deps)
+        pipeline.setup(deps)
 
     if head_ready:
         log.info(f"\nWorker seeded and joined cluster at {head_ip}.")

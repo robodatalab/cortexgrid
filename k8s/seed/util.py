@@ -49,6 +49,31 @@ def save_config(cfg: dict) -> None:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
 
+def checkpoint_step_done(ip: str, operator_name: str, direction: str) -> None:
+    """Record progress of a pipeline step against the node entry in infra-config.yaml.
+
+    Setup appends operator_name to node['progress']. Teardown pops the last
+    entry iff it matches operator_name (teardown runs operators in reverse,
+    so the last-completed setup step is the first to be torn down).
+    The `progress` field is removed when the list becomes empty.
+    """
+    if direction not in ("setup", "teardown"):
+        raise ValueError(f"direction must be 'setup' or 'teardown', got {direction!r}")
+    cfg = load_config()
+    for node in cfg["nodes"]:
+        if node["ip"] != ip:
+            continue
+        progress = node.setdefault("progress", [])
+        if direction == "setup":
+            progress.append(operator_name)
+        elif progress and progress[-1] == operator_name:
+            progress.pop()
+        if not progress:
+            node.pop("progress", None)
+        break
+    save_config(cfg)
+
+
 def ssh_user_for_ip(ip: str) -> str | None:
     """Look up the SSH user for `ip` in ~/.ssh/config by matching HostName entries."""
     path = Path.home() / ".ssh" / "config"
