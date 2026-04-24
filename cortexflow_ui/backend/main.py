@@ -34,7 +34,6 @@ from cortexflow.secrets import (
     set_secret,
 )
 
-from cortexflow_ui.backend.config import settings
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 log = logging.getLogger("cortexflow_ui_backend")
@@ -43,7 +42,7 @@ app = FastAPI(title="CortexFlow UI", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
