@@ -80,12 +80,11 @@ def main() -> None:
     cfg = util.load_config()
     entry = next((n for n in cfg["nodes"] if n["ip"] == args.ip), None)
     if entry is None:
-        logging.info(
-            f"Warning: {args.ip} is not in infra-config.yaml — will still wipe the remote node."
+        sys.exit(
+            f"Error: {args.ip} is not in infra-config.yaml. "
+            f"Nothing to tear down — refusing to touch an untracked node."
         )
-        role = None
-    else:
-        role = entry["role"]
+    role = entry["role"]
 
     confirm = input(
         f"This will wipe k3s, nvidia-container-toolkit, and any deferred-join "
@@ -100,6 +99,12 @@ def main() -> None:
 
     with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
         wipe_node(c)
+
+    # Node is wiped — reflect that in infra-config.yaml immediately, before any
+    # laptop-side cleanup that could fail (kubectl, AWS SM). Intent has been realised.
+    cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != args.ip]
+    util.save_config(cfg)
+    logging.info(f"Removed {args.ip} from infra-config.yaml.")
 
     if node_name:
         subprocess.run(["kubectl", "delete", "node", node_name], check=False)
@@ -130,11 +135,6 @@ def main() -> None:
             except ClientError as e:
                 if e.response["Error"]["Code"] != "ResourceNotFoundException":
                     raise
-
-    if entry is not None:
-        cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != args.ip]
-        util.save_config(cfg)
-        logging.info(f"Removed {args.ip} from infra-config.yaml.")
 
     logging.info("Node teardown complete.")
 
