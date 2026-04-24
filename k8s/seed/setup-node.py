@@ -396,6 +396,14 @@ def install_deferred_join(c: Connection) -> None:
     c.sudo("systemctl daemon-reload", hide=True)
     c.sudo("systemctl enable --now robolab-join.timer", hide=True)
 
+    state = c.run("systemctl is-active robolab-join.timer", hide=True, warn=True).stdout.strip()
+    if state != "active":
+        sys.exit(
+            f"Error: robolab-join.timer on {c.host} did not reach 'active' state "
+            f"(got '{state}'). Check `systemctl status robolab-join.timer` on the node."
+        )
+    print(f"robolab-join.timer is active on {c.host}.")
+
 
 def reconcile_worker_labels(cfg: dict) -> None:
     """Label any joined worker node per infra-config.yaml (best-effort; silent if cluster unreachable)."""
