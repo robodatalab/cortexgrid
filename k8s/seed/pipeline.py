@@ -1,51 +1,31 @@
 """Operator / Pipeline primitives for node setup and teardown.
 
-An Operator is a discrete piece of cluster state with a matching setup/teardown
-pair. A Pipeline is an ordered list of operators — setup() runs them in order,
-teardown() runs them in reverse, so the last thing installed is the first
-thing removed.
+Dependencies flow as an explicit `deps` dict passed to setup() and teardown().
+Operators pull what they need out of it; a missing key raises KeyError, so
+unmet dependencies fail loudly rather than silently skipping.
+
+Constructors hold per-instance configuration only (role, mode, strictness).
 """
 
 import abc
-import argparse
-from dataclasses import dataclass, field
-from typing import Optional
-
-from fabric import Connection  # type: ignore
-
-
-@dataclass
-class Context:
-    """Shared state passed through a pipeline run."""
-
-    args: argparse.Namespace
-    cfg: dict = field(default_factory=dict)
-    entry: Optional[dict] = None
-    connection: Optional[Connection] = None
-    head_token: Optional[str] = None
-    head_ip: Optional[str] = None
 
 
 class Operator(abc.ABC):
-    """Base class for pipeline operators. Override setup() and teardown()."""
+    @abc.abstractmethod
+    def setup(self, deps: dict) -> None: ...
 
     @abc.abstractmethod
-    def setup(self, ctx: Context) -> None:
-        pass
-
-    @abc.abstractmethod
-    def teardown(self, ctx: Context) -> None:
-        pass
+    def teardown(self, deps: dict) -> None: ...
 
 
-class Pipeline:
+class Pipeline(Operator):
     def __init__(self, operators: list[Operator]):
         self.operators = operators
 
-    def setup(self, ctx: Context) -> None:
+    def setup(self, deps: dict) -> None:
         for op in self.operators:
-            op.setup(ctx)
+            op.setup(deps)
 
-    def teardown(self, ctx: Context) -> None:
+    def teardown(self, deps: dict) -> None:
         for op in reversed(self.operators):
-            op.teardown(ctx)
+            op.teardown(deps)

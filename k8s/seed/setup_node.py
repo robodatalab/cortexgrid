@@ -4,26 +4,30 @@ Usage:
     uv run python k8s/seed/setup-node.py --type=head --ip=X --storage-path=Y [--ssh-user=Z]
     uv run python k8s/seed/setup-node.py --type=worker --ip=X [--ssh-user=Z]
 
-All operations are idempotent. Topology is recorded in ./infra-config.yaml at
-the repo root and is read by other infra scripts (teardown-node, etc.).
-Run teardown-node first to change a node's role or config.
-
-Worker-before-head is supported: when the head has not been seeded yet, the
-worker command installs prerequisites, drops a systemd timer on the worker
-that polls AWS Secrets Manager for the cluster's K3S_NODE_TOKEN and control-
-plane IP, and joins automatically once those appear. The command returns
-immediately — no re-run needed.
-
-This module is a dispatcher. Role-specific install steps live in head.py and
-worker.py, whose setup() / teardown() functions are intentionally mirrored.
+Dispatcher responsibilities:
+  - Parse args, validate and update infra-config.yaml.
+  - Resolve every pipeline dependency (env vars, head creds from AWS SM, etc.)
+    into a single deps dict.
+  - Open the SSH connection, call head.build() / worker.build(), then run
+    pipeline.setup(deps).
 """
 
 import argparse
 import getpass
 import logging
+import os
 import sys
+from typing import Literal
 
+from dotenv import load_dotenv
+
+from cortexflow.secrets import get_secret, list_secrets
 from k8s.seed import head, util, worker
+
+
+BOOTSTRAP_FILE = util.REPO_ROOT / "k8s" / "argocd.yaml"
+
+log = logging.getLogger("k8s.seed.setup_node")
 
 
 def parse_args() -> argparse.Namespace:
@@ -86,16 +90,73 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
     return cfg
 
 
+def _lookup_head_creds() -> tuple[str | None, str | None]:
+    available = set(list_secrets())
+    if util.SECRET_K3S_TOKEN in available and util.SECRET_CONTROL_PLANE_IP in available:
+        return get_secret(util.SECRET_K3S_TOKEN), get_secret(util.SECRET_CONTROL_PLANE_IP)
+    return None, None
+
+
+def _run_head(args: argparse.Namespace, cfg: dict, sudo_pw: str) -> None:
+    workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+        deps = {
+            "connection": c,
+            "node_ip": args.ip,
+            "bootstrap_file": BOOTSTRAP_FILE,
+            "env_file": util.ENV_FILE,
+            "storage_path": args.storage_path,
+            "workers": workers,
+            "github_token": os.environ["GH_TOKEN"],
+            "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+            "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+        }
+        head.build().setup(deps)
+    log.info(
+        f"\nHead seeded.\n  Argo UI: http://{args.ip}:30080 (auth disabled, via Tailscale)"
+    )
+
+
+def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
+    head_token, head_ip = _lookup_head_creds()
+    head_ready = head_token is not None and head_ip is not None
+    mode: Literal["direct", "deferred"] = "direct" if head_ready else "deferred"
+
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+        deps = {
+            "connection": c,
+            "node_ip": args.ip,
+        }
+        if head_ready:
+            deps["head_ip"] = head_ip
+            deps["head_token"] = head_token
+        else:
+            deps["aws_access_key_id"] = os.environ["AWS_ACCESS_KEY_ID"]
+            deps["aws_secret_access_key"] = os.environ["AWS_SECRET_ACCESS_KEY"]
+        worker.build(mode=mode).setup(deps)
+
+    if head_ready:
+        log.info(f"\nWorker seeded and joined cluster at {head_ip}.")
+    else:
+        log.info(
+            f"\nWorker prerequisites installed and deferred-join timer active on {args.ip}. "
+            f"The worker will join the cluster automatically within ~60s of the head being seeded."
+        )
+
+
 def main() -> None:
     args = parse_args()
     cfg = util.load_config()
     cfg = validate_and_update(cfg, args)
     util.save_config(cfg)
 
+    load_dotenv(util.ENV_FILE)
+    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
+
     if args.type == "head":
-        head.setup(args, cfg)
+        _run_head(args, cfg, sudo_pw)
     else:
-        worker.setup(args, cfg)
+        _run_worker(args, sudo_pw)
 
 
 if __name__ == "__main__":

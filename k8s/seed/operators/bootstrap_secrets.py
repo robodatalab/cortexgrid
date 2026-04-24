@@ -1,21 +1,28 @@
-"""BootstrapSecrets — seeds Argo repo creds + ESO AWS creds into k8s on setup.
+"""BootstrapSecrets — seeds Argo repo creds + ESO AWS creds into k8s.
 
-Setup-only: the k8s Secrets themselves die with k3s via K3sServer.teardown.
+Required deps (setup): github_token, aws_access_key_id, aws_secret_access_key.
+Required deps (teardown): (none — deletion is by name).
+
+Assumes the argocd namespace already exists — that's K3sServer's responsibility
+(its setup waits for the bootstrap manifest to be applied before returning).
 """
 
 import logging
-import os
 import textwrap
 
 from k8s.seed import util
-from k8s.seed.pipeline import Context, Operator
+from k8s.seed.pipeline import Operator
 
 
 log = logging.getLogger("k8s.seed.operators.bootstrap_secrets")
 
 
 class BootstrapSecrets(Operator):
-    def setup(self, ctx: Context) -> None:
+    def setup(self, deps: dict) -> None:
+        github_token = deps["github_token"]
+        aws_access_key_id = deps["aws_access_key_id"]
+        aws_secret_access_key = deps["aws_secret_access_key"]
+
         log.info("Bootstrap: GitHub repo credentials in argocd namespace...")
         github_secret = textwrap.dedent(f"""\
             apiVersion: v1
@@ -30,7 +37,7 @@ class BootstrapSecrets(Operator):
               type: git
               url: https://github.com/paksas/robolab-infra.git
               username: x-access-token
-              password: "{os.environ["GH_TOKEN"]}"
+              password: "{github_token}"
         """)
         util.kubectl("apply", "-f", "-", input=github_secret, capture=False)
 
@@ -48,10 +55,17 @@ class BootstrapSecrets(Operator):
               namespace: external-secrets
             type: Opaque
             stringData:
-              AWS_ACCESS_KEY_ID: "{os.environ["AWS_ACCESS_KEY_ID"]}"
-              AWS_SECRET_ACCESS_KEY: "{os.environ["AWS_SECRET_ACCESS_KEY"]}"
+              AWS_ACCESS_KEY_ID: "{aws_access_key_id}"
+              AWS_SECRET_ACCESS_KEY: "{aws_secret_access_key}"
         """)
         util.kubectl("apply", "-f", "-", input=aws_secret, capture=False)
 
-    def teardown(self, ctx: Context) -> None:
-        pass  # k8s Secrets die with k3s via K3sServer.teardown
+    def teardown(self, deps: dict) -> None:
+        util.kubectl(
+            "-n", "argocd", "delete", "secret", "argo-github-repo",
+            "--ignore-not-found", check=False, capture=False,
+        )
+        util.kubectl(
+            "delete", "namespace", "external-secrets",
+            "--ignore-not-found", check=False, capture=False,
+        )

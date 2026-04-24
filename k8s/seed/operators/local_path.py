@@ -1,7 +1,9 @@
 """LocalPath — points local-path-provisioner at a specific HDD path on the head.
 
-Setup patches the local-path-config configmap.
-Teardown wipes the HDD contents (with an explicit confirmation prompt).
+Required deps: connection, node_ip, storage_path.
+
+Setup patches the local-path-config configmap; teardown wipes the HDD contents
+(with an explicit confirmation prompt, since it destroys workload data).
 """
 
 import json
@@ -14,16 +16,16 @@ import time
 import yaml  # type: ignore
 
 from k8s.seed import util
-from k8s.seed.pipeline import Context, Operator
+from k8s.seed.pipeline import Operator
 
 
 log = logging.getLogger("k8s.seed.operators.local_path")
 
 
 class LocalPath(Operator):
-    def setup(self, ctx: Context) -> None:
-        node_ip = ctx.args.ip
-        storage_path = ctx.args.storage_path
+    def setup(self, deps: dict) -> None:
+        node_ip = deps["node_ip"]
+        storage_path = deps["storage_path"]
         log.info(
             f"Configuring local-path-provisioner to use {storage_path} on {node_ip}..."
         )
@@ -50,22 +52,13 @@ class LocalPath(Operator):
         )
         patch = yaml.safe_dump({"data": {"config.json": config_json}})
         util.kubectl(
-            "-n",
-            "kube-system",
-            "patch",
-            "cm",
-            "local-path-config",
-            "--type=merge",
-            "--patch",
-            patch,
-            capture=False,
+            "-n", "kube-system", "patch", "cm", "local-path-config",
+            "--type=merge", "--patch", patch, capture=False,
         )
 
-    def teardown(self, ctx: Context) -> None:
-        storage_path = (ctx.entry or {}).get("storage_path")
-        if not storage_path:
-            return
-        c = ctx.connection
+    def teardown(self, deps: dict) -> None:
+        c = deps["connection"]
+        storage_path = deps["storage_path"]
         confirm = input(
             f"Wipe PVC contents under {storage_path} on {c.host}? This destroys "
             f"all workload data persisted to the HDD. [y/N] "

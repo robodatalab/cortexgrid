@@ -3,9 +3,11 @@
 Usage:
     uv run python k8s/seed/teardown-node.py --ip=X [--ssh-user=Z]
 
-Looks the node up in infra-config.yaml, dispatches to the role's teardown()
-flow (head.py or worker.py), and drops its entry from infra-config.yaml.
-Each teardown() mirrors its setup() counterpart step-for-step.
+Dispatcher responsibilities:
+  - Look the node up in infra-config.yaml.
+  - Resolve every pipeline dependency into a single deps dict.
+  - Open the SSH connection, call head.build() / worker.build(), then run
+    pipeline.teardown(deps).
 """
 
 import argparse
@@ -13,7 +15,14 @@ import getpass
 import logging
 import sys
 
+from dotenv import load_dotenv
+
 from k8s.seed import head, util, worker
+
+
+BOOTSTRAP_FILE = util.REPO_ROOT / "k8s" / "argocd.yaml"
+
+log = logging.getLogger("k8s.seed.teardown_node")
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,6 +33,33 @@ def parse_args() -> argparse.Namespace:
     if args.ssh_user is None:
         args.ssh_user = util.ssh_user_for_ip(args.ip) or getpass.getuser()
     return args
+
+
+def _run_head(args: argparse.Namespace, entry: dict, cfg: dict, sudo_pw: str) -> None:
+    workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+        deps = {
+            "connection": c,
+            "node_ip": args.ip,
+            "bootstrap_file": BOOTSTRAP_FILE,
+            "env_file": util.ENV_FILE,
+            "storage_path": entry["storage_path"],
+            "workers": workers,
+        }
+        head.build().teardown(deps)
+    log.info("Head teardown complete.")
+
+
+def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
+    # Mode is irrelevant for teardown — JoinCluster.teardown runs both cleanups.
+    # We still need to pick *some* valid mode to construct the pipeline.
+    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
+        deps = {
+            "connection": c,
+            "node_ip": args.ip,
+        }
+        worker.build(mode="direct").teardown(deps)
+    log.info("Worker teardown complete.")
 
 
 def main() -> None:
@@ -43,12 +79,14 @@ def main() -> None:
     if confirm.strip().lower() != "y":
         sys.exit(0)
 
-    if entry["role"] == "head":
-        head.teardown(args, entry)
-    else:
-        worker.teardown(args, entry)
+    load_dotenv(util.ENV_FILE)
+    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
 
-    # Teardown has run — drop the node from infra-config.yaml.
+    if entry["role"] == "head":
+        _run_head(args, entry, cfg, sudo_pw)
+    else:
+        _run_worker(args, sudo_pw)
+
     cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != args.ip]
     util.save_config(cfg)
     logging.info(f"Removed {args.ip} from infra-config.yaml.")

@@ -1,26 +1,66 @@
-"""DeferredJoin — drops a systemd timer that joins the cluster when the head appears.
+"""JoinCluster — joins a worker to the cluster.
 
-Setup writes the script + timer only if the head ISN'T ready yet.
-Teardown removes them unconditionally (idempotent).
+Has two setup modes chosen at construction time:
+  - mode="direct":   install k3s-agent now, pointing at the already-running head
+  - mode="deferred": drop a systemd timer that will join once the head appears
+
+Teardown always runs both cleanups (uninstall k3s-agent + remove deferred timer);
+they're idempotent, and we may not know which setup path was actually used.
+
+Required deps (setup, mode="direct"):   connection, head_ip, head_token
+Required deps (setup, mode="deferred"): connection, aws_access_key_id, aws_secret_access_key
+Required deps (teardown):                connection
 """
 
 import logging
-import os
+import shlex
 import sys
 import textwrap
 
 from k8s.seed import util
-from k8s.seed.pipeline import Context, Operator
+from k8s.seed.pipeline import Operator
 
 
-log = logging.getLogger("k8s.seed.operators.deferred_join")
+log = logging.getLogger("k8s.seed.operators.join_cluster")
 
 
-class DeferredJoin(Operator):
-    def setup(self, ctx: Context) -> None:
-        if ctx.head_ip and ctx.head_token:
-            return
-        c = ctx.connection
+class JoinCluster(Operator):
+    def __init__(self, mode: str):
+        if mode not in ("direct", "deferred"):
+            raise ValueError(
+                f"JoinCluster mode must be 'direct' or 'deferred', got {mode!r}"
+            )
+        self.mode = mode
+
+    def setup(self, deps: dict) -> None:
+        c = deps["connection"]
+        if self.mode == "direct":
+            self._direct_join(c, deps["head_ip"], deps["head_token"])
+        else:
+            self._deferred_join(
+                c, deps["aws_access_key_id"], deps["aws_secret_access_key"]
+            )
+
+    def teardown(self, deps: dict) -> None:
+        c = deps["connection"]
+        self._uninstall_agent(c)
+        self._remove_deferred_timer(c)
+
+    def _direct_join(self, c, head_ip: str, head_token: str) -> None:
+        log.info(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
+        util.sudo_script(
+            c,
+            textwrap.dedent(f"""\
+            set -euo pipefail
+            if [[ ! -x /usr/local/bin/k3s-agent ]] && [[ ! -x /usr/local/bin/k3s ]]; then
+                curl -sfL https://get.k3s.io | K3S_URL={shlex.quote(f"https://{head_ip}:6443")} K3S_TOKEN={shlex.quote(head_token)} sh -
+            fi
+        """),
+        )
+
+    def _deferred_join(
+        self, c, aws_access_key_id: str, aws_secret_access_key: str
+    ) -> None:
         log.info(
             f"Head not seeded yet — dropping systemd timer on {c.host} to join when it appears. "
             f"This command will now exit; the worker will join automatically."
@@ -68,8 +108,8 @@ class DeferredJoin(Operator):
         """)
 
         env_content = (
-            f'AWS_ACCESS_KEY_ID="{os.environ["AWS_ACCESS_KEY_ID"]}"\n'
-            f'AWS_SECRET_ACCESS_KEY="{os.environ["AWS_SECRET_ACCESS_KEY"]}"\n'
+            f'AWS_ACCESS_KEY_ID="{aws_access_key_id}"\n'
+            f'AWS_SECRET_ACCESS_KEY="{aws_secret_access_key}"\n'
         )
 
         util.write_remote_file(c, env_content, util.JOIN_ENV_PATH, mode="600")
@@ -90,8 +130,19 @@ class DeferredJoin(Operator):
             )
         print(f"robolab-join.timer is active on {c.host}.")
 
-    def teardown(self, ctx: Context) -> None:
-        c = ctx.connection
+    def _uninstall_agent(self, c) -> None:
+        util.sudo_script(
+            c,
+            textwrap.dedent("""\
+            set -euo pipefail
+            if [[ -x /usr/local/bin/k3s-agent-uninstall.sh ]]; then
+                /usr/local/bin/k3s-agent-uninstall.sh
+            fi
+        """),
+        )
+        util.wipe_k3s_residue(c)
+
+    def _remove_deferred_timer(self, c) -> None:
         util.sudo_script(
             c,
             textwrap.dedent(f"""\

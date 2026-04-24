@@ -1,66 +1,23 @@
-"""Head-role pipeline composition + entry points.
+"""Head-role pipeline construction.
 
-The pipeline is assembled once and used for both setup and teardown —
-teardown just runs it in reverse.
+Returns a Pipeline of operators. Each operator pulls what it needs out of the
+deps dict at setup(deps) / teardown(deps) time — the caller (setup_node /
+teardown_node) is responsible for populating deps.
 """
 
-import argparse
-import getpass
-import logging
-
-from dotenv import load_dotenv
-
-from k8s.seed import util
-from k8s.seed.operators import (
-    AwaitArgo,
-    BootstrapSecrets,
-    ControlPlaneDetails,
-    EnvSecrets,
-    InstallPrereqs,
-    K3sServer,
-    Kubeconfig,
-    LocalPath,
-    NodeLabel,
-    WorkerLabelsReconciler,
-)
-from k8s.seed.pipeline import Context, Pipeline
+from k8s.seed import operators
+from k8s.seed.pipeline import Pipeline
 
 
-log = logging.getLogger("k8s.seed.head")
-
-
-def build_pipeline() -> Pipeline:
+def build() -> Pipeline:
     return Pipeline([
-        InstallPrereqs(),
-        K3sServer(),
-        Kubeconfig(),
-        AwaitArgo(),
-        LocalPath(),
-        EnvSecrets(),
-        BootstrapSecrets(),
-        ControlPlaneDetails(),
-        NodeLabel(role="head", strict=True),
-        WorkerLabelsReconciler(),
+        operators.InstallPrereqs(),
+        operators.K3sServer(),
+        operators.Kubeconfig(),
+        operators.LocalPath(),
+        operators.EnvSecrets(),
+        operators.BootstrapSecrets(),
+        operators.ControlPlaneDetails(),
+        operators.NodeLabel(role="head", strict=True),
+        operators.WorkerLabels(),
     ])
-
-
-def setup(args: argparse.Namespace, cfg: dict) -> None:
-    load_dotenv(util.ENV_FILE)
-    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
-    ctx = Context(args=args, cfg=cfg)
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
-        ctx.connection = c
-        build_pipeline().setup(ctx)
-    log.info(
-        f"\nHead seeded.\n  Argo UI: http://{args.ip}:30080 (auth disabled, via Tailscale)"
-    )
-
-
-def teardown(args: argparse.Namespace, entry: dict) -> None:
-    load_dotenv(util.ENV_FILE)
-    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
-    ctx = Context(args=args, entry=entry)
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c:
-        ctx.connection = c
-        build_pipeline().teardown(ctx)
-    log.info("Head teardown complete.")
