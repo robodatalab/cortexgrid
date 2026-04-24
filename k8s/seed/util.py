@@ -69,7 +69,8 @@ def connect(user: str, ip: str, password: str) -> Connection:
         connect_kwargs={"password": password},
     )
     c.config.sudo.password = password
-    c.client.set_missing_host_key_policy(AutoAddPolicy())
+    if c.client is not None:
+        c.client.set_missing_host_key_policy(AutoAddPolicy())
     return c
 
 
@@ -114,7 +115,8 @@ def resolve_node_name(node_ip: str, wait_for: float = 0.0) -> str | None:
     while True:
         result = subprocess.run(
             ["kubectl", "get", "nodes", "-o", "json"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             data = json.loads(result.stdout)
@@ -131,7 +133,10 @@ def kubectl(
     *args: str, check: bool = True, input: str | None = None, capture: bool = True
 ) -> str:
     result = subprocess.run(
-        ["kubectl", *args], input=input, capture_output=capture, text=True,
+        ["kubectl", *args],
+        input=input,
+        capture_output=capture,
+        text=True,
     )
     if check and result.returncode != 0:
         if result.stderr:
