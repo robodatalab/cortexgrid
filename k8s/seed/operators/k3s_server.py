@@ -3,9 +3,14 @@
 Required deps (setup): connection, bootstrap_file.
 Required deps (teardown): connection.
 
-Setup is not considered done until k3s has applied its staged manifests and
-argocd-server has rolled out. The readiness check runs on the head itself
-via `k3s kubectl`, so it does not depend on the local kubeconfig.
+Setup is not considered done until the argocd namespace exists — downstream
+operators (BootstrapSecrets) need it to apply Secrets. We intentionally do NOT
+wait for argocd-server to roll out here: the bootstrap manifest pins argocd
+pods to `role=head`, which NodeLabel applies later in the pipeline. Waiting
+for rollout in K3sServer would deadlock.
+
+The readiness check runs on the head itself via `k3s kubectl`, so it does not
+depend on the local kubeconfig.
 """
 
 import base64
@@ -54,17 +59,16 @@ class K3sServer(Operator):
         util.wipe_k3s_residue(c)
 
     def _await_bootstrap_applied(self, c) -> None:
-        log.info("Waiting for k3s to apply the argocd bootstrap manifest...")
+        """Wait only until the argocd namespace exists.
+
+        We deliberately do NOT wait for argocd-server to roll out: the bootstrap
+        manifest pins argocd pods to `role=head`, and that label is applied by
+        NodeLabel further down the pipeline. Waiting for rollout here would
+        deadlock. Downstream operators only need the namespace to exist.
+        """
+        log.info("Waiting for argocd namespace to exist...")
         while True:
-            result = c.sudo(
-                "k3s kubectl -n argocd get deploy argocd-server",
-                hide=True,
-                warn=True,
-            )
+            result = c.sudo("k3s kubectl get ns argocd", hide=True, warn=True)
             if result.ok:
                 break
             time.sleep(5)
-        c.sudo(
-            "k3s kubectl -n argocd rollout status deploy/argocd-server --timeout=5m",
-            hide=True,
-        )
