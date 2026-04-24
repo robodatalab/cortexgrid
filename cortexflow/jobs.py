@@ -6,21 +6,21 @@ import cloudpickle  # type: ignore
 from dataclasses import asdict, dataclass, field
 import json
 import logging
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from typing import Any, Callable
 
+from cortexflow import s3_util
 from cortexflow.experiment import get_mlflow_tracking_uri
 from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
-from tqdm import tqdm  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -100,9 +100,16 @@ class JobLifecycle:
 
     def download_project_code_root(self) -> str:
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        return client.download_artifacts(
-            self.run_id, f"job/{self.job_id}/project_code_root"
+        manifest_path = client.download_artifacts(
+            self.run_id, f"job/{self.job_id}/manifest.json"
         )
+        manifest = json.loads(Path(manifest_path).read_text())
+        bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        extract_dir = Path(tempfile.mkdtemp())
+        tarball_local = s3_util.download(bucket, key, str(extract_dir / "project_code_root.tar.gz"))
+        with tarfile.open(tarball_local, "r:gz") as tar:
+            tar.extractall(extract_dir)
+        return str(extract_dir / "project_code_root")
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
@@ -167,16 +174,30 @@ class Payload(BaseModel):
             (project_dest / "requirements.txt").write_text(
                 f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
             )
-            _upload_dir(client, self.run_id, tmp_dir, artifact_path)
+            tarball_path = Path(tmp_dir, "project_code_root.tar.gz")
+            with tarfile.open(tarball_path, "w:gz") as tar:
+                tar.add(str(project_dest), arcname="project_code_root")
+            tarball_uri = s3_util.upload(
+                str(tarball_path),
+                key=f"{artifact_path}/project_code_root.tar.gz",
+            )
+            manifest_path = Path(tmp_dir, "manifest.json")
+            manifest_path.write_text(json.dumps({"code_tarball_uri": tarball_uri}))
+            client.log_artifact(self.run_id, str(manifest_path), artifact_path=artifact_path)
             log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
-        project_code_root = client.download_artifacts(
-            run_id, f"job/{job_id}/project_code_root"
-        )
+        manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
+        manifest = json.loads(Path(manifest_path).read_text())
+        bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        extract_dir = Path(tempfile.mkdtemp())
+        tarball_local = s3_util.download(bucket, key, str(extract_dir / "project_code_root.tar.gz"))
+        with tarfile.open(tarball_local, "r:gz") as tar:
+            tar.extractall(extract_dir)
+        project_code_root = str(extract_dir / "project_code_root")
         sys.path.insert(0, project_code_root)
         try:
             payload = cloudpickle.loads(
@@ -263,21 +284,6 @@ def _inject_github_token(pip_requirements: str) -> str:
         "git+https://github.com/",
         f"git+https://x-access-token:{token}@github.com/",
     )
-
-
-def _upload_dir(
-    client: MlflowClient, run_id: str, local_dir: str, artifact_path: str
-) -> None:
-    """Upload a directory to MLflow with a per-file progress bar."""
-    files = [(root, f) for root, _, filenames in os.walk(local_dir) for f in filenames]
-    total_bytes = sum(os.path.getsize(os.path.join(r, f)) for r, f in files)
-    with tqdm(total=total_bytes, unit="B", unit_scale=True, desc="Uploading") as pbar:
-        for root, filename in files:
-            filepath = os.path.join(root, filename)
-            rel_dir = os.path.relpath(root, local_dir)
-            dest = f"{artifact_path}/{rel_dir}" if rel_dir != "." else artifact_path
-            client.log_artifact(run_id, filepath, artifact_path=dest)
-            pbar.update(os.path.getsize(filepath))
 
 
 def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:

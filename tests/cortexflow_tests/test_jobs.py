@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -62,10 +64,41 @@ class FakeMLflow:
         ]
 
 
+class FakeS3:
+    """Fake s3_util backed by a temp directory."""
+
+    def __init__(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+
+    def upload(self, local_path: str, bucket: str | None = None, key: str | None = None) -> str:
+        bucket = bucket or "ray-checkpoints"
+        key = key or Path(local_path).name
+        dest = self.root / bucket / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_path, dest)
+        return f"s3://{bucket}/{key}"
+
+    def download(self, bucket: str, key: str, local_path: str | None = None) -> str:
+        local_path = local_path or Path(key).name
+        shutil.copy2(self.root / bucket / key, local_path)
+        return local_path
+
+
+def _extract_uploaded_project(fake_mlflow: FakeMLflow, fake_s3: FakeS3, job_id: str) -> Path:
+    """Read the job's manifest from FakeMLflow, extract its tarball from FakeS3."""
+    manifest = json.loads((fake_mlflow.root / "job" / job_id / "manifest.json").read_text())
+    bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+    extract_dir = Path(tempfile.mkdtemp())
+    with tarfile.open(fake_s3.root / bucket / key, "r:gz") as tar:
+        tar.extractall(extract_dir)
+    return extract_dir / "project_code_root"
+
+
 class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
         clear_instance()
         self.fake_mlflow = FakeMLflow()
+        self.fake_s3 = FakeS3()
         self.project_dir = Path(tempfile.mkdtemp())
         (self.project_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
         (self.project_dir / "src").mkdir()
@@ -79,6 +112,7 @@ class TestRemote(unittest.TestCase):
                 "cortexflow.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
+            patch("cortexflow.jobs.s3_util", self.fake_s3),
             patch(
                 "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(
@@ -109,15 +143,8 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        self.assertTrue(
-            (
-                self.fake_mlflow.root
-                / "job"
-                / job_id
-                / "project_code_root"
-                / "payload.pkl"
-            ).exists()
-        )
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        self.assertTrue((project_root / "payload.pkl").exists())
         self.assertTrue(
             (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").exists()
         )
@@ -127,7 +154,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        project_root = self.fake_mlflow.root / "job" / job_id / "project_code_root"
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue(project_root.is_dir())
         self.assertTrue((project_root / "pyproject.toml").exists())
         self.assertTrue((project_root / "src" / "main.py").exists())
@@ -137,13 +164,8 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        requirements = (
-            self.fake_mlflow.root
-            / "job"
-            / job_id
-            / "project_code_root"
-            / "requirements.txt"
-        )
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        requirements = project_root / "requirements.txt"
         self.assertTrue(requirements.exists())
         self.assertIn("numpy==1.26", requirements.read_text())
         self.assertIn("torch==2.5", requirements.read_text())
@@ -153,14 +175,8 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        requirements = (
-            self.fake_mlflow.root
-            / "job"
-            / job_id
-            / "project_code_root"
-            / "requirements.txt"
-        )
-        content = requirements.read_text()
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        content = (project_root / "requirements.txt").read_text()
         self.assertIn(
             "git+https://x-access-token:ghp_faketoken@github.com/paksas/robolab-infra.git",
             content,
@@ -176,7 +192,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        project_root = self.fake_mlflow.root / "job" / job_id / "project_code_root"
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertFalse((project_root / ".venv").exists())
         self.assertFalse((project_root / ".git").exists())
 
@@ -205,10 +221,8 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None)
 
-        raw = (
-            self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl"
-        ).read_bytes()
-        payload: Payload = cloudpickle.loads(raw)
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
         self.assertIsNotNone(payload.fn)
         self.assertEqual(payload.experiment_name, EXPERIMENT_NAME)
         self.assertEqual(payload.run_id, RUN_ID)
@@ -218,10 +232,8 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexflow.remote(lambda: None, num_gpus=2, num_cpus=4)
 
-        raw = (
-            self.fake_mlflow.root / "job" / job_id / "project_code_root" / "payload.pkl"
-        ).read_bytes()
-        payload: Payload = cloudpickle.loads(raw)
+        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
         self.assertEqual(payload.num_gpus, 2)
         self.assertEqual(payload.num_cpus, 4)
 
@@ -229,6 +241,7 @@ class TestRemote(unittest.TestCase):
 class TestPayloadSaveLoad(unittest.TestCase):
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
+        self.fake_s3 = FakeS3()
         self.project_dir = Path(tempfile.mkdtemp())
         (self.project_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
         (self.project_dir / "train.py").write_text("import torch")
@@ -241,6 +254,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
                 "cortexflow.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
+            patch("cortexflow.jobs.s3_util", self.fake_s3),
             patch(
                 "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(stdout="numpy==1.26\n"),
@@ -268,22 +282,15 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        self.assertTrue(
-            (
-                self.fake_mlflow.root
-                / "job"
-                / "job-1"
-                / "project_code_root"
-                / "payload.pkl"
-            ).exists()
-        )
+        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
+        self.assertTrue((project / "payload.pkl").exists())
 
     def test_save_creates_project_code_root_dir(self) -> None:
         payload = self._make_payload()
 
         payload.save_to_mlflow()
 
-        project = self.fake_mlflow.root / "job" / "job-1" / "project_code_root"
+        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
         self.assertTrue(project.is_dir())
 
     def test_save_copies_project_files(self) -> None:
@@ -291,7 +298,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = self.fake_mlflow.root / "job" / "job-1" / "project_code_root"
+        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
         self.assertTrue((project / "pyproject.toml").exists())
         self.assertTrue((project / "train.py").exists())
         self.assertTrue((project / "data" / "config.yaml").exists())
@@ -301,7 +308,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = self.fake_mlflow.root / "job" / "job-1" / "project_code_root"
+        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
         self.assertEqual((project / "train.py").read_text(), "import torch")
         self.assertEqual((project / "data" / "config.yaml").read_text(), "lr: 0.001")
 
