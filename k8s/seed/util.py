@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 import subprocess
 import sys
+import textwrap
 import time
 import uuid
 
@@ -138,6 +139,68 @@ def resolve_node_name(node_ip: str, wait_for: float = 0.0) -> str | None:
         if time.monotonic() >= deadline:
             return None
         time.sleep(2)
+
+
+def install_prereqs(c: Connection) -> None:
+    log.info(f"Installing prerequisites on {c.host}...")
+    sudo_script(
+        c,
+        textwrap.dedent("""\
+        set -euo pipefail
+        if ! command -v nvidia-ctk &>/dev/null; then
+            curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+                | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+            curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+                | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+                > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+            apt-get update
+            apt-get install -y nvidia-container-toolkit
+        fi
+        if ! command -v aws &>/dev/null; then
+            apt-get update
+            apt-get install -y awscli
+        fi
+    """),
+    )
+
+
+def wipe_k3s_residue(c: Connection) -> None:
+    """Remove directories k3s uninstallers do not always clean up."""
+    sudo_script(
+        c,
+        textwrap.dedent("""\
+        set -euo pipefail
+        rm -rf /etc/rancher/k3s /var/lib/rancher/k3s /var/lib/kubelet /etc/cni /var/lib/cni
+    """),
+    )
+
+
+def wipe_host_packages(c: Connection) -> None:
+    """Inverse of install_prereqs: remove nvidia-container-toolkit, awscli, apt entries."""
+    log.info(f"Removing host prerequisites on {c.host}...")
+    sudo_script(
+        c,
+        textwrap.dedent("""\
+        set -euo pipefail
+        if dpkg -l nvidia-container-toolkit &>/dev/null; then
+            apt-get remove --purge -y nvidia-container-toolkit
+        fi
+        if dpkg -l awscli &>/dev/null; then
+            apt-get remove --purge -y awscli
+        fi
+        apt-get autoremove -y || true
+        rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        rm -f /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        apt-get update || true
+    """),
+    )
+
+
+def await_node(node_ip: str) -> str:
+    name = resolve_node_name(node_ip, wait_for=60.0)
+    if name is None:
+        sys.exit(f"Error: node with IP {node_ip} never registered with API server")
+    return name
 
 
 def kubectl(
