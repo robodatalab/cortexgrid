@@ -11,8 +11,8 @@ Teardown always runs both cleanups (uninstall k3s-agent + remove deferred timer
 and python3-boto3); they're idempotent, and we may not know which setup path
 was actually used.
 
-Required deps (setup, mode="direct"):   connection, head_ip, head_token
-Required deps (setup, mode="deferred"): connection, aws_access_key_id, aws_secret_access_key
+Required deps (setup, mode="direct"):   connection, node_ip, head_ip, head_token
+Required deps (setup, mode="deferred"): connection, node_ip, aws_access_key_id, aws_secret_access_key
 Required deps (teardown):                connection
 """
 
@@ -42,11 +42,12 @@ class JoinCluster(Operator):
 
     def setup(self, deps: dict) -> None:
         c = deps["connection"]
+        node_ip = deps["node_ip"]
         if self.mode == "direct":
-            self._direct_join(c, deps["head_ip"], deps["head_token"])
+            self._direct_join(c, node_ip, deps["head_ip"], deps["head_token"])
         else:
             self._deferred_join(
-                c, deps["aws_access_key_id"], deps["aws_secret_access_key"]
+                c, node_ip, deps["aws_access_key_id"], deps["aws_secret_access_key"]
             )
 
     def teardown(self, deps: dict) -> None:
@@ -54,12 +55,18 @@ class JoinCluster(Operator):
         self._uninstall_agent(c)
         self._remove_deferred_timer(c)
 
-    def _direct_join(self, c, head_ip: str, head_token: str) -> None:
+    def _direct_join(self, c, node_ip: str, head_ip: str, head_token: str) -> None:
         log.info(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
+        # `node-ip` pins the agent to advertise its Tailscale IP; otherwise
+        # k3s picks the LAN interface and downstream await_node lookups miss it.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
             set -euo pipefail
+            mkdir -p /etc/rancher/k3s
+            cat > /etc/rancher/k3s/config.yaml <<EOF
+node-ip: {node_ip}
+EOF
             if [[ ! -x /usr/local/bin/k3s-agent ]] && [[ ! -x /usr/local/bin/k3s ]]; then
                 curl -sfL https://get.k3s.io | K3S_URL={shlex.quote(f"https://{head_ip}:6443")} K3S_TOKEN={shlex.quote(head_token)} sh -
             fi
@@ -67,7 +74,11 @@ class JoinCluster(Operator):
         )
 
     def _deferred_join(
-        self, c, aws_access_key_id: str, aws_secret_access_key: str
+        self,
+        c,
+        node_ip: str,
+        aws_access_key_id: str,
+        aws_secret_access_key: str,
     ) -> None:
         log.info(
             f"Head not seeded yet — dropping systemd timer on {c.host} to join when it appears. "
@@ -75,12 +86,18 @@ class JoinCluster(Operator):
         )
 
         # python3-boto3 is the external dep that lets the timer script query AWS SM.
+        # `node-ip` pins the agent to advertise its Tailscale IP when the timer
+        # eventually runs `curl | sh -`; the file sits here waiting.
         util.sudo_script(
             c,
-            textwrap.dedent("""\
+            textwrap.dedent(f"""\
             set -euo pipefail
             apt-get update
             apt-get install -y python3-boto3
+            mkdir -p /etc/rancher/k3s
+            cat > /etc/rancher/k3s/config.yaml <<EOF
+node-ip: {node_ip}
+EOF
         """),
         )
 
