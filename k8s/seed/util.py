@@ -6,11 +6,12 @@ Holds everything both scripts touch: paths, constants, infra-config.yaml I/O,
 
 import io
 import json
+import logging
+from pathlib import Path
 import subprocess
 import sys
 import time
 import uuid
-from pathlib import Path
 
 import yaml  # type: ignore
 from fabric import Connection  # type: ignore
@@ -30,6 +31,9 @@ JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.sh"
 JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"
 JOIN_SERVICE_PATH = "/etc/systemd/system/robolab-join.service"
 JOIN_TIMER_PATH = "/etc/systemd/system/robolab-join.timer"
+
+
+log = logging.getLogger("k8s.seed.util")
 
 
 def load_config() -> dict:
@@ -71,6 +75,13 @@ def connect(user: str, ip: str, password: str) -> Connection:
     c.config.sudo.password = password
     if c.client is not None:
         c.client.set_missing_host_key_policy(AutoAddPolicy())
+    else:
+        log.warning(
+            "Connection to %s@%s has no client; host key checking may not work",
+            user,
+            ip,
+        )
+
     return c
 
 

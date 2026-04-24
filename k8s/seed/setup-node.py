@@ -19,6 +19,7 @@ import argparse
 import base64
 import getpass
 import json
+import logging
 import os
 import shlex
 import subprocess
@@ -37,6 +38,8 @@ from k8s.seed import util
 
 BOOTSTRAP_FILE = util.REPO_ROOT / "k8s" / "argocd.yaml"
 KUBECONFIG_FILE = Path.home() / ".kube" / "config"
+
+log = logging.getLogger("k8s.seed.setup_node")
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,7 +103,7 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
 
 
 def install_prereqs(c: Connection) -> None:
-    print(f"Installing prerequisites on {c.host}...")
+    log.info(f"Installing prerequisites on {c.host}...")
     util.sudo_script(
         c,
         textwrap.dedent("""\
@@ -123,7 +126,7 @@ def install_prereqs(c: Connection) -> None:
 
 
 def install_k3s_server(c: Connection) -> None:
-    print(f"Installing k3s server on {c.host} + staging argocd bootstrap...")
+    log.info(f"Installing k3s server on {c.host} + staging argocd bootstrap...")
     bootstrap_b64 = base64.b64encode(BOOTSTRAP_FILE.read_bytes()).decode()
     util.sudo_script(
         c,
@@ -139,7 +142,7 @@ def install_k3s_server(c: Connection) -> None:
 
 
 def merge_kubeconfig(c: Connection, node_ip: str) -> None:
-    print(
+    log.info(
         f"Merging kubeconfig into {KUBECONFIG_FILE} as context '{util.KUBE_CONTEXT}'..."
     )
     KUBECONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -169,7 +172,7 @@ def merge_kubeconfig(c: Connection, node_ip: str) -> None:
 
 
 def wait_for_argo() -> None:
-    print("Waiting for Argo server to come up...")
+    log.info("Waiting for Argo server to come up...")
     while True:
         result = subprocess.run(
             ["kubectl", "-n", "argocd", "get", "deploy", "argocd-server"],
@@ -198,7 +201,9 @@ def _await_node(node_ip: str) -> str:
 
 
 def patch_local_path_config(node_ip: str, storage_path: str) -> None:
-    print(f"Configuring local-path-provisioner to use {storage_path} on {node_ip}...")
+    log.info(
+        f"Configuring local-path-provisioner to use {storage_path} on {node_ip}..."
+    )
     while True:
         result = subprocess.run(
             ["kubectl", "-n", "kube-system", "get", "cm", "local-path-config"],
@@ -235,16 +240,16 @@ def patch_local_path_config(node_ip: str, storage_path: str) -> None:
 
 
 def publish_env_to_aws_sm() -> None:
-    print("Publishing .env entries to AWS Secrets Manager at robolab/infra/*...")
+    log.info("Publishing .env entries to AWS Secrets Manager at robolab/infra/*...")
     for k, v in dotenv_values(util.ENV_FILE).items():
         if v is None:
             continue
         set_secret(k, v)
-        print(f"  published robolab/infra/{k}")
+        log.info(f"  published robolab/infra/{k}")
 
 
 def seed_bootstrap_secrets() -> None:
-    print("Bootstrap: GitHub repo credentials in argocd namespace...")
+    log.info("Bootstrap: GitHub repo credentials in argocd namespace...")
     github_secret = textwrap.dedent(f"""\
         apiVersion: v1
         kind: Secret
@@ -262,7 +267,7 @@ def seed_bootstrap_secrets() -> None:
     """)
     util.kubectl("apply", "-f", "-", input=github_secret, capture=False)
 
-    print("Seeding AWS bootstrap credentials for ESO...")
+    log.info("Seeding AWS bootstrap credentials for ESO...")
     aws_secret = textwrap.dedent(f"""\
         apiVersion: v1
         kind: Namespace
@@ -283,7 +288,7 @@ def seed_bootstrap_secrets() -> None:
 
 
 def publish_control_plane_details(c: Connection, node_ip: str) -> None:
-    print("Publishing k3s token + control-plane IP to AWS SM...")
+    log.info("Publishing k3s token + control-plane IP to AWS SM...")
     token = c.sudo(
         "cat /var/lib/rancher/k3s/server/node-token", hide=True
     ).stdout.strip()
@@ -293,7 +298,7 @@ def publish_control_plane_details(c: Connection, node_ip: str) -> None:
 
 def label_node(node_ip: str, role: str) -> None:
     name = _await_node(node_ip)
-    print(f"Labelling node {name} with role={role}...")
+    log.info(f"Labelling node {name} with role={role}...")
     util.kubectl("label", "node", name, f"role={role}", "--overwrite", capture=False)
 
 
@@ -313,13 +318,13 @@ def setup_head(args: argparse.Namespace, cfg: dict) -> None:
 
     label_node(args.ip, "head")
     reconcile_worker_labels(cfg)
-    print(
+    log.info(
         f"\nHead seeded.\n  Argo UI: http://{args.ip}:30080 (auth disabled, via Tailscale)"
     )
 
 
 def install_k3s_agent_direct(c: Connection, head_ip: str, token: str) -> None:
-    print(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
+    log.info(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
     util.sudo_script(
         c,
         textwrap.dedent(f"""\
@@ -332,7 +337,7 @@ def install_k3s_agent_direct(c: Connection, head_ip: str, token: str) -> None:
 
 
 def install_deferred_join(c: Connection) -> None:
-    print(
+    log.info(
         f"Head not seeded yet — dropping systemd timer on {c.host} to join when it appears. "
         f"This command will now exit; the worker will join automatically."
     )
@@ -439,12 +444,12 @@ def setup_worker(args: argparse.Namespace, cfg: dict) -> None:
         try:
             label_node(args.ip, "worker")
         except Exception as e:
-            print(
+            log.info(
                 f"Warning: could not label node immediately ({e}); will be reconciled on next head seed."
             )
-        print(f"\nWorker seeded and joined cluster at {head_ip}.")
+        log.info(f"\nWorker seeded and joined cluster at {head_ip}.")
     else:
-        print(
+        log.info(
             f"\nWorker prerequisites installed and deferred-join timer active on {args.ip}. "
             f"The worker will join the cluster automatically within ~60s of the head being seeded."
         )
@@ -463,4 +468,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
     main()

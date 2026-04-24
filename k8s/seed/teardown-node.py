@@ -14,6 +14,7 @@ cluster-seed entries in AWS Secrets Manager.
 
 import argparse
 import getpass
+import logging
 import subprocess
 import sys
 import textwrap
@@ -24,6 +25,8 @@ from fabric import Connection  # type: ignore
 
 from cortexflow.secrets import delete_secret
 from k8s.seed import util
+
+log = logging.getLogger("k8s.seed.teardown_node")
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,7 +80,7 @@ def main() -> None:
     cfg = util.load_config()
     entry = next((n for n in cfg["nodes"] if n["ip"] == args.ip), None)
     if entry is None:
-        print(
+        logging.info(
             f"Warning: {args.ip} is not in infra-config.yaml — will still wipe the remote node."
         )
         role = None
@@ -111,13 +114,13 @@ def main() -> None:
                 capture_output=True,
                 check=False,
             )
-        print(f"Scrubbed kubeconfig context '{util.KUBE_CONTEXT}'.")
+        logging.info(f"Scrubbed kubeconfig context '{util.KUBE_CONTEXT}'.")
 
         load_dotenv(util.ENV_FILE)
         for sec in (util.SECRET_K3S_TOKEN, util.SECRET_CONTROL_PLANE_IP):
             try:
                 delete_secret(sec)
-                print(f"  deleted AWS SM: robolab/infra/{sec}")
+                logging.info(f"  deleted AWS SM: robolab/infra/{sec}")
             except ClientError as e:
                 if e.response["Error"]["Code"] != "ResourceNotFoundException":
                     raise
@@ -125,10 +128,13 @@ def main() -> None:
     if entry is not None:
         cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != args.ip]
         util.save_config(cfg)
-        print(f"Removed {args.ip} from infra-config.yaml.")
+        logging.info(f"Removed {args.ip} from infra-config.yaml.")
 
-    print("Node teardown complete.")
+    logging.info("Node teardown complete.")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
     main()
