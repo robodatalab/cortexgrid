@@ -129,5 +129,81 @@ class TestResolveNodeName(unittest.TestCase):
             self.assertEqual(util.resolve_node_name(ip), "the-node")
 
 
+class TestCheckpointStepDone(unittest.TestCase):
+    """checkpoint_step_done tracks pipeline progress on the node entry.
+
+    Setup appends; teardown pops matching. The field is removed when empty."""
+
+    def _with_temp_config(self, cfg: dict):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        path = Path(td.name) / "infra.yaml"
+        patcher = patch.object(util, "CONFIG_FILE", path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        util.save_config(cfg)
+        return path
+
+    def test_setup_appends_operator_name(self) -> None:
+        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
+        util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "setup")
+        util.checkpoint_step_done("10.0.0.1", "K3sServer", "setup")
+        self.assertEqual(
+            util.load_config()["nodes"][0]["progress"],
+            ["InstallPrereqs", "K3sServer"],
+        )
+
+    def test_teardown_pops_matching_last_entry(self) -> None:
+        self._with_temp_config(
+            {
+                "nodes": [
+                    {
+                        "ip": "10.0.0.1",
+                        "role": "head",
+                        "progress": ["InstallPrereqs", "K3sServer"],
+                    }
+                ]
+            }
+        )
+        util.checkpoint_step_done("10.0.0.1", "K3sServer", "teardown")
+        self.assertEqual(util.load_config()["nodes"][0]["progress"], ["InstallPrereqs"])
+
+    def test_teardown_ignores_non_matching_last_entry(self) -> None:
+        """Teardown of an operator whose setup never completed is a no-op.
+        Keeps the checkpoint honest when teardown is called on a partial setup."""
+        self._with_temp_config(
+            {
+                "nodes": [
+                    {"ip": "10.0.0.1", "role": "head", "progress": ["InstallPrereqs"]}
+                ]
+            }
+        )
+        util.checkpoint_step_done("10.0.0.1", "K3sServer", "teardown")
+        self.assertEqual(util.load_config()["nodes"][0]["progress"], ["InstallPrereqs"])
+
+    def test_progress_field_removed_when_list_empties(self) -> None:
+        self._with_temp_config(
+            {
+                "nodes": [
+                    {"ip": "10.0.0.1", "role": "head", "progress": ["InstallPrereqs"]}
+                ]
+            }
+        )
+        util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "teardown")
+        self.assertNotIn("progress", util.load_config()["nodes"][0])
+
+    def test_invalid_direction_raises(self) -> None:
+        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
+        with self.assertRaises(ValueError):
+            util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "sideways")
+
+    def test_unknown_ip_is_silent_noop(self) -> None:
+        """Writing a checkpoint for an IP not in the config is tolerated —
+        the dispatcher may have just removed the entry (end-of-teardown)."""
+        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
+        util.checkpoint_step_done("10.0.0.99", "InstallPrereqs", "setup")
+        self.assertEqual(util.load_config()["nodes"], [{"ip": "10.0.0.1", "role": "head"}])
+
+
 if __name__ == "__main__":
     unittest.main()

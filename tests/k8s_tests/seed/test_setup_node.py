@@ -51,6 +51,29 @@ class TestValidateAndUpdate(unittest.TestCase):
             [{"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd"}],
         )
 
+    def test_reseed_preserves_existing_progress(self) -> None:
+        """A partial checkpoint from a prior failed run must survive a re-run
+        of validate_and_update, so the dispatcher can still see where it got to."""
+        cfg = {
+            "nodes": [
+                {
+                    "ip": "10.0.0.1",
+                    "role": "head",
+                    "storage_path": "/mnt/hdd",
+                    "progress": ["InstallPrereqs", "K3sServer"],
+                }
+            ]
+        }
+        result = setup_node.validate_and_update(cfg, _args(type="head"))
+        self.assertEqual(
+            result["nodes"][0].get("progress"), ["InstallPrereqs", "K3sServer"]
+        )
+
+    def test_fresh_entry_has_no_progress_field(self) -> None:
+        cfg: dict = {"nodes": []}
+        result = setup_node.validate_and_update(cfg, _args(type="head"))
+        self.assertNotIn("progress", result["nodes"][0])
+
     @parameterized.expand(
         [
             (
