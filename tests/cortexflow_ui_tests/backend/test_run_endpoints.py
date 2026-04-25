@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
 from cortexflow.ray_util import JobStatus
 from cortexflow.jobs import JobLifecycle, LifecycleEvent
-from cortexflow_ui.backend.main import app
+from cortexflow_ui.backend.main import _tarball_exists, app
 
 
 class TestRunEndpoints(unittest.TestCase):
@@ -167,9 +170,10 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(history[1]["state"], "running")
         self.assertIsNone(history[1]["end"])
 
+    @patch("cortexflow_ui.backend.main._tarball_exists", return_value=True)
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["payload.pkl", "lifecycle.json"],
+        return_value=["manifest.json", "lifecycle.json"],
     )
     @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value=None)
     @patch(
@@ -185,6 +189,7 @@ class TestRunEndpoints(unittest.TestCase):
         _mock_status: MagicMock,
         _mock_ray_url: MagicMock,
         _mock_list_artifacts: MagicMock,
+        _mock_tarball_exists: MagicMock,
     ) -> None:
         mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
             experiment_name="alpha",
@@ -202,7 +207,7 @@ class TestRunEndpoints(unittest.TestCase):
 
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["payload.pkl"],
+        return_value=[],
     )
     def test_job_detail_returns_pending_when_lifecycle_missing(
         self,
@@ -216,6 +221,76 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertFalse(data["readiness"]["lifecycle"])
         self.assertIn("lifecycle.json", data["readiness"]["lifecycle_error"])
         self.assertNotIn("history", data)
+
+    @patch("cortexflow_ui.backend.main._tarball_exists", return_value=True)
+    @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["lifecycle.json"],
+    )
+    @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value=None)
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status",
+        return_value=JobStatus.RUNNING,
+    )
+    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow_ui.backend.main.JobLifecycle")
+    def test_job_detail_code_not_ready_when_manifest_missing(
+        self,
+        mock_lifecycle_cls: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
+        _mock_status: MagicMock,
+        _mock_ray_url: MagicMock,
+        _mock_list_artifacts: MagicMock,
+        mock_tarball_exists: MagicMock,
+    ) -> None:
+        mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
+            experiment_name="alpha",
+            run_id="run-1",
+            job_id="job-1",
+        )
+
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
+
+        self.assertEqual(response.status_code, 200)
+        readiness = response.json()["readiness"]
+        self.assertFalse(readiness["code"])
+        self.assertTrue(readiness["lifecycle"])
+        mock_tarball_exists.assert_not_called()
+
+    @patch("cortexflow_ui.backend.main._tarball_exists", return_value=False)
+    @patch(
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["manifest.json", "lifecycle.json"],
+    )
+    @patch("cortexflow_ui.backend.main.get_ray_job_url", return_value=None)
+    @patch(
+        "cortexflow_ui.backend.main.get_ray_job_status",
+        return_value=JobStatus.RUNNING,
+    )
+    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexflow_ui.backend.main.JobLifecycle")
+    def test_job_detail_code_not_ready_when_tarball_missing_from_minio(
+        self,
+        mock_lifecycle_cls: MagicMock,
+        _mock_list_ray_jobs: MagicMock,
+        _mock_status: MagicMock,
+        _mock_ray_url: MagicMock,
+        _mock_list_artifacts: MagicMock,
+        mock_tarball_exists: MagicMock,
+    ) -> None:
+        mock_lifecycle_cls.load_from_mlflow.return_value = JobLifecycle(
+            experiment_name="alpha",
+            run_id="run-1",
+            job_id="job-1",
+        )
+
+        response = self.client.get("/api/runs/run-1/jobs/job-1")
+
+        self.assertEqual(response.status_code, 200)
+        readiness = response.json()["readiness"]
+        self.assertFalse(readiness["code"])
+        self.assertTrue(readiness["lifecycle"])
+        mock_tarball_exists.assert_called_once_with("run-1", "job-1")
 
     @patch(
         "cortexflow_ui.backend.main.get_ray_logs",
@@ -288,6 +363,47 @@ class TestRunEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
         mock_stop.assert_called_once_with("run-1")
+
+
+class TestTarballExists(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = Path(tempfile.mkdtemp())
+        manifest = {"code_tarball_uri": "s3://ray-checkpoints/job/job-1/project_code_root.tar.gz"}
+        self.manifest_path = self.tmpdir / "manifest.json"
+        self.manifest_path.write_text(json.dumps(manifest))
+
+        self.fake_mlflow = MagicMock()
+        self.fake_mlflow.download_artifacts.return_value = str(self.manifest_path)
+        self.fake_s3 = MagicMock()
+
+        patchers = [
+            patch("cortexflow_ui.backend.main.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexflow_ui.backend.main.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+            patch(
+                "cortexflow_ui.backend.main.s3_util.get_s3_client",
+                return_value=self.fake_s3,
+            ),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_returns_true_when_head_object_succeeds(self) -> None:
+        self.fake_s3.head_object.return_value = {"ContentLength": 123}
+
+        self.assertTrue(_tarball_exists("run-1", "job-1"))
+        self.fake_s3.head_object.assert_called_once_with(
+            Bucket="ray-checkpoints",
+            Key="job/job-1/project_code_root.tar.gz",
+        )
+
+    def test_returns_false_when_head_object_raises(self) -> None:
+        self.fake_s3.head_object.side_effect = Exception("404 NoSuchKey")
+
+        self.assertFalse(_tarball_exists("run-1", "job-1"))
 
 
 if __name__ == "__main__":

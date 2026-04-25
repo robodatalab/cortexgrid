@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from dataclasses import asdict
@@ -8,7 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import list_experiments
+from cortexflow import s3_util
+from cortexflow.experiment import get_mlflow_tracking_uri, list_experiments
 from cortexflow.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
@@ -26,6 +28,7 @@ from cortexflow.mlflow_util import (
     list_run_metrics,
     list_run_params,
 )
+from mlflow.tracking import MlflowClient
 from cortexflow.ray_util import get_ray_job_url, get_ray_logs
 from cortexflow.secrets import (
     delete_secret,
@@ -167,15 +170,27 @@ def run_jobs(run_id: str) -> list[dict]:
 
 
 def check_job_readiness(run_id: str, job_id: str) -> dict:
-    code_entries = list_run_artifacts(run_id, f"job/{job_id}/project_code_root")
-    code_ready = len(code_entries) > 0
     job_entries = list_run_artifacts(run_id, f"job/{job_id}")
     lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
+    manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
+    code_ready = manifest_ready and _tarball_exists(run_id, job_id)
     return {
         "code": code_ready,
         "lifecycle": lifecycle_ready,
         "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
     }
+
+
+def _tarball_exists(run_id: str, job_id: str) -> bool:
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
+    manifest = json.loads(Path(manifest_path).read_text())
+    bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+    try:
+        s3_util.get_s3_client().head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
 
 
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
