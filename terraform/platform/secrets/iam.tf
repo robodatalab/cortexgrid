@@ -1,14 +1,6 @@
 # =============================================================================
 # IAM — access policies for secrets consumers
 # =============================================================================
-#
-# Secret values are created by scripts/push-secrets.sh. This module grants
-# read access using wildcard ARN patterns so it can be applied before or
-# after secrets exist.
-
-# ── DGX Machine User ─────────────────────────────────────────────────────────
-# Minimal IAM user for the DGX Spark to pull its own secrets.
-# Credentials are the one bootstrapping secret stored manually on the DGX.
 
 resource "aws_iam_user" "dgx" {
   name = "robolab-dgx"
