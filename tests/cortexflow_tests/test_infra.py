@@ -11,27 +11,27 @@ from cortexflow.infra import (
 )
 
 
-class TestInfraFallsBackToServerIp(unittest.TestCase):
-    """With no env vars set, URIs fall back to DGX Tailscale IP + NodePort."""
+class TestInfraFallsBackToSm(unittest.TestCase):
+    """With no env vars set, URIs come from AWS Secrets Manager — which now holds
+    the full URL (not just an IP). `get_s3_endpoint_url` is env-only with no SM
+    fallback: unset means "real AWS S3"."""
 
-    @patch.dict("os.environ", {}, clear=False)
-    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
+    @patch("cortexflow.infra.get_secret", return_value="http://100.80.27.32:30500")
     def test_mlflow_tracking_uri(self, _mock: MagicMock) -> None:
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(get_mlflow_tracking_uri(), "http://100.80.27.32:30500")
 
-    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
+    @patch("cortexflow.infra.get_secret", return_value="http://100.80.27.32:30265")
     def test_ray_job_server_uri(self, _mock: MagicMock) -> None:
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(get_ray_job_server_uri(), "http://100.80.27.32:30265")
 
-    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
-    def test_s3_endpoint_url(self, _mock: MagicMock) -> None:
+    def test_s3_endpoint_url_unset_returns_none(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(get_s3_endpoint_url(), "http://100.80.27.32:30900")
+            self.assertIsNone(get_s3_endpoint_url())
 
     @patch("cortexflow.infra.MlflowClient")
-    @patch("cortexflow.infra.get_secret", return_value="100.80.27.32")
+    @patch("cortexflow.infra.get_secret", return_value="http://100.80.27.32:30500")
     def test_mlflow_run_url(
         self, _mock_secret: MagicMock, mock_mlflow_cls: MagicMock
     ) -> None:
