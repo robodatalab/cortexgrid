@@ -2,26 +2,26 @@ locals {
   ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
 }
 
-data "aws_ami" "ubuntu_arm64" {
+data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
   filter {
     name   = "architecture"
-    values = ["arm64"]
+    values = ["x86_64"]
   }
 }
 
-data "aws_subnet" "primary" {
-  id = data.aws_subnets.default.ids[0]
+data "aws_subnet" "head" {
+  id = var.private_subnet_ids[0]
 }
 
 resource "aws_ebs_volume" "storage" {
-  availability_zone = data.aws_subnet.primary.availability_zone
+  availability_zone = data.aws_subnet.head.availability_zone
   size              = var.ebs_size_gb
   type              = "gp3"
 
@@ -33,11 +33,13 @@ resource "aws_ebs_volume" "storage" {
 }
 
 resource "aws_instance" "head" {
-  ami                         = data.aws_ami.ubuntu_arm64.id
-  instance_type               = var.instance_type
-  subnet_id                   = data.aws_subnet.primary.id
-  vpc_security_group_ids      = [aws_security_group.head.id]
-  associate_public_ip_address = true
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  subnet_id              = data.aws_subnet.head.id
+  vpc_security_group_ids = [aws_security_group.head.id]
+  # Private subnet: no public IP. Tailscale joins via outbound NAT and uses
+  # DERP relays for inbound peer connections.
+  associate_public_ip_address = false
 
   user_data = templatefile("${path.module}/cloud-init.yaml", {
     tailscale_auth_key = var.tailscale_auth_key
@@ -46,7 +48,7 @@ resource "aws_instance" "head" {
   })
 
   root_block_device {
-    volume_size = 20
+    volume_size = 100
     volume_type = "gp3"
   }
 

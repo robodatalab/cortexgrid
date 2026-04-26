@@ -81,7 +81,6 @@ def dashboards() -> list[Dashboard]:
     return [
         Dashboard(id="mlflow", url=os.environ["PUBLIC_MLFLOW_URL"]),
         Dashboard(id="ray", url=os.environ["PUBLIC_RAY_DASHBOARD_URL"]),
-        Dashboard(id="minio", url=os.environ["PUBLIC_MINIO_CONSOLE_URL"]),
     ]
 
 

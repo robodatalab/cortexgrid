@@ -16,8 +16,10 @@ def build() -> Pipeline:
         operators.Kubeconfig(),
         operators.LocalPath(),
         operators.EnvSecrets(),
+        operators.PlatformConfig(),
         operators.BootstrapSecrets(),
         operators.ControlPlaneDetails(),
         operators.NodeLabel(role="head", strict=True),
         operators.WorkerLabels(),
+        operators.ArgoReady(),
     ])

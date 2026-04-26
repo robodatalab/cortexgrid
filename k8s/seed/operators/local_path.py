@@ -2,8 +2,7 @@
 
 Required deps: connection, node_ip, storage_path.
 
-Setup patches the local-path-config configmap; teardown wipes the HDD contents
-(with an explicit confirmation prompt, since it destroys workload data).
+Setup patches the local-path-config configmap; teardown wipes the HDD contents.
 """
 
 import json
@@ -63,13 +62,6 @@ class LocalPath(Operator):
     def teardown(self, deps: dict) -> None:
         c = deps["connection"]
         storage_path = deps["storage_path"]
-        confirm = input(
-            f"Wipe PVC contents under {storage_path} on {c.host}? This destroys "
-            f"all workload data persisted to the HDD. [y/N] "
-        )
-        if confirm.strip().lower() != "y":
-            log.info(f"Skipped wiping {storage_path}.")
-            return
         util.sudo_script(
             c,
             textwrap.dedent(f"""\

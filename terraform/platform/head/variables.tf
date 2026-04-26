@@ -1,13 +1,17 @@
-variable "aws_region" {
-  description = "AWS region"
+variable "vpc_id" {
+  description = "VPC ID — supplied by the network module."
   type        = string
-  default     = "eu-west-2"
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs from the network module. The EC2 lands in private_subnet_ids[0]."
+  type        = list(string)
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for the k3s head"
+  description = "EC2 instance type for the k3s head. amd64 because most workload images are not yet multi-arch — only ray is."
   type        = string
-  default     = "t4g.large"
+  default     = "t3.large"
 }
 
 variable "ebs_size_gb" {

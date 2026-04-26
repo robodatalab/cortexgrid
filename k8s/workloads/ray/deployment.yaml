@@ -19,7 +19,7 @@ spec:
     spec:
       runtimeClassName: nvidia
       nodeSelector:
-        role: head
+        role: worker
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -47,13 +47,15 @@ spec:
               value: http://mlflow.mlflow.svc.cluster.local:5000
             - name: RAY_JOB_SERVER_URI
               value: http://ray-head.ray.svc.cluster.local:8265
-            - name: AWS_S3_ENDPOINT_URL
-              value: http://minio.minio.svc.cluster.local:9000
           envFrom:
             - secretRef:
                 name: ray-env
             - secretRef:
                 name: aws-creds
+            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
+            - secretRef:
+                name: s3-endpoint-override
+                optional: true
           ports:
             - name: dashboard
               containerPort: 8265
@@ -84,6 +86,8 @@ spec:
         app: ray-worker
     spec:
       runtimeClassName: nvidia
+      nodeSelector:
+        role: worker
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -109,11 +113,13 @@ spec:
               value: http://mlflow.mlflow.svc.cluster.local:5000
             - name: RAY_JOB_SERVER_URI
               value: http://ray-head.ray.svc.cluster.local:8265
-            - name: AWS_S3_ENDPOINT_URL
-              value: http://minio.minio.svc.cluster.local:9000
           envFrom:
             - secretRef:
                 name: aws-creds
+            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
+            - secretRef:
+                name: s3-endpoint-override
+                optional: true
           livenessProbe:
             exec:
               command: ["ray", "status"]

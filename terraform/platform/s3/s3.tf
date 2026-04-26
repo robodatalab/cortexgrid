@@ -1,0 +1,39 @@
+resource "aws_s3_bucket" "main" {
+  bucket = var.bucket_name
+
+  tags = {
+    Project   = "robolab"
+    Component = "s3"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
+  bucket = aws_s3_bucket.main.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Surface the bucket name in SM so apps can read it via ESO instead of
+# hardcoding it into manifests.
+
+resource "aws_secretsmanager_secret" "bucket_name" {
+  name = "robolab/infra/S3_BUCKET_NAME"
+}
+
+resource "aws_secretsmanager_secret_version" "bucket_name" {
+  secret_id     = aws_secretsmanager_secret.bucket_name.id
+  secret_string = aws_s3_bucket.main.id
+}
