@@ -1,7 +1,11 @@
-variable "aws_region" {
-  description = "AWS region"
+variable "vpc_id" {
+  description = "VPC ID — supplied by the network module."
   type        = string
-  default     = "eu-west-2"
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs from the network module. The EC2 lands in private_subnet_ids[0]."
+  type        = list(string)
 }
 
 variable "instance_type" {

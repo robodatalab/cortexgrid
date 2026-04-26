@@ -72,10 +72,10 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  backup_retention_period   = 0
-  skip_final_snapshot       = true
-  deletion_protection       = false
-  apply_immediately         = true
+  backup_retention_period    = 0
+  skip_final_snapshot        = true
+  deletion_protection        = false
+  apply_immediately          = true
   auto_minor_version_upgrade = true
 
   tags = {

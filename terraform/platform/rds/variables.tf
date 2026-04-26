@@ -1,7 +1,16 @@
-variable "aws_region" {
-  description = "AWS region"
+variable "vpc_id" {
+  description = "VPC ID — supplied by the network module."
   type        = string
-  default     = "eu-west-2"
+}
+
+variable "private_subnet_ids" {
+  description = "Private subnet IDs from the network module. RDS subnet group requires >=2 AZs even for single-AZ instances."
+  type        = list(string)
+}
+
+variable "head_security_group_id" {
+  description = "Security group ID of the k3s head — Postgres ingress is restricted to it."
+  type        = string
 }
 
 variable "instance_class" {

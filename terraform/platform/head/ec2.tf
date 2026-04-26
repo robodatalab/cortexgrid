@@ -17,7 +17,7 @@ data "aws_ami" "ubuntu" {
 }
 
 data "aws_subnet" "head" {
-  id = data.aws_subnets.private.ids[0]
+  id = var.private_subnet_ids[0]
 }
 
 resource "aws_ebs_volume" "storage" {
@@ -33,10 +33,10 @@ resource "aws_ebs_volume" "storage" {
 }
 
 resource "aws_instance" "head" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.instance_type
-  subnet_id                   = data.aws_subnet.head.id
-  vpc_security_group_ids      = [aws_security_group.head.id]
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  subnet_id              = data.aws_subnet.head.id
+  vpc_security_group_ids = [aws_security_group.head.id]
   # Private subnet: no public IP. Tailscale joins via outbound NAT and uses
   # DERP relays for inbound peer connections.
   associate_public_ip_address = false
