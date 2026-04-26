@@ -36,6 +36,12 @@ class K3sServer(Operator):
         # `node-ip` tells k3s to register the node under node_ip instead of the
         # default LAN interface; otherwise pod networking and every script
         # that looks up the node by Tailscale IP (await_node) misses it.
+        # `node-label role=head` registers the node with the label from the
+        # very first kubelet registration. The bootstrap argocd manifest pins
+        # its pods to `role=head`; without this, helm-install-argocd retries
+        # repeatedly until NodeLabel runs ~minutes later in the pipeline,
+        # leaving stale state in argocd-secret/argocd-cm that breaks the
+        # application controller's gRPC client.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
@@ -46,6 +52,8 @@ class K3sServer(Operator):
 tls-san:
   - {node_ip}
 node-ip: {node_ip}
+node-label:
+  - role=head
 EOF
             if [[ ! -x /usr/local/bin/k3s ]]; then
                 curl -sfL https://get.k3s.io | sh -
