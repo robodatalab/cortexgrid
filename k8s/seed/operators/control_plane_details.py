@@ -18,14 +18,18 @@ class ControlPlaneDetails(Operator):
     def setup(self, deps: dict) -> None:
         c = deps["connection"]
         node_ip = deps["node_ip"]
-        log.info("Publishing k3s token + control-plane IP to AWS SM...")
+        log.info("Publishing k3s token + service URLs to AWS SM...")
         token = c.sudo(
             "cat /var/lib/rancher/k3s/server/node-token", hide=True
         ).stdout.strip()
         set_secret(util.SECRET_K3S_TOKEN, token)
         set_secret(util.SECRET_CONTROL_PLANE_IP, node_ip)
+        set_secret(util.SECRET_MLFLOW_TRACKING_URI, util.mlflow_tracking_uri_for(node_ip))
+        set_secret(util.SECRET_RAY_JOB_SERVER_URI, util.ray_job_server_uri_for(node_ip))
 
     def teardown(self, deps: dict) -> None:
-        log.info("Deleting k3s token + control-plane IP from AWS SM...")
+        log.info("Deleting k3s token + service URLs from AWS SM...")
         delete_secret(util.SECRET_K3S_TOKEN)
         delete_secret(util.SECRET_CONTROL_PLANE_IP)
+        delete_secret(util.SECRET_MLFLOW_TRACKING_URI)
+        delete_secret(util.SECRET_RAY_JOB_SERVER_URI)

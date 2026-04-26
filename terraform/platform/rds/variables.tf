@@ -17,9 +17,9 @@ variable "allocated_storage_gb" {
 }
 
 variable "db_name" {
-  description = "Initial database name. Apps may create additional databases on the same instance later."
+  description = "Initial database name. mlflow is the only current consumer; additional databases on the same instance can be created later via the postgres provider or app-managed migrations."
   type        = string
-  default     = "robolab"
+  default     = "mlflow"
 }
 
 variable "engine_version" {

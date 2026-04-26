@@ -78,11 +78,13 @@ def infra_status() -> InfraStatus:
 
 @app.get("/api/dashboards")
 def dashboards() -> list[Dashboard]:
-    return [
+    items = [
         Dashboard(id="mlflow", url=os.environ["PUBLIC_MLFLOW_URL"]),
         Dashboard(id="ray", url=os.environ["PUBLIC_RAY_DASHBOARD_URL"]),
-        Dashboard(id="minio", url=os.environ["PUBLIC_MINIO_CONSOLE_URL"]),
     ]
+    if minio_url := os.environ.get("PUBLIC_MINIO_CONSOLE_URL"):
+        items.append(Dashboard(id="minio", url=minio_url))
+    return items
 
 
 @app.get("/api/secrets")

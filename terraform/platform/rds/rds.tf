@@ -16,6 +16,45 @@ resource "aws_secretsmanager_secret_version" "rds_password" {
   secret_string = random_password.master.result
 }
 
+# Connection info also lives in SM so apps can read it via ESO without
+# hardcoding terraform-controlled values into manifests.
+
+resource "aws_secretsmanager_secret" "rds_host" {
+  name = "robolab/infra/RDS_HOST"
+}
+
+resource "aws_secretsmanager_secret_version" "rds_host" {
+  secret_id     = aws_secretsmanager_secret.rds_host.id
+  secret_string = aws_db_instance.main.address
+}
+
+resource "aws_secretsmanager_secret" "rds_port" {
+  name = "robolab/infra/RDS_PORT"
+}
+
+resource "aws_secretsmanager_secret_version" "rds_port" {
+  secret_id     = aws_secretsmanager_secret.rds_port.id
+  secret_string = tostring(aws_db_instance.main.port)
+}
+
+resource "aws_secretsmanager_secret" "rds_username" {
+  name = "robolab/infra/RDS_USERNAME"
+}
+
+resource "aws_secretsmanager_secret_version" "rds_username" {
+  secret_id     = aws_secretsmanager_secret.rds_username.id
+  secret_string = aws_db_instance.main.username
+}
+
+resource "aws_secretsmanager_secret" "rds_db_name" {
+  name = "robolab/infra/RDS_DB_NAME"
+}
+
+resource "aws_secretsmanager_secret_version" "rds_db_name" {
+  secret_id     = aws_secretsmanager_secret.rds_db_name.id
+  secret_string = aws_db_instance.main.db_name
+}
+
 resource "aws_db_instance" "main" {
   identifier             = "robolab"
   engine                 = "postgres"

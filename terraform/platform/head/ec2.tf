@@ -16,12 +16,12 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-data "aws_subnet" "primary" {
-  id = data.aws_subnets.default.ids[0]
+data "aws_subnet" "head" {
+  id = data.aws_subnets.private.ids[0]
 }
 
 resource "aws_ebs_volume" "storage" {
-  availability_zone = data.aws_subnet.primary.availability_zone
+  availability_zone = data.aws_subnet.head.availability_zone
   size              = var.ebs_size_gb
   type              = "gp3"
 
@@ -35,9 +35,11 @@ resource "aws_ebs_volume" "storage" {
 resource "aws_instance" "head" {
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
-  subnet_id                   = data.aws_subnet.primary.id
+  subnet_id                   = data.aws_subnet.head.id
   vpc_security_group_ids      = [aws_security_group.head.id]
-  associate_public_ip_address = true
+  # Private subnet: no public IP. Tailscale joins via outbound NAT and uses
+  # DERP relays for inbound peer connections.
+  associate_public_ip_address = false
 
   user_data = templatefile("${path.module}/cloud-init.yaml", {
     tailscale_auth_key = var.tailscale_auth_key

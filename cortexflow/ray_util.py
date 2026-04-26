@@ -5,11 +5,7 @@ from __future__ import annotations
 import os
 from enum import Enum
 
-from cortexflow.infra import (
-    RAY_DASHBOARD_NODEPORT,
-    get_ray_job_server_uri,
-    get_server_ip,
-)
+from cortexflow.infra import get_ray_job_server_uri
 from ray.job_submission import JobSubmissionClient
 
 
@@ -73,10 +69,7 @@ def get_ray_job_url(ray_job_id: str | None) -> str | None:
     if ray_job_id is None:
         return None
 
-    base = (
-        os.environ.get("PUBLIC_RAY_DASHBOARD_URL")
-        or f"http://{get_server_ip()}:{RAY_DASHBOARD_NODEPORT}"
-    )
+    base = os.environ.get("PUBLIC_RAY_DASHBOARD_URL") or get_ray_job_server_uri()
     return f"{base}/#/jobs/{ray_job_id}"
 
 

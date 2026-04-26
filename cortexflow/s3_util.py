@@ -1,7 +1,14 @@
 """S3/MinIO wrappers.
 
 Provides upload/download and a pre-configured boto3 client.
-Works with MinIO locally and real S3 on AWS — same code.
+Works with real S3 on AWS and with MinIO when AWS_S3_ENDPOINT_URL is set.
+
+Credentials come from the standard boto3 chain (AWS_ACCESS_KEY_ID /
+AWS_SECRET_ACCESS_KEY env vars; on AWS this is populated by ESO from
+robolab/infra/AWS_*).
+
+Default bucket comes from S3_BUCKET_NAME env (populated by ESO from
+robolab/infra/S3_BUCKET_NAME, written by terraform/platform/s3).
 """
 
 from __future__ import annotations
@@ -15,21 +22,22 @@ from tqdm import tqdm  # type: ignore
 from cortexflow.infra import get_s3_endpoint_url
 
 
-# Hardcoded to match the MinIO creds set in the k8s MinIO Deployment.
-# The DGX is an isolated single-tenant machine, so these aren't real secrets.
-_S3_ACCESS_KEY = "admin"
-_S3_SECRET_KEY = "adminadmin"
-_S3_DEFAULT_BUCKET = "ray-checkpoints"
+def _default_bucket() -> str:
+    bucket = os.environ.get("S3_BUCKET_NAME")
+    if not bucket:
+        raise RuntimeError(
+            "S3_BUCKET_NAME env var is not set. Apps running in-cluster get "
+            "this via ESO from the aws-creds Secret; set it manually in dev "
+            "shells if you need to call upload/download outside the cluster."
+        )
+    return bucket
 
 
 def get_s3_client() -> Any:
-    """Return a boto3 S3 client configured for MinIO or AWS S3."""
+    """Return a boto3 S3 client. AWS by default, MinIO if AWS_S3_ENDPOINT_URL is set."""
     kwargs: dict[str, Any] = {}
-    endpoint_url = get_s3_endpoint_url()
-    if endpoint_url:
+    if endpoint_url := get_s3_endpoint_url():
         kwargs["endpoint_url"] = endpoint_url
-    kwargs["aws_access_key_id"] = _S3_ACCESS_KEY
-    kwargs["aws_secret_access_key"] = _S3_SECRET_KEY
     return boto3.client("s3", **kwargs)
 
 
@@ -48,7 +56,7 @@ def upload(
     Returns:
         The s3://bucket/key URI of the uploaded object.
     """
-    bucket = bucket or _S3_DEFAULT_BUCKET
+    bucket = bucket or _default_bucket()
     key = key or os.path.basename(local_path)
 
     client = get_s3_client()
@@ -84,7 +92,7 @@ def upload_dir(
     Returns:
         List of s3://bucket/key URIs for uploaded objects.
     """
-    bucket = bucket or _S3_DEFAULT_BUCKET
+    bucket = bucket or _default_bucket()
 
     client = get_s3_client()
     try:

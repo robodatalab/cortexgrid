@@ -18,6 +18,7 @@ node-teardown:
 
 head-aws-apply:
 	@[ -f .env ] || { echo ".env not found"; exit 1; }
+	cd terraform/platform/network && terraform init && terraform apply -auto-approve
 	. ./.env; \
 	  [ -n "$$TAILSCALE_AUTH_KEY" ] || { echo "TAILSCALE_AUTH_KEY missing from .env"; exit 1; }; \
 	  cd terraform/platform/head && \
@@ -31,4 +32,5 @@ head-aws-destroy:
 	cd terraform/platform/rds && terraform destroy -auto-approve
 	cd terraform/platform/s3 && terraform destroy -auto-approve
 	cd terraform/platform/head && TF_VAR_tailscale_auth_key=_ terraform destroy -auto-approve
+	cd terraform/platform/network && terraform destroy -auto-approve
 	uv run python -m k8s.seed.update_ssh_config --remove

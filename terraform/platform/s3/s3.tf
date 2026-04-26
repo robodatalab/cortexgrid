@@ -25,3 +25,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
     }
   }
 }
+
+# Surface the bucket name in SM so apps can read it via ESO instead of
+# hardcoding it into manifests.
+
+resource "aws_secretsmanager_secret" "bucket_name" {
+  name = "robolab/infra/S3_BUCKET_NAME"
+}
+
+resource "aws_secretsmanager_secret_version" "bucket_name" {
+  secret_id     = aws_secretsmanager_secret.bucket_name.id
+  secret_string = aws_s3_bucket.main.id
+}

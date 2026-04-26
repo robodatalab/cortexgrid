@@ -28,6 +28,22 @@ KUBE_CONTEXT = "robolab"
 # cortexflow.secrets prefixes these with "robolab/infra/".
 SECRET_K3S_TOKEN = "K3S_NODE_TOKEN"
 SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
+SECRET_MLFLOW_TRACKING_URI = "MLFLOW_TRACKING_URI"
+SECRET_RAY_JOB_SERVER_URI = "RAY_JOB_SERVER_URI"
+
+# NodePorts must match k8s/workloads/{mlflow,ray}/service.yaml. Seed pipeline
+# stores the full URL in SM at setup time; downstream consumers read the URL,
+# not the port.
+_MLFLOW_NODEPORT = 30500
+_RAY_DASHBOARD_NODEPORT = 30265
+
+
+def mlflow_tracking_uri_for(tailscale_ip: str) -> str:
+    return f"http://{tailscale_ip}:{_MLFLOW_NODEPORT}"
+
+
+def ray_job_server_uri_for(tailscale_ip: str) -> str:
+    return f"http://{tailscale_ip}:{_RAY_DASHBOARD_NODEPORT}"
 
 JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.py"
 JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"

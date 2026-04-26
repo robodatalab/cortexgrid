@@ -28,9 +28,10 @@ spec:
               value: http://mlflow.mlflow.svc.cluster.local:5000
             - name: RAY_JOB_SERVER_URI
               value: http://ray-head.ray.svc.cluster.local:8265
-            - name: AWS_S3_ENDPOINT_URL
-              value: http://minio.minio.svc.cluster.local:9000
           envFrom:
+            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME — boto3
+            # picks them up automatically. AWS_S3_ENDPOINT_URL is intentionally
+            # unset so boto3 hits real AWS S3.
             - secretRef:
                 name: aws-creds
             - secretRef:
