@@ -34,6 +34,7 @@ class Kubeconfig(Operator):
         )
         self.local_path.parent.mkdir(parents=True, exist_ok=True)
         self.local_path.touch(exist_ok=True)
+        self._scrub_local_context()
 
         remote_kcfg = c.sudo("cat /etc/rancher/k3s/k3s.yaml", hide=True).stdout
         remote_kcfg = (
@@ -58,10 +59,13 @@ class Kubeconfig(Operator):
             os.unlink(tmp_path)
 
     def teardown(self, deps: dict) -> None:
+        self._scrub_local_context()
+        log.info(f"Scrubbed kubeconfig context '{self.context}'.")
+
+    def _scrub_local_context(self) -> None:
         for verb in ("delete-context", "delete-cluster", "delete-user"):
             subprocess.run(
                 ["kubectl", "config", verb, self.context],
                 capture_output=True,
                 check=False,
             )
-        log.info(f"Scrubbed kubeconfig context '{self.context}'.")

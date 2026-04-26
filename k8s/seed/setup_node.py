@@ -17,7 +17,7 @@ import getpass
 import logging
 import os
 import sys
-from typing import Literal
+from typing import Callable, Literal
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -103,10 +103,15 @@ def _lookup_head_creds() -> tuple[str | None, str | None]:
     return None, None
 
 
-def _run_head(args: argparse.Namespace, cfg: dict, sudo_pw: str) -> None:
+def _run_head(
+    args: argparse.Namespace,
+    cfg: dict,
+    ssh_pw: Callable[[], str],
+    sudo_pw: Callable[[], str],
+) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
     pipeline = head.build()
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
         total=len(pipeline.operators), desc=f"Head setup {args.ip}"
     ) as bar:
         def on_step_done(name: str) -> None:
@@ -132,13 +137,17 @@ def _run_head(args: argparse.Namespace, cfg: dict, sudo_pw: str) -> None:
     )
 
 
-def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
+def _run_worker(
+    args: argparse.Namespace,
+    ssh_pw: Callable[[], str],
+    sudo_pw: Callable[[], str],
+) -> None:
     head_token, head_ip = _lookup_head_creds()
     head_ready = head_token is not None and head_ip is not None
     mode: Literal["direct", "deferred"] = "direct" if head_ready else "deferred"
 
     pipeline = worker.build(mode=mode)
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
         total=len(pipeline.operators), desc=f"Worker setup {args.ip}"
     ) as bar:
         def on_step_done(name: str) -> None:
@@ -175,12 +184,13 @@ def main() -> None:
     util.save_config(cfg)
 
     load_dotenv(util.ENV_FILE)
-    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
+    ssh_pw = lambda: getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
+    sudo_pw = lambda: getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
     if args.type == "head":
-        _run_head(args, cfg, sudo_pw)
+        _run_head(args, cfg, ssh_pw, sudo_pw)
     else:
-        _run_worker(args, sudo_pw)
+        _run_worker(args, ssh_pw, sudo_pw)
 
 
 if __name__ == "__main__":

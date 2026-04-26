@@ -39,6 +39,7 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 |--------|---------|
 | `terraform/website/` | Marketing site + investor auth infrastructure |
 | `terraform/platform/secrets/` | Centralized secrets management (AWS Secrets Manager + IAM) |
+| `terraform/platform/head/` | EC2 + EBS that hosts the k3s head and platform services |
 | `k8s/` | Argo CD GitOps platform — bootstrap manifest, Argo Applications, workload manifests, one-shot DGX seed scripts |
 | `cortexflow/` | Python library for ML code to reach Ray/MLflow/S3 |
 | `lambda/auth/` | Auth Lambda source (deployed by `terraform/website/`) |
@@ -108,9 +109,28 @@ State backend: `s3://robolab-terraform-state/website/terraform.tfstate`
 4. `psql -h <rds_endpoint> ... -f ../../lambda/auth/schema.sql` to create tables
 5. Verify SES sender in AWS Console; request production access to lift sandbox
 
+### `terraform/platform/head/` — k3s head EC2
+
+Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platform services in `eu-west-2`. The DGX Spark joins as a worker over Tailscale.
+
+| Resource | Purpose |
+|----------|---------|
+| EC2 (`t4g.large`, Ubuntu 24.04 arm64) | Hosts the k3s server + workloads pinned to `role=head` |
+| EBS gp3 (100 GB default) | Mounted at `/storage`; backs k3s local-path PVCs (Postgres, MLflow, MinIO). Online-resizable via `aws ec2 modify-volume`. |
+| Security group | Egress-all + UDP 41641 inbound for Tailscale direct connections; no public SSH (access is over Tailscale). |
+| Cloud-init | Adds your `~/.ssh/id_rsa.pub` to the `ubuntu` user, installs Tailscale (joins tailnet via auth key from `.env`), formats and mounts the EBS volume. |
+
+State backend: `s3://robolab-terraform-state/platform/head/terraform.tfstate`
+
+**Bring-up order:**
+1. `make head-apply` — terraform reads `TAILSCALE_AUTH_KEY` from `.env`, applies. EC2 boots, joins your tailnet as `robolab-head`.
+2. Add a `Host robolab-aws` entry to `~/.ssh/config` pointing at the new Tailscale IP.
+3. `make setup-head IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage` — installs k3s, bootstraps Argo CD, publishes `.env` to Secrets Manager.
+4. `make setup-worker IP=<dgx-tailscale-ip>` — DGX joins as worker.
+
 ### `terraform/platform/secrets/` — Centralized secrets
 
-IAM users, roles, and OIDC configuration for accessing AWS Secrets Manager. Secret values are managed directly in AWS Secrets Manager (via the Platform UI or `aws secretsmanager` CLI), not Terraform.
+IAM users, roles, and OIDC configuration for accessing AWS Secrets Manager. Secret values are written by `setup-node` from `.env` (see [k8s/seed/operators/env_secrets.py](k8s/seed/operators/env_secrets.py)), not Terraform.
 
 ### Security posture
 

@@ -17,7 +17,7 @@ from typing import Callable
 
 import yaml  # type: ignore
 from fabric import Connection  # type: ignore
-from paramiko import AutoAddPolicy, SSHConfig  # type: ignore
+from paramiko import AuthenticationException, AutoAddPolicy, SSHConfig  # type: ignore
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -90,16 +90,34 @@ def ssh_user_for_ip(ip: str) -> str | None:
     return None
 
 
-def connect(user: str, ip: str, password: str) -> Connection:
-    """Open a Fabric SSH connection. Paramiko tries SSH agent + key files first; if
-    none authenticate, falls back to the supplied password. Same password is reused
-    for sudo on the remote."""
-    c = Connection(
-        host=ip,
-        user=user,
-        connect_kwargs={"password": password},
-    )
-    c.config.sudo.password = password
+def connect(
+    user: str,
+    ip: str,
+    ssh_password: Callable[[], str],
+    sudo_password: Callable[[], str],
+) -> Connection:
+    """Open a Fabric SSH connection.
+
+    SSH: tries key/agent first; calls ssh_password() only if that fails.
+    Sudo: probes `sudo -n true`; calls sudo_password() only if NOPASSWD isn't set.
+    Each callback runs at most once, and only when its password is actually needed.
+    """
+    c = _build_connection(user, ip)
+    try:
+        c.open()
+    except AuthenticationException:
+        c = _build_connection(user, ip, password=ssh_password())
+        c.open()
+
+    if c.run("sudo -n true 2>/dev/null", hide=True, warn=True).failed:
+        c.config.sudo.password = sudo_password()
+
+    return c
+
+
+def _build_connection(user: str, ip: str, password: str | None = None) -> Connection:
+    kwargs = {"password": password} if password else {}
+    c = Connection(host=ip, user=user, connect_kwargs=kwargs)
     if c.client is not None:
         c.client.set_missing_host_key_policy(AutoAddPolicy())
     else:
@@ -108,7 +126,6 @@ def connect(user: str, ip: str, password: str) -> Connection:
             user,
             ip,
         )
-
     return c
 
 
