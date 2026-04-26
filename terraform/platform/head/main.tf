@@ -10,7 +10,7 @@ terraform {
 
   backend "s3" {
     bucket = "robolab-terraform-state"
-    key    = "platform/ecr/terraform.tfstate"
+    key    = "platform/head/terraform.tfstate"
     region = "us-east-1"
   }
 }

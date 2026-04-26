@@ -1,0 +1,43 @@
+#cloud-config
+
+users:
+  - default
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+package_update: true
+packages:
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /usr/local/bin/robolab-head-init.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      curl -fsSL https://tailscale.com/install.sh | sh
+      tailscale up --auth-key='${tailscale_auth_key}' --hostname=robolab-head
+
+      VOLUME_ID="${storage_volume_id}"
+      SYMLINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${VOLUME_ID//-/}"
+      for _ in $(seq 1 60); do
+        [[ -L "$SYMLINK" ]] && break
+        sleep 2
+      done
+      [[ -L "$SYMLINK" ]] || { echo "EBS volume $VOLUME_ID never attached"; exit 1; }
+      DEVICE=$(readlink -f "$SYMLINK")
+
+      blkid -L robolab-storage >/dev/null 2>&1 || mkfs.ext4 -L robolab-storage "$DEVICE"
+
+      mkdir -p /storage
+      grep -q '^LABEL=robolab-storage ' /etc/fstab || \
+        echo 'LABEL=robolab-storage /storage ext4 defaults,nofail 0 2' >> /etc/fstab
+      mount -a
+
+runcmd:
+  - /usr/local/bin/robolab-head-init.sh

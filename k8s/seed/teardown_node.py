@@ -14,6 +14,7 @@ import argparse
 import getpass
 import logging
 import sys
+from typing import Callable
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -36,10 +37,16 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def _run_head(args: argparse.Namespace, entry: dict, cfg: dict, sudo_pw: str) -> None:
+def _run_head(
+    args: argparse.Namespace,
+    entry: dict,
+    cfg: dict,
+    ssh_pw: Callable[[], str],
+    sudo_pw: Callable[[], str],
+) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
     pipeline = head.build()
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
         total=len(pipeline.operators), desc=f"Head teardown {args.ip}"
     ) as bar:
         def on_step_done(name: str) -> None:
@@ -60,11 +67,15 @@ def _run_head(args: argparse.Namespace, entry: dict, cfg: dict, sudo_pw: str) ->
     log.info("Head teardown complete.")
 
 
-def _run_worker(args: argparse.Namespace, sudo_pw: str) -> None:
+def _run_worker(
+    args: argparse.Namespace,
+    ssh_pw: Callable[[], str],
+    sudo_pw: Callable[[], str],
+) -> None:
     # Mode is irrelevant for teardown — JoinCluster.teardown runs both cleanups.
     # We still need to pick *some* valid mode to construct the pipeline.
     pipeline = worker.build(mode="direct")
-    with util.connect(args.ssh_user, args.ip, sudo_pw) as c, tqdm(
+    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
         total=len(pipeline.operators), desc=f"Worker teardown {args.ip}"
     ) as bar:
         def on_step_done(name: str) -> None:
@@ -99,12 +110,13 @@ def main() -> None:
         sys.exit(0)
 
     load_dotenv(util.ENV_FILE)
-    sudo_pw = getpass.getpass("Node password (SSH + sudo): ")
+    ssh_pw = lambda: getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
+    sudo_pw = lambda: getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
     if entry["role"] == "head":
-        _run_head(args, entry, cfg, sudo_pw)
+        _run_head(args, entry, cfg, ssh_pw, sudo_pw)
     else:
-        _run_worker(args, sudo_pw)
+        _run_worker(args, ssh_pw, sudo_pw)
 
     cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != args.ip]
     util.save_config(cfg)
