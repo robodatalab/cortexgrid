@@ -1,4 +1,4 @@
-.PHONY: setup-head setup-worker teardown-node head-apply head-destroy
+.PHONY: head-setup worker-setup node-teardown head-aws-apply head-aws-destroy
 
 # Optional SSH_USER; defaults to the laptop user if not passed.
 SSH_USER_FLAG = $(if $(SSH_USER),--ssh-user=$(SSH_USER))
@@ -23,8 +23,12 @@ head-aws-apply:
 	  cd terraform/platform/head && \
 	  terraform init && \
 	  TF_VAR_tailscale_auth_key="$$TAILSCALE_AUTH_KEY" terraform apply -auto-approve
+	cd terraform/platform/s3 && terraform init && terraform apply -auto-approve
+	cd terraform/platform/rds && terraform init && terraform apply -auto-approve
 	uv run python -m k8s.seed.update_ssh_config
 
 head-aws-destroy:
+	cd terraform/platform/rds && terraform destroy -auto-approve
+	cd terraform/platform/s3 && terraform destroy -auto-approve
 	cd terraform/platform/head && TF_VAR_tailscale_auth_key=_ terraform destroy -auto-approve
 	uv run python -m k8s.seed.update_ssh_config --remove

@@ -46,7 +46,7 @@ resource "aws_instance" "head" {
   })
 
   root_block_device {
-    volume_size = 20
+    volume_size = 100
     volume_type = "gp3"
   }
 

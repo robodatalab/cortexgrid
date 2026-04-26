@@ -34,6 +34,9 @@ spec:
     path: k8s/argo-deployments
     directory:
       recurse: true
+      # AWS profile: skip on-prem-only Apps (postgres, minio — replaced by RDS, S3).
+      # K3sServer rewrites this to an empty string when sys_vendor != "Amazon EC2".
+      exclude: 'onprem/**'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

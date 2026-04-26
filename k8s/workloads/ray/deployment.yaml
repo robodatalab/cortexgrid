@@ -19,7 +19,7 @@ spec:
     spec:
       runtimeClassName: nvidia
       nodeSelector:
-        role: head
+        role: worker
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -84,6 +84,8 @@ spec:
         app: ray-worker
     spec:
       runtimeClassName: nvidia
+      nodeSelector:
+        role: worker
       imagePullSecrets:
         - name: ghcr-pull
       containers:

@@ -18,6 +18,8 @@ import logging
 import shlex
 import textwrap
 
+import yaml  # type: ignore
+
 from k8s.seed import util
 from k8s.seed.pipeline import Operator
 
@@ -30,8 +32,10 @@ class K3sServer(Operator):
         c = deps["connection"]
         bootstrap_file = deps["bootstrap_file"]
         node_ip = deps["node_ip"]
-        log.info(f"Installing k3s server on {c.host} + staging argocd bootstrap...")
-        bootstrap_b64 = base64.b64encode(bootstrap_file.read_bytes()).decode()
+        profile = self._detect_profile(c)
+        log.info(f"Installing k3s server on {c.host} (profile={profile})...")
+        rendered = self._render_bootstrap(bootstrap_file.read_bytes(), profile)
+        bootstrap_b64 = base64.b64encode(rendered).decode()
         # `tls-san` adds node_ip to the API server's TLS cert SANs.
         # `node-ip` tells k3s to register the node under node_ip instead of the
         # default LAN interface; otherwise pod networking and every script
@@ -95,3 +99,30 @@ EOF
             timeout_s=300,
             poll_s=5,
         )
+
+    def _detect_profile(self, c) -> str:
+        """'aws' if the host is an EC2 instance, 'onprem' otherwise.
+
+        Reads /sys/class/dmi/id/sys_vendor — populated by the BIOS/firmware,
+        no network call. EC2 reports 'Amazon EC2'; physical hardware reports
+        the actual vendor (LENOVO, NVIDIA, ...).
+        """
+        result = c.run("cat /sys/class/dmi/id/sys_vendor", hide=True, warn=True)
+        vendor = result.stdout.strip() if result.ok else ""
+        return "aws" if vendor == "Amazon EC2" else "onprem"
+
+    def _render_bootstrap(self, content: bytes, profile: str) -> bytes:
+        """Drop the `onprem/**` exclude on on-prem so postgres + minio Apps sync.
+
+        The shipped argocd.yaml has `exclude: 'onprem/**'` for the AWS path.
+        On-prem deployments need those Apps included.
+        """
+        if profile == "aws":
+            return content
+        docs = list(yaml.safe_load_all(content))
+        for doc in docs:
+            if not doc or doc.get("kind") != "Application":
+                continue
+            if doc.get("metadata", {}).get("name") == "argo-bootstrap":
+                doc["spec"]["source"]["directory"].pop("exclude", None)
+        return yaml.safe_dump_all(docs).encode()
