@@ -5,9 +5,9 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for the k3s head"
+  description = "EC2 instance type for the k3s head. amd64 because most workload images are not yet multi-arch — only ray is."
   type        = string
-  default     = "t4g.large"
+  default     = "t3.large"
 }
 
 variable "ebs_size_gb" {

@@ -20,4 +20,5 @@ def build() -> Pipeline:
         operators.ControlPlaneDetails(),
         operators.NodeLabel(role="head", strict=True),
         operators.WorkerLabels(),
+        operators.ArgoReady(),
     ])

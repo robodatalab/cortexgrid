@@ -2,17 +2,17 @@ locals {
   ssh_public_key = file(pathexpand("~/.ssh/id_rsa.pub"))
 }
 
-data "aws_ami" "ubuntu_arm64" {
+data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"]
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
   }
   filter {
     name   = "architecture"
-    values = ["arm64"]
+    values = ["x86_64"]
   }
 }
 
@@ -33,7 +33,7 @@ resource "aws_ebs_volume" "storage" {
 }
 
 resource "aws_instance" "head" {
-  ami                         = data.aws_ami.ubuntu_arm64.id
+  ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
   subnet_id                   = data.aws_subnet.primary.id
   vpc_security_group_ids      = [aws_security_group.head.id]

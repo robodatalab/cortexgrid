@@ -115,7 +115,7 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 
 | Resource | Purpose |
 |----------|---------|
-| EC2 (`t4g.large`, Ubuntu 24.04 arm64) | Hosts the k3s server + workloads pinned to `role=head` |
+| EC2 (`t3.large`, Ubuntu 24.04 amd64) | Hosts the k3s server + workloads pinned to `role=head` |
 | EBS gp3 (100 GB default) | Mounted at `/storage`; backs k3s local-path PVCs (Postgres, MLflow, MinIO). Online-resizable via `aws ec2 modify-volume`. |
 | Security group | Egress-all + UDP 41641 inbound for Tailscale direct connections; no public SSH (access is over Tailscale). |
 | Cloud-init | Adds your `~/.ssh/id_rsa.pub` to the `ubuntu` user, installs Tailscale (joins tailnet via auth key from `.env`), formats and mounts the EBS volume. |
