@@ -41,3 +41,15 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # Tight retry to absorb the App-of-Apps wave gap: when wave -1 Applications
+    # (external-secrets, reflector) are created, ArgoCD moves to wave 0 before
+    # their child pods (e.g. external-secrets-webhook) are Ready. Wave 0
+    # resources that depend on those pods (ClusterSecretStore validation
+    # webhook) fail their first apply. Without this block, ArgoCD's default
+    # backoff stretches recovery to 3+ minutes; with it, ~30-60s.
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
