@@ -65,7 +65,10 @@ class BootstrapSecrets(Operator):
             "-n", "argocd", "delete", "secret", "argo-github-repo",
             "--ignore-not-found", check=False, capture=False,
         )
+        # --wait=false: don't block on finalizers (e.g. ESO CRDs). The node is
+        # about to be destroyed anyway, so a stuck Terminating namespace doesn't
+        # matter — only that this teardown step returns promptly.
         util.kubectl(
             "delete", "namespace", "external-secrets",
-            "--ignore-not-found", check=False, capture=False,
+            "--ignore-not-found", "--wait=false", check=False, capture=False,
         )
