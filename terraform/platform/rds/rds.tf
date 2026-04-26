@@ -1,64 +1,14 @@
-# Generate a random master password and stash it in Secrets Manager under the
-# robolab/infra/* namespace. ESO inside the cluster reads it via the existing
-# ClusterSecretStore — no separate IAM grant needed.
-
 resource "random_password" "master" {
   length  = 32
   special = false
 }
 
-resource "aws_secretsmanager_secret" "rds_password" {
-  name = "robolab/infra/RDS_PASSWORD"
-}
-
-resource "aws_secretsmanager_secret_version" "rds_password" {
-  secret_id     = aws_secretsmanager_secret.rds_password.id
-  secret_string = random_password.master.result
-}
-
-# Connection info also lives in SM so apps can read it via ESO without
-# hardcoding terraform-controlled values into manifests.
-
-resource "aws_secretsmanager_secret" "rds_host" {
-  name = "robolab/infra/RDS_HOST"
-}
-
-resource "aws_secretsmanager_secret_version" "rds_host" {
-  secret_id     = aws_secretsmanager_secret.rds_host.id
-  secret_string = aws_db_instance.main.address
-}
-
-resource "aws_secretsmanager_secret" "rds_port" {
-  name = "robolab/infra/RDS_PORT"
-}
-
-resource "aws_secretsmanager_secret_version" "rds_port" {
-  secret_id     = aws_secretsmanager_secret.rds_port.id
-  secret_string = tostring(aws_db_instance.main.port)
-}
-
-resource "aws_secretsmanager_secret" "rds_username" {
-  name = "robolab/infra/RDS_USERNAME"
-}
-
-resource "aws_secretsmanager_secret_version" "rds_username" {
-  secret_id     = aws_secretsmanager_secret.rds_username.id
-  secret_string = aws_db_instance.main.username
-}
-
-resource "aws_secretsmanager_secret" "rds_db_name" {
-  name = "robolab/infra/RDS_DB_NAME"
-}
-
-resource "aws_secretsmanager_secret_version" "rds_db_name" {
-  secret_id     = aws_secretsmanager_secret.rds_db_name.id
-  secret_string = aws_db_instance.main.db_name
-}
-
-# Composed mlflow backend store URI — surfaced directly so consumers don't have
-# to template it. On-prem writes the same key with an in-cluster Postgres URI
-# (see k8s/seed/operators/platform_config.py), so mlflow's ExternalSecret can
-# read this single value in both profiles without a profile-specific template.
+# Composed mlflow backend store URI — the only SM entry this module publishes.
+# Single value, consumed directly by mlflow's `mlflow-config` ExternalSecret
+# (no ESO templating). On-prem writes the same key with an in-cluster Postgres
+# URI (see k8s/seed/operators/platform_config.py), so mlflow's manifest is
+# profile-agnostic. The master password lives only inside this composed URI
+# and the RDS instance itself.
 resource "aws_secretsmanager_secret" "mlflow_backend_store_uri" {
   name = "robolab/infra/MLFLOW_BACKEND_STORE_URI"
 }
