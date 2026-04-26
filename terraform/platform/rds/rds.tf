@@ -55,6 +55,26 @@ resource "aws_secretsmanager_secret_version" "rds_db_name" {
   secret_string = aws_db_instance.main.db_name
 }
 
+# Composed mlflow backend store URI — surfaced directly so consumers don't have
+# to template it. On-prem writes the same key with an in-cluster Postgres URI
+# (see k8s/seed/operators/platform_config.py), so mlflow's ExternalSecret can
+# read this single value in both profiles without a profile-specific template.
+resource "aws_secretsmanager_secret" "mlflow_backend_store_uri" {
+  name = "robolab/infra/MLFLOW_BACKEND_STORE_URI"
+}
+
+resource "aws_secretsmanager_secret_version" "mlflow_backend_store_uri" {
+  secret_id = aws_secretsmanager_secret.mlflow_backend_store_uri.id
+  secret_string = format(
+    "postgresql://%s:%s@%s:%d/%s",
+    aws_db_instance.main.username,
+    random_password.master.result,
+    aws_db_instance.main.address,
+    aws_db_instance.main.port,
+    aws_db_instance.main.db_name,
+  )
+}
+
 resource "aws_db_instance" "main" {
   identifier             = "robolab"
   engine                 = "postgres"

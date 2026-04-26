@@ -33,6 +33,9 @@ class K3sServer(Operator):
         bootstrap_file = deps["bootstrap_file"]
         node_ip = deps["node_ip"]
         profile = self._detect_profile(c)
+        # Surface the detected profile for downstream operators (PlatformConfig)
+        # so they don't have to re-SSH and parse /sys/class/dmi/id/sys_vendor.
+        deps["profile"] = profile
         log.info(f"Installing k3s server on {c.host} (profile={profile})...")
         rendered = self._render_bootstrap(bootstrap_file.read_bytes(), profile)
         bootstrap_b64 = base64.b64encode(rendered).decode()
