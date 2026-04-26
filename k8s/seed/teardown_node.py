@@ -102,13 +102,6 @@ def main() -> None:
             f"Nothing to tear down — refusing to touch an untracked node."
         )
 
-    confirm = input(
-        f"This will wipe the {entry['role']} node at {args.ip} "
-        f"(k3s, toolkit, any deferred-join timer). Continue? [y/N] "
-    )
-    if confirm.strip().lower() != "y":
-        sys.exit(0)
-
     load_dotenv(util.ENV_FILE)
     ssh_pw = lambda: getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
     sudo_pw = lambda: getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
