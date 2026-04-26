@@ -40,7 +40,7 @@ def _load_env() -> bool:
             continue
         key, value = line.split("=", 1)
         os.environ[key.strip()] = value.strip().strip('"')
-    os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+    os.environ.setdefault("AWS_DEFAULT_REGION", "eu-west-2")
     return True
 
 

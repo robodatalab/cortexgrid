@@ -1,11 +1,11 @@
 # RoboLab Infrastructure
 
-Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. All cloud resources run on AWS (`us-east-1`) and are provisioned with Terraform. ML compute runs on a DGX Spark accessible over Tailscale.
+Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Cloud resources run on AWS (`eu-west-2`, except the marketing site which stays in `us-east-1` because CloudFront requires `us-east-1` ACM) and are provisioned with Terraform. ML compute runs on a DGX Spark worker that joins the cluster over Tailscale.
 
 ## Architecture
 
 ```
-  AWS (us-east-1)
+  AWS
   +--------------------------------------------------+
   |                                                  |
   |  Route53 --> CloudFront --> S3 (robodatalab.com) |

@@ -35,28 +35,6 @@ resource "aws_iam_user_policy" "dgx_secrets_manage" {
   policy = data.aws_iam_policy_document.dgx_secrets_manage.json
 }
 
-data "aws_iam_policy_document" "dgx_ecr_pull" {
-  statement {
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:BatchGetImage",
-    ]
-    resources = ["arn:aws:ecr:${var.aws_region}:*:repository/robolab/*"]
-  }
-}
-
-resource "aws_iam_user_policy" "dgx_ecr_pull" {
-  name   = "ecr-pull"
-  user   = aws_iam_user.dgx.name
-  policy = data.aws_iam_policy_document.dgx_ecr_pull.json
-}
-
 # ── DGX → argocd/ secrets (manage + read) ───────────────────────────────────
 # Seed publishes .env here; ESO running in-cluster reads these using the same
 # robolab-dgx credentials.
@@ -128,34 +106,4 @@ resource "aws_iam_role_policy" "github_actions_secrets_read" {
   name   = "secrets-read"
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_secrets_read.json
-}
-
-# ── ECR Push (for CD pipelines) ─────────────────────────────────────────────
-
-data "aws_iam_policy_document" "github_actions_ecr_push" {
-  statement {
-    actions = [
-      "ecr:GetAuthorizationToken",
-    ]
-    resources = ["*"]
-  }
-
-  statement {
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:GetDownloadUrlForLayer",
-      "ecr:BatchGetImage",
-      "ecr:PutImage",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
-    ]
-    resources = ["arn:aws:ecr:${var.aws_region}:*:repository/robolab/*"]
-  }
-}
-
-resource "aws_iam_role_policy" "github_actions_ecr_push" {
-  name   = "ecr-push"
-  role   = aws_iam_role.github_actions.id
-  policy = data.aws_iam_policy_document.github_actions_ecr_push.json
 }

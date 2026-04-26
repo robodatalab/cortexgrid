@@ -8,7 +8,7 @@ import boto3  # type: ignore
 
 
 _SM_PREFIX = "robolab/infra"
-_SM_REGION = "us-east-1"
+_SM_REGION = "eu-west-2"
 _DELETE_WAIT_TIMEOUT_S = 15.0
 _DELETE_WAIT_POLL_S = 0.25
 
