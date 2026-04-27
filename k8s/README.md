@@ -2,31 +2,74 @@
 
 GitOps manifests watched by Argo CD. See [argo-deployments/](argo-deployments/) for the actual deployment specs. [argocd.yaml](argocd.yaml) is the one-shot bootstrap applied at seed time and is not watched by Argo.
 
-## Workload placement
+## Topology
 
-**Current policy:** every first-party workload pins to the head node (`nodeSelector: role: head`). The only exception is `ray-worker`, which runs as a DaemonSet on every node so Ray can dispatch GPU jobs anywhere. The head hosts the k3s control plane, storage, and all CPU workloads; workers are there for extra GPU capacity only.
+The platform is a hybrid: a single k3s **head** plus zero or more **GPU workers**. The head can run on AWS EC2 or on a local box; workers can be the DGX, a ThinkStation, or any GPU node reachable over Tailscale. The same manifests apply in both cases - placement is decided by node labels, not by environment.
 
-Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../infra-config.yaml) at the repo root. That file is written by `setup-node` and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs.
+| Role | Label | What lands there | Typical box |
+|------|-------|------------------|-------------|
+| `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexflow-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`head-aws-apply` + `head-setup`) **or** on-prem ThinkStation/DGX (`head-setup` only) |
+| `worker` | `role=worker` | ray-worker DaemonSet (1 Pod per node, requests 1 GPU) | DGX, ThinkStation, GPU EC2 - anything joined via `worker-setup` |
+
+Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../infra-config.yaml) at the repo root. That file is written by the seed scripts and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs.
+
+### Profiles
+
+`K3sServer` ([k8s/seed/operators/k3s_server.py](seed/operators/k3s_server.py)) auto-detects the profile at seed time from `/sys/class/dmi/id/sys_vendor`:
+
+- **`aws`** — vendor reports `Amazon EC2`. Argo's `onprem/**` exclude stays in place; in-cluster MinIO and Postgres are not deployed. mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
+- **`onprem`** — anything else. K3sServer drops the `onprem/**` exclude, so [argo-deployments/onprem/](argo-deployments/onprem/) (Postgres, MinIO, the `s3-endpoint-override` Secret) syncs. `PlatformConfig` ([k8s/seed/operators/platform_config.py](seed/operators/platform_config.py)) writes MinIO admin creds + in-cluster Postgres URI to AWS Secrets Manager so workload manifests stay profile-agnostic.
+
+Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
+
+### Seeding
 
 Nodes are seeded and torn down via the repo-root Makefile:
 
 ```bash
-make setup-head   IP=<head-ip>   STORAGE_PATH=<hdd-mount>   [SSH_USER=<user>]
-make setup-worker IP=<worker-ip>                            [SSH_USER=<user>]
-make teardown-node IP=<any-ip>                              [SSH_USER=<user>]
+# AWS head (provision EC2 + VPC + S3 + RDS, then bootstrap k3s on it)
+make head-aws-apply
+make head-setup IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage
+
+# On-prem head (skip terraform; just bootstrap k3s on an existing box)
+make head-setup IP=<head-ip> STORAGE_PATH=<hdd-mount> [SSH_USER=<user>]
+
+# Worker (any GPU box, AWS or on-prem)
+make worker-setup IP=<worker-ip> [SSH_USER=<user>]
+
+# Teardown
+make node-teardown IP=<any-ip> [SSH_USER=<user>]
+make head-aws-destroy   # AWS only - destroys EC2 + VPC + S3 + RDS
 ```
 
-Worker-before-head is supported: if the head hasn't been seeded yet, `make setup-worker` installs node prerequisites and drops a systemd timer on the worker that polls AWS Secrets Manager for the head's credentials and joins automatically once the head appears. Command returns immediately.
+Worker-before-head is supported: if the head hasn't been seeded yet, `make worker-setup` installs node prerequisites and drops a systemd timer on the worker that polls AWS Secrets Manager for the head's credentials and joins automatically once the head appears. The command returns immediately.
 
 ### Storage routing (head HDD)
 
-The head node has an HDD mounted at whatever path you pass as `STORAGE_PATH` to `make setup-head`. All `PersistentVolumeClaim`s (MinIO, Postgres, etc.) land there instead of the default `/var/lib/rancher/k3s/storage`, keeping PV data off the root NVMe. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, patched idempotently by `setup-node.py` using the value from `infra-config.yaml`. The stamped path is declarative, not quota-enforced — minio's `1Ti` PVC can still physically fill the whole disk.
+`STORAGE_PATH` passed to `head-setup` becomes the local-path-provisioner directory on the head node. Any in-cluster PVC (Postgres, MinIO, Prometheus, Grafana, Alertmanager) lands there instead of the default `/var/lib/rancher/k3s/storage`, keeping PV data off the root volume. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, patched idempotently by [k8s/seed/operators/local_path.py](seed/operators/local_path.py) using the value from `infra-config.yaml`. The stamped path is declarative, not quota-enforced.
+
+In the AWS profile, mlflow's backend store and artifact store are RDS + S3 - no PVC. Only the prometheus stack uses PVCs there. In the on-prem profile, MinIO and Postgres also live on this volume.
 
 ## Features
 
-### Multi-node Ray
+### Ray topology
 
-`ray-head` is pinned to `role=head` via `nodeSelector`. A `ray-worker` DaemonSet runs on every node (head + workers), registering to the head via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Each `ray-worker` pod requests 1 GPU; Ray pools them all into one scheduler — a job asking for 1 GPU can land on any node, a job asking for more parallelises across nodes. No code change at the cortexflow submission site; Ray handles GPU assignment transparently. See [workloads/ray/](workloads/ray/).
+Ray is split into a CPU-only control plane on the head and a GPU-bearing worker DaemonSet on every joined GPU node. Both shapes are in [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml).
+
+| | nodeSelector | GPU | Replicas |
+|------|--------------|-----|----------|
+| `ray-head` | `role=head` | none (no `nvidia.com/gpu` request, no `--num-gpus`, no `runtimeClassName`) | 1 (Deployment) |
+| `ray-worker` | `role=worker` | 1 (`nvidia.com/gpu: 1`, `runtimeClassName: nvidia`) | 1 per worker node (DaemonSet) |
+
+Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexflow submission site.
+
+**To run ray on AWS:** join GPU EC2 instances via `worker-setup`. ray-head stays on the AWS EC2 head; ray-worker DaemonSet lights up one Pod per GPU EC2.
+
+**To run ray on-prem:** join the DGX (or any GPU box on Tailscale) via `worker-setup`. The head can be either AWS EC2 or another on-prem box - ray-head only needs CPU and reaches workers through the cluster's Tailscale-routed overlay network.
+
+**To run ray fully on-prem:** seed the head on an on-prem box (`head-setup` only, no `head-aws-apply`), then join GPU workers. The auto-detected `onprem` profile brings in MinIO + Postgres so mlflow has somewhere to store metadata and artifacts.
+
+**Adding/removing GPU capacity at runtime:** `worker-setup IP=<new-gpu-box>` or `node-teardown IP=<old-gpu-box>` - DaemonSet self-adjusts; ray-head's GCS picks up the new worker (or notices the missing one) on the next heartbeat.
 
 ## Future extensions
 
@@ -36,9 +79,9 @@ The head node has an HDD mounted at whatever path you pass as `STORAGE_PATH` to 
 
 **Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexflow-ui, jobs-control-plane) get per-branch copies.
 
-### AWS migration
+### Multi-cluster routing
 
-When `main` migrates to AWS, on-prem stays as the dev cluster, production on AWS. ApplicationSet templates parameterise `destination.server` so PR Applications land on the dev cluster while main Applications land on AWS — same manifest shape, routed by destination.
+Today the platform runs on a single cluster at a time (either AWS-headed or on-prem-headed). When per-PR dev clusters land alongside a stable main cluster, ApplicationSet templates can parameterise `destination.server` so PR Applications target the dev cluster while main Applications target the production cluster - same manifest shape, routed by destination. Same mechanism would let an AWS production cluster coexist with an on-prem development cluster.
 
 ## FAQ
 
@@ -92,6 +135,6 @@ kubectl -n argocd annotate app <name> argocd.argoproj.io/refresh=hard --overwrit
 
 ### Ray worker DaemonSet hardcodes GPU count to 1
 
-**Symptom.** [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml) requests `nvidia.com/gpu: 1` and passes `--num-gpus=1` on every node. One GPU per node is the common denominator that fits everywhere (head shares its GPUs with `ray-head`). If a future node has more GPUs, this DaemonSet only uses one of them.
+**Symptom.** [workloads/ray/deployment.yaml](workloads/ray/deployment.yaml) requests `nvidia.com/gpu: 1` and passes `--num-gpus=1` on every worker. One GPU per node is the common denominator that fits the DGX Spark and most single-GPU boxes. If a future node has more GPUs, this DaemonSet only uses one of them.
 
 **Why we don't do anything preemptive.** Without KubeRay there's no clean k8s-native way to say "one worker per GPU on each node with variable count." Two realistic fixes when it bites: (a) swap the DaemonSet for a per-node Deployment with explicit replicas/GPU requests, or (b) multiple DaemonSets filtered by an extra label like `gpu-count=N`. Neither's worth doing until we actually add a node with a different GPU count that we want to exploit fully.
