@@ -57,7 +57,12 @@ def _ensure_bucket(client: Any, bucket: str) -> None:
     except client.exceptions.ClientError as e:
         if e.response["Error"]["Code"] != "404":
             raise
-        client.create_bucket(Bucket=bucket)
+        # LocationConstraint is required for any AWS region other than us-east-1.
+        # MinIO accepts it too.
+        client.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": get_aws_region()},
+        )
 
 
 def upload(

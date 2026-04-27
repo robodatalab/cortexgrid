@@ -44,10 +44,11 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://other/run/output.parquet")
 
+    @patch("cortexflow.s3_util.get_aws_region", return_value="eu-west-2")
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
     def test_upload_creates_bucket_when_missing(
-        self, mock_client_fn: MagicMock, _getsize: MagicMock
+        self, mock_client_fn: MagicMock, _getsize: MagicMock, _region: MagicMock
     ) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
@@ -60,7 +61,10 @@ class TestS3Client(unittest.TestCase):
         result = upload("/tmp/data.parquet", bucket="new-bucket", key="file.parquet")
 
         mock_client.head_bucket.assert_called_once_with(Bucket="new-bucket")
-        mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
+        mock_client.create_bucket.assert_called_once_with(
+            Bucket="new-bucket",
+            CreateBucketConfiguration={"LocationConstraint": "eu-west-2"},
+        )
         mock_client.upload_file.assert_called_once_with(
             "/tmp/data.parquet", "new-bucket", "file.parquet", Callback=ANY
         )
