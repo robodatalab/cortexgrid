@@ -1,6 +1,9 @@
 # Grants the existing robolab-dgx IAM user (created by terraform/platform/secrets)
-# read/write to this bucket. The user is also reused by ESO/in-cluster boto3
-# clients, so any pod with aws-bootstrap-creds inherits the same access.
+# full read/write/create/delete on any S3 bucket in the account. cortexflow
+# auto-creates buckets on demand under arbitrary names, so the policy is
+# account-wide rather than scoped to a single bucket. Same key is used by
+# ESO/in-cluster boto3 clients, so all pods with aws-bootstrap-creds inherit
+# this access.
 
 data "aws_iam_user" "dgx" {
   user_name = "robolab-dgx"
@@ -8,8 +11,13 @@ data "aws_iam_user" "dgx" {
 
 data "aws_iam_policy_document" "dgx_s3" {
   statement {
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.main.arn]
+    actions = [
+      "s3:ListBucket",
+      "s3:CreateBucket",
+      "s3:DeleteBucket",
+      "s3:GetBucketLocation",
+    ]
+    resources = ["arn:aws:s3:::*"]
   }
 
   statement {
@@ -20,7 +28,7 @@ data "aws_iam_policy_document" "dgx_s3" {
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",
     ]
-    resources = ["${aws_s3_bucket.main.arn}/*"]
+    resources = ["arn:aws:s3:::*/*"]
   }
 }
 
