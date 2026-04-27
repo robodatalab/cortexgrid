@@ -38,20 +38,13 @@ spec:
             - --dashboard-host=0.0.0.0
             - --metrics-export-port=8080
             - --block
-          env:
-            - name: MLFLOW_TRACKING_URI
-              value: http://mlflow.mlflow.svc.cluster.local:5000
-            - name: RAY_JOB_SERVER_URI
-              value: http://ray-head.ray.svc.cluster.local:8265
           envFrom:
             - secretRef:
                 name: ray-env
+            # Real AWS keys for cortexflow.secrets to call AWS Secrets Manager.
+            # S3 access goes through cortexflow.s3_util (explicit SM-fetched creds).
             - secretRef:
                 name: aws-creds
-            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
-            - secretRef:
-                name: s3-endpoint-override
-                optional: true
           ports:
             - name: dashboard
               containerPort: 8265
@@ -104,18 +97,11 @@ spec:
             - --address=ray-head.ray.svc.cluster.local:6379
             - --num-gpus=1
             - --block
-          env:
-            - name: MLFLOW_TRACKING_URI
-              value: http://mlflow.mlflow.svc.cluster.local:5000
-            - name: RAY_JOB_SERVER_URI
-              value: http://ray-head.ray.svc.cluster.local:8265
           envFrom:
+            # Real AWS keys for cortexflow.secrets to call AWS Secrets Manager.
+            # S3 access goes through cortexflow.s3_util (explicit SM-fetched creds).
             - secretRef:
                 name: aws-creds
-            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
-            - secretRef:
-                name: s3-endpoint-override
-                optional: true
           livenessProbe:
             exec:
               command: ["ray", "status"]

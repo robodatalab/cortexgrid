@@ -1,14 +1,12 @@
 """S3/MinIO wrappers.
 
-Provides upload/download and a pre-configured boto3 client.
-Works with real S3 on AWS and with MinIO when AWS_S3_ENDPOINT_URL is set.
+Provides upload/download and a pre-configured boto3 client. AWS or MinIO is
+selected by what is in robolab/infra/AWS_S3_ENDPOINT_URL: empty means real S3,
+non-empty means MinIO at that URL.
 
-Credentials come from the standard boto3 chain (AWS_ACCESS_KEY_ID /
-AWS_SECRET_ACCESS_KEY env vars; on AWS this is populated by ESO from
-robolab/infra/AWS_*).
-
-Default bucket comes from S3_BUCKET_NAME env (populated by ESO from
-robolab/infra/S3_BUCKET_NAME, written by terraform/platform/s3).
+Credentials come from the standard boto3 chain (AWS env vars in pods,
+~/.aws/credentials on the laptop). All cortexflow config -- bucket name and
+S3 endpoint -- lives in AWS Secrets Manager, never in env vars.
 """
 
 from __future__ import annotations
@@ -20,25 +18,30 @@ import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
 from cortexflow.infra import get_s3_endpoint_url
+from cortexflow.secrets import get_secret
 
 
 def _default_bucket() -> str:
-    bucket = os.environ.get("S3_BUCKET_NAME")
-    if not bucket:
-        raise RuntimeError(
-            "S3_BUCKET_NAME env var is not set. Apps running in-cluster get "
-            "this via ESO from the aws-creds Secret; set it manually in dev "
-            "shells if you need to call upload/download outside the cluster."
-        )
-    return bucket
+    return get_secret("S3_BUCKET_NAME")
 
 
 def get_s3_client() -> Any:
-    """Return a boto3 S3 client. AWS by default, MinIO if AWS_S3_ENDPOINT_URL is set."""
-    kwargs: dict[str, Any] = {}
-    if endpoint_url := get_s3_endpoint_url():
-        kwargs["endpoint_url"] = endpoint_url
-    return boto3.client("s3", **kwargs)
+    """Return a boto3 S3 client built from SM-stored S3 creds + endpoint.
+
+    S3 access creds (S3_ACCESS_KEY_ID/SECRET in SM) are deliberately separate
+    from the AWS keys that boto3's default chain picks up from env. The env
+    creds (AWS_ACCESS_KEY_ID/SECRET in pod env from the aws-creds Secret) are
+    real AWS keys used only to reach AWS Secrets Manager. The S3 creds are
+    profile-specific: real-AWS on the AWS profile (mirrors AWS_*), MinIO admin
+    on the on-prem profile. Building the client explicitly avoids leaking the
+    AWS-SM keys into S3 calls (which on-prem MinIO would reject).
+    """
+    return boto3.client(
+        "s3",
+        aws_access_key_id=get_secret("S3_ACCESS_KEY_ID"),
+        aws_secret_access_key=get_secret("S3_SECRET_ACCESS_KEY"),
+        endpoint_url=get_s3_endpoint_url(),
+    )
 
 
 def upload(

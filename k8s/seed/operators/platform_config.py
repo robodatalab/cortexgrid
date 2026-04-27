@@ -8,7 +8,10 @@ contents differ between the AWS and on-prem profiles:
     S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY ← mirror of .env AWS_* (real S3)
     S3_BUCKET_NAME                          ← written by terraform/platform/s3
     MLFLOW_BACKEND_STORE_URI                ← written by terraform/platform/rds
-    AWS_S3_ENDPOINT_URL                     ← absent (boto3 hits real AWS S3)
+    AWS_S3_ENDPOINT_URL                     ← the real-AWS S3 regional endpoint;
+                                              functionally equivalent to passing
+                                              no endpoint to boto3, but written
+                                              explicitly so SM has the key.
 
   On-prem profile
     S3_ACCESS_KEY_ID = "admin"              ← MinIO admin user
@@ -43,6 +46,10 @@ _ONPREM_MINIO_BUCKET = "mlflow-artifacts"
 _ONPREM_MINIO_ACCESS_KEY = "admin"
 _ONPREM_MINIO_SECRET_KEY = "adminadmin"
 
+# Default real-AWS S3 endpoint matching the project's eu-west-2 region. boto3
+# treats this as identical to the no-endpoint default for that region.
+_AWS_S3_ENDPOINT_URL = "https://s3.eu-west-2.amazonaws.com"
+
 
 class PlatformConfig(Operator):
     def setup(self, deps: dict) -> None:
@@ -69,6 +76,11 @@ class PlatformConfig(Operator):
         log.info("Mirroring real-AWS S3 credentials to S3_* SM keys...")
         set_secret(_SECRET_S3_ACCESS_KEY_ID, deps["aws_access_key_id"])
         set_secret(_SECRET_S3_SECRET_ACCESS_KEY, deps["aws_secret_access_key"])
+        # Real-AWS regional S3 endpoint. boto3 with this URL hits real S3
+        # exactly the same as if no endpoint were passed; storing the real URL
+        # avoids the AWS-SM "min length 1" constraint that disallows empty
+        # strings as sentinels.
+        set_secret(_SECRET_AWS_S3_ENDPOINT_URL, _AWS_S3_ENDPOINT_URL)
 
     def _setup_onprem(self) -> None:
         log.info("Writing on-prem platform config (MinIO + in-cluster Postgres) to SM...")

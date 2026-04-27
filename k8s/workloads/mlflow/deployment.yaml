@@ -32,22 +32,17 @@ spec:
             - name: MLFLOW_SERVER_CORS_ALLOWED_ORIGINS
               value: "*"
           envFrom:
-            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME — boto3
-            # picks the creds up automatically. Contents differ per profile:
-            # real AWS keys + bucket on AWS, MinIO admin + on-prem bucket on on-prem.
+            # S3-purposed AWS_ACCESS_KEY_ID/SECRET, AWS_S3_ENDPOINT_URL, S3_BUCKET_NAME.
+            # On AWS these target real S3; on on-prem they target in-cluster MinIO.
+            # mlflow uses boto3 directly to upload artifacts, so it needs the right
+            # env creds for whichever target -- separate from the aws-creds Secret
+            # that other workloads consume for AWS-SM access.
             - secretRef:
-                name: aws-creds
-            # MLFLOW_BACKEND_STORE_URI — single composed value, written to SM by
-            # whoever provisions the backend store (terraform on AWS, head-setup
-            # on on-prem).
+                name: s3-creds
+            # MLFLOW_BACKEND_STORE_URI -- composed value written to SM by whoever
+            # provisions the backend store (terraform on AWS, head-setup on on-prem).
             - secretRef:
                 name: mlflow-config
-            # AWS_S3_ENDPOINT_URL — only present on on-prem (deployed under
-            # argo-deployments/onprem/**). Optional so AWS pods start fine
-            # without it; absent → boto3 hits real AWS S3.
-            - secretRef:
-                name: s3-endpoint-override
-                optional: true
           command:
             - mlflow
             - server

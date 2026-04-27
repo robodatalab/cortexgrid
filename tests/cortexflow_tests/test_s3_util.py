@@ -11,11 +11,11 @@ from cortexflow.s3_util import download, upload, upload_dir
 
 class TestS3Client(unittest.TestCase):
 
-    @patch.dict("os.environ", {"S3_BUCKET_NAME": "ray-checkpoints"})
+    @patch("cortexflow.s3_util.get_secret", return_value="ray-checkpoints")
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
     def test_upload_uses_default_bucket_and_filename(
-        self, mock_client_fn: MagicMock, _getsize: MagicMock
+        self, mock_client_fn: MagicMock, _getsize: MagicMock, _get_secret: MagicMock
     ) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
@@ -106,9 +106,11 @@ class TestS3Client(unittest.TestCase):
         self.assertIn("s3://out/model/a.txt", result)
         self.assertIn("s3://out/model/sub/b.txt", result)
 
-    @patch.dict("os.environ", {"S3_BUCKET_NAME": "ray-checkpoints"})
+    @patch("cortexflow.s3_util.get_secret", return_value="ray-checkpoints")
     @patch("cortexflow.s3_util.get_s3_client")
-    def test_uses_default_bucket(self, mock_client_fn: MagicMock) -> None:
+    def test_uses_default_bucket(
+        self, mock_client_fn: MagicMock, _get_secret: MagicMock
+    ) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
 

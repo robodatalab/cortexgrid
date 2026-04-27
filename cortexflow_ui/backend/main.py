@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from cortexflow.ray_util import (
     list_ray_jobs_with_submission_id,
     get_ray_job_id_for_cortexflow_job,
 )
-from cortexflow.infra import get_mlflow_run_url
+from cortexflow.infra import get_mlflow_run_url, get_ray_job_server_uri
 from cortexflow.jobs import (
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
@@ -79,8 +78,8 @@ def infra_status() -> InfraStatus:
 @app.get("/api/dashboards")
 def dashboards() -> list[Dashboard]:
     return [
-        Dashboard(id="mlflow", url=os.environ["PUBLIC_MLFLOW_URL"]),
-        Dashboard(id="ray", url=os.environ["PUBLIC_RAY_DASHBOARD_URL"]),
+        Dashboard(id="mlflow", url=get_mlflow_tracking_uri()),
+        Dashboard(id="ray", url=get_ray_job_server_uri()),
     ]
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from enum import Enum
 
 from cortexflow.infra import get_ray_job_server_uri
@@ -69,7 +68,7 @@ def get_ray_job_url(ray_job_id: str | None) -> str | None:
     if ray_job_id is None:
         return None
 
-    base = os.environ.get("PUBLIC_RAY_DASHBOARD_URL") or get_ray_job_server_uri()
+    base = get_ray_job_server_uri()
     return f"{base}/#/jobs/{ray_job_id}"
 
 

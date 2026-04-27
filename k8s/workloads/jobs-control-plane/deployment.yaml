@@ -30,19 +30,12 @@ spec:
             # resource. Bump higher only after measuring head CPU under load.
             - name: CORTEXFLOW_STARTER_WORKERS
               value: "2"
-            - name: MLFLOW_TRACKING_URI
-              value: http://mlflow.mlflow.svc.cluster.local:5000
-            - name: RAY_JOB_SERVER_URI
-              value: http://ray-head.ray.svc.cluster.local:8265
           envFrom:
-            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME via ESO.
-            # Contents are real-AWS on AWS, MinIO admin on on-prem.
+            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY -- real AWS keys for
+            # cortexflow.secrets to call AWS Secrets Manager. S3 access goes
+            # through cortexflow.s3_util, which fetches its own creds from SM.
             - secretRef:
                 name: aws-creds
-            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
-            - secretRef:
-                name: s3-endpoint-override
-                optional: true
           livenessProbe:
             exec:
               command:

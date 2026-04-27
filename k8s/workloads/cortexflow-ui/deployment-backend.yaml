@@ -23,23 +23,11 @@ spec:
       containers:
         - name: cortexflow-ui-backend
           image: ghcr.io/paksas/cortexflow-ui-backend:main-567259b58923f462785bbf003ee21fd2dbb6d7f2
-          env:
-            - name: MLFLOW_TRACKING_URI
-              value: http://mlflow.mlflow.svc.cluster.local:5000
-            - name: RAY_JOB_SERVER_URI
-              value: http://ray-head.ray.svc.cluster.local:8265
           envFrom:
-            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME — boto3
-            # picks them up automatically. Contents are real-AWS on AWS, MinIO
-            # admin on on-prem.
+            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for boto3's default
+            # credential chain (used when cortexflow.secrets reads SM).
             - secretRef:
                 name: aws-creds
-            - secretRef:
-                name: cortexflow-ui-public-urls
-            # On-prem only — points boto3 at in-cluster MinIO. Absent on AWS.
-            - secretRef:
-                name: s3-endpoint-override
-                optional: true
           ports:
             - name: http
               containerPort: 8000
