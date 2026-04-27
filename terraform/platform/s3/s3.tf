@@ -31,6 +31,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
 
 resource "aws_secretsmanager_secret" "bucket_name" {
   name = "robolab/infra/S3_BUCKET_NAME"
+  # Purge immediately on destroy. Default 30-day recovery window blocks
+  # subsequent apply with "scheduled for deletion" -- bad for dev infra that
+  # cycles destroy/apply. Matches cortexflow.secrets.delete_secret which
+  # uses ForceDeleteWithoutRecovery=True.
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "bucket_name" {
