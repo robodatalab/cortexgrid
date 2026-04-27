@@ -16,6 +16,12 @@ def get_s3_endpoint_url() -> str:
     return get_secret("AWS_S3_ENDPOINT_URL")
 
 
+def get_aws_region() -> str:
+    # Hardcoded for now; mirrors cortexflow.secrets._SM_REGION. Move to SM
+    # once terraform writes robolab/infra/AWS_REGION.
+    return "eu-west-2"
+
+
 def get_mlflow_run_url(run_id: str) -> str:
     base = get_mlflow_tracking_uri()
     client = MlflowClient(tracking_uri=base)

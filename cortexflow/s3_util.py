@@ -17,7 +17,7 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.infra import get_s3_endpoint_url
+from cortexflow.infra import get_aws_region, get_s3_endpoint_url
 from cortexflow.secrets import get_secret
 
 
@@ -41,7 +41,23 @@ def get_s3_client() -> Any:
         aws_access_key_id=get_secret("S3_ACCESS_KEY_ID"),
         aws_secret_access_key=get_secret("S3_SECRET_ACCESS_KEY"),
         endpoint_url=get_s3_endpoint_url(),
+        # Required: without it boto3 picks the local default region for SigV4,
+        # which mismatches the AWS endpoint and produces 301 Moved Permanently
+        # against real AWS. MinIO ignores the value.
+        region_name=get_aws_region(),
     )
+
+
+def _ensure_bucket(client: Any, bucket: str) -> None:
+    """Create the bucket if and only if head_bucket returns 404. Other errors
+    (region mismatch, perms) propagate so they aren't silently masked by an
+    unrelated create_bucket failure."""
+    try:
+        client.head_bucket(Bucket=bucket)
+    except client.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] != "404":
+            raise
+        client.create_bucket(Bucket=bucket)
 
 
 def upload(
@@ -63,12 +79,7 @@ def upload(
     key = key or os.path.basename(local_path)
 
     client = get_s3_client()
-    try:
-        client.head_bucket(Bucket=bucket)
-    except client.exceptions.NoSuchBucket:
-        client.create_bucket(Bucket=bucket)
-    except client.exceptions.ClientError:
-        client.create_bucket(Bucket=bucket)
+    _ensure_bucket(client, bucket)
     file_size = os.path.getsize(local_path)
     with tqdm(
         total=file_size,
@@ -98,12 +109,7 @@ def upload_dir(
     bucket = bucket or _default_bucket()
 
     client = get_s3_client()
-    try:
-        client.head_bucket(Bucket=bucket)
-    except client.exceptions.NoSuchBucket:
-        client.create_bucket(Bucket=bucket)
-    except client.exceptions.ClientError:
-        client.create_bucket(Bucket=bucket)
+    _ensure_bucket(client, bucket)
 
     uploaded: list[str] = []
     for root, _dirs, files in os.walk(local_dir):
