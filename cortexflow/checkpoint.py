@@ -184,8 +184,10 @@ class Checkpoint:
         tmpdir = Path(tempfile.mkdtemp())
         for name, info in manifest["attrs"].items():
             try:
-                bucket, _, key = info["uri"].removeprefix("s3://").partition("/")
-                file_path = s3_util.download(bucket, key, str(tmpdir / Path(key).name))
+                _, _, src_path = info["uri"].removeprefix("s3://").partition("/")
+                file_path = s3_util.download(
+                    src_path, local_path=str(tmpdir / Path(src_path).name)
+                )
                 raw = Path(file_path).read_bytes()
                 data[name] = _deserialize(raw, info["format"])
             except Exception:
