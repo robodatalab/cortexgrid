@@ -18,5 +18,5 @@ FastAPI can serve a built SPA, but splitting them keeps CI triggers narrow: a Ty
 - **MLflow** ([../mlflow/](../mlflow/)) — source of experiments, runs, metrics, and artifacts. Accessed at `http://mlflow.mlflow.svc.cluster.local:5000`.
 - **Ray** ([../ray/](../ray/)) — source of job status and logs. Accessed at `http://ray-head.ray.svc.cluster.local:8265`.
 - **MinIO** ([../minio/](../minio/)) — artifact bucket read-through. Accessed at `http://minio.minio.svc.cluster.local:9000`.
-- **Reflector** ([../secrets/](../secrets/)) — mirrors `aws-creds` (for `cortexflow.secrets`) and `ghcr-pull` (to pull the private images) into this namespace.
-- **External Secrets Operator** ([../secrets/](../secrets/)) — materializes `cortexflow-ui-public-urls` from `CONTROL_PLANE_TAILSCALE_IP` at `robolab/infra/*`.
+- **Reflector** ([../secrets/](../secrets/)) - mirrors `aws-creds` (real AWS keys, used by cortexflow.secrets to reach AWS Secrets Manager) and `ghcr-pull` (to pull the private images) into this namespace.
+- **External Secrets Operator** ([../secrets/](../secrets/)) - materializes `aws-creds` from `robolab/infra/AWS_*`. Service URLs and bucket names are read by the backend via cortexflow library calls into SM, not pre-rendered into env.

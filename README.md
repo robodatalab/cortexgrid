@@ -172,25 +172,32 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 In-cluster service-to-service calls use cluster DNS (`mlflow.mlflow.svc.cluster.local:5000`,
 `ray-head.ray.svc.cluster.local:8265`) — hardcoded in deployment manifests.
 
-Off-cluster URLs and shared infra coordinates flow through AWS Secrets Manager:
+All cortexflow config flows through AWS Secrets Manager. No env vars override
+this on the laptop or in pods - cortexflow always reads from SM.
 
 - `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`) to SM.
-- Terraform writes the composed `MLFLOW_BACKEND_STORE_URI` and `S3_BUCKET_NAME` to SM (AWS profile only).
-- ESO syncs `robolab/infra/*` into k8s Secrets (`aws-creds`, `mlflow-config`, …); Reflector mirrors `aws-creds` to every workload namespace.
-- `cortexflow.infra` reads URLs from env first (in-cluster) or falls back to SM (laptop dev).
+- Terraform writes the composed `MLFLOW_BACKEND_STORE_URI`, `S3_BUCKET_NAME`, and (AWS-only) `AWS_S3_ENDPOINT_URL` to SM.
+- `PlatformConfig` writes profile-specific values: real-AWS S3 creds + AWS endpoint on the AWS profile, MinIO admin + in-cluster MinIO endpoint + Postgres URI on on-prem.
+- ESO syncs `robolab/infra/*` into k8s Secrets (`aws-creds`, `s3-creds`, `mlflow-config`); Reflector mirrors them into every workload namespace.
 
-#### Profile-aware secret pattern
+#### Profile-aware values in SM
 
-Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference Secret *names*, not specific backends. The Secret *contents* differ by profile, written by whoever provisions the environment:
+Workload manifests reference Secret *names*, not specific backends. The Secret *contents* differ by profile:
 
 | SM key | AWS source | on-prem source |
 |---|---|---|
-| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | [`PlatformConfig`](k8s/seed/operators/platform_config.py) mirrors real AWS keys from `.env` | `PlatformConfig` writes MinIO admin creds (`admin`/`adminadmin`) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `EnvSecrets` from `.env` (real AWS keys) | same - real AWS keys, used to reach SM |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | [`PlatformConfig`](k8s/seed/operators/platform_config.py) mirrors real AWS keys | `PlatformConfig` writes MinIO admin creds (`admin`/`adminadmin`) |
 | `S3_BUCKET_NAME` | `terraform/platform/s3` (`robolab-data`) | `PlatformConfig` writes `mlflow-artifacts` |
 | `MLFLOW_BACKEND_STORE_URI` | `terraform/platform/rds` (composed from RDS attrs) | `PlatformConfig` writes in-cluster Postgres URI |
-| `AWS_S3_ENDPOINT_URL` | (absent — boto3 hits real S3) | `PlatformConfig` writes in-cluster MinIO URL |
+| `AWS_S3_ENDPOINT_URL` | `PlatformConfig` writes the regional AWS S3 URL | `PlatformConfig` writes in-cluster MinIO URL |
 
-The `aws-creds` ExternalSecret reads from `S3_*` SM keys and exposes them as `AWS_*` env names so boto3 just works. The on-prem-only `s3-endpoint-override` ExternalSecret lives under [`k8s/argo-deployments/onprem/`](k8s/argo-deployments/onprem/) — excluded on AWS via the `onprem/**` exclude that K3sServer toggles. Workloads consume it with `optional: true`, so AWS pods start fine without it.
+Two cluster Secrets, two purposes:
+
+- `aws-creds` carries the real AWS keys (from `AWS_*` SM keys). Pods consume it via `envFrom`; boto3's default chain finds it; `cortexflow.secrets.get_secret(...)` works. Used by jobs-control-plane, cortexflow-ui-backend, ray-head, ray-worker.
+- `s3-creds` carries the S3-purposed creds + endpoint + bucket (from `S3_*` and `AWS_S3_ENDPOINT_URL` SM keys). Used by mlflow, which uses boto3 directly to upload artifacts. mlflow's pod env therefore has the right creds for whichever S3 target is active.
+
+`cortexflow.s3_util` builds its boto3 client *explicitly* with `S3_ACCESS_KEY_ID/SECRET/AWS_S3_ENDPOINT_URL` fetched from SM - it does not use boto3's default chain. So pods that only have `aws-creds` (real AWS keys for SM) talk to the right S3 target without leaking those keys into S3 calls.
 
 ### `terraform/platform/secrets/` — Centralized secrets
 

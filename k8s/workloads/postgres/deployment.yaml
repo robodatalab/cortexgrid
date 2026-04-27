@@ -21,14 +21,14 @@ spec:
         - name: postgres
           image: postgres:15-alpine
           env:
-            - name: POSTGRES_USER
-              value: admin
-            - name: POSTGRES_PASSWORD
-              value: admin
-            - name: POSTGRES_DB
-              value: mlflow
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          envFrom:
+            # Source of truth for POSTGRES_USER/PASSWORD/DB lives in
+            # credentials.yaml. The publish-config Job consumes the same
+            # Secret to compose and publish MLFLOW_BACKEND_STORE_URI to SM.
+            - secretRef:
+                name: postgres-credentials
           ports:
             - name: postgres
               containerPort: 5432

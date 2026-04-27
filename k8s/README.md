@@ -18,7 +18,7 @@ Cluster topology — which IP is head vs worker, where the head's HDD is mounted
 `K3sServer` ([k8s/seed/operators/k3s_server.py](seed/operators/k3s_server.py)) auto-detects the profile at seed time from `/sys/class/dmi/id/sys_vendor`:
 
 - **`aws`** — vendor reports `Amazon EC2`. Argo's `onprem/**` exclude stays in place; in-cluster MinIO and Postgres are not deployed. mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
-- **`onprem`** — anything else. K3sServer drops the `onprem/**` exclude, so [argo-deployments/onprem/](argo-deployments/onprem/) (Postgres, MinIO, the `s3-endpoint-override` Secret) syncs. `PlatformConfig` ([k8s/seed/operators/platform_config.py](seed/operators/platform_config.py)) writes MinIO admin creds + in-cluster Postgres URI to AWS Secrets Manager so workload manifests stay profile-agnostic.
+- **`onprem`** - anything else. K3sServer drops the `onprem/**` exclude, so [argo-deployments/onprem/](argo-deployments/onprem/) (Postgres, MinIO) syncs. `PlatformConfig` ([k8s/seed/operators/platform_config.py](seed/operators/platform_config.py)) writes MinIO admin creds + in-cluster Postgres URI to AWS Secrets Manager so workload manifests stay profile-agnostic.
 
 Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
 

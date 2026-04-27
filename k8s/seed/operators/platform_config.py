@@ -1,26 +1,24 @@
-"""PlatformConfig — writes profile-specific platform config to AWS SM.
+"""PlatformConfig - mirrors .env AWS keys to S3-purposed SM keys.
 
-The cluster's mlflow + boto3-using workloads read their backend store URI,
-S3 bucket/credentials, and S3 endpoint override from `robolab/infra/*`. The
-contents differ between the AWS and on-prem profiles:
+The cluster's S3 access uses creds from `robolab/infra/S3_ACCESS_KEY_ID/SECRET`
+- separate from `AWS_ACCESS_KEY_ID/SECRET` which authenticate Secrets Manager
+itself. On the AWS profile the two are functionally identical (S3 IS real AWS,
+SM is real AWS), but they are kept separate so the on-prem profile can swap S3
+creds for MinIO admin without breaking SM access.
+
+This operator only handles the AWS profile mirror because that value depends
+on `.env`. Every other SM key is published by whoever owns the value:
 
   AWS profile
-    S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY ← mirror of .env AWS_* (real S3)
-    S3_BUCKET_NAME                          ← written by terraform/platform/s3
-    MLFLOW_BACKEND_STORE_URI                ← written by terraform/platform/rds
-    AWS_S3_ENDPOINT_URL                     ← the real-AWS S3 regional endpoint;
-                                              functionally equivalent to passing
-                                              no endpoint to boto3, but written
-                                              explicitly so SM has the key.
+    S3_BUCKET_NAME, AWS_S3_ENDPOINT_URL  -> terraform/platform/s3
+    MLFLOW_BACKEND_STORE_URI             -> terraform/platform/rds
 
   On-prem profile
-    S3_ACCESS_KEY_ID = "admin"              ← MinIO admin user
-    S3_SECRET_ACCESS_KEY = "adminadmin"     ← MinIO admin password
-    S3_BUCKET_NAME = "mlflow-artifacts"     ← bucket created by minio bucket-init Job
-    MLFLOW_BACKEND_STORE_URI                ← in-cluster Postgres
-    AWS_S3_ENDPOINT_URL                     ← in-cluster MinIO Service
+    S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
+    S3_BUCKET_NAME, AWS_S3_ENDPOINT_URL  -> minio/publish-config Job
+    MLFLOW_BACKEND_STORE_URI             -> postgres/publish-config Job
 
-Required deps (setup): profile.
+Required deps (setup): profile, aws_access_key_id, aws_secret_access_key.
 """
 
 import logging
@@ -34,58 +32,22 @@ log = logging.getLogger("k8s.seed.operators.platform_config")
 
 _SECRET_S3_ACCESS_KEY_ID = "S3_ACCESS_KEY_ID"
 _SECRET_S3_SECRET_ACCESS_KEY = "S3_SECRET_ACCESS_KEY"
-_SECRET_S3_BUCKET_NAME = "S3_BUCKET_NAME"
-_SECRET_MLFLOW_BACKEND_STORE_URI = "MLFLOW_BACKEND_STORE_URI"
-_SECRET_AWS_S3_ENDPOINT_URL = "AWS_S3_ENDPOINT_URL"
-
-_ONPREM_POSTGRES_URI = (
-    "postgresql://admin:admin@postgres.postgres.svc.cluster.local:5432/mlflow"
-)
-_ONPREM_MINIO_ENDPOINT = "http://minio.minio.svc.cluster.local:9000"
-_ONPREM_MINIO_BUCKET = "mlflow-artifacts"
-_ONPREM_MINIO_ACCESS_KEY = "admin"
-_ONPREM_MINIO_SECRET_KEY = "adminadmin"
-
-# Default real-AWS S3 endpoint matching the project's eu-west-2 region. boto3
-# treats this as identical to the no-endpoint default for that region.
-_AWS_S3_ENDPOINT_URL = "https://s3.eu-west-2.amazonaws.com"
 
 
 class PlatformConfig(Operator):
     def setup(self, deps: dict) -> None:
-        profile = deps["profile"]
-        if profile == "aws":
-            self._setup_aws(deps)
-        else:
-            self._setup_onprem()
-
-    def teardown(self, deps: dict) -> None:
-        # Delete every key this operator may have written, regardless of profile —
-        # teardown shouldn't need to re-detect profile, and missing keys are tolerated
-        # by delete_secret.
-        for key in (
-            _SECRET_S3_ACCESS_KEY_ID,
-            _SECRET_S3_SECRET_ACCESS_KEY,
-            _SECRET_S3_BUCKET_NAME,
-            _SECRET_MLFLOW_BACKEND_STORE_URI,
-            _SECRET_AWS_S3_ENDPOINT_URL,
-        ):
-            delete_secret(key)
-
-    def _setup_aws(self, deps: dict) -> None:
-        log.info("Mirroring real-AWS S3 credentials to S3_* SM keys...")
+        if deps["profile"] != "aws":
+            # On-prem: the minio + postgres publish-config Jobs handle every
+            # SM key. Nothing for this operator to do.
+            return
+        log.info("Mirroring real-AWS keys to S3_* SM keys...")
         set_secret(_SECRET_S3_ACCESS_KEY_ID, deps["aws_access_key_id"])
         set_secret(_SECRET_S3_SECRET_ACCESS_KEY, deps["aws_secret_access_key"])
-        # Real-AWS regional S3 endpoint. boto3 with this URL hits real S3
-        # exactly the same as if no endpoint were passed; storing the real URL
-        # avoids the AWS-SM "min length 1" constraint that disallows empty
-        # strings as sentinels.
-        set_secret(_SECRET_AWS_S3_ENDPOINT_URL, _AWS_S3_ENDPOINT_URL)
 
-    def _setup_onprem(self) -> None:
-        log.info("Writing on-prem platform config (MinIO + in-cluster Postgres) to SM...")
-        set_secret(_SECRET_S3_ACCESS_KEY_ID, _ONPREM_MINIO_ACCESS_KEY)
-        set_secret(_SECRET_S3_SECRET_ACCESS_KEY, _ONPREM_MINIO_SECRET_KEY)
-        set_secret(_SECRET_S3_BUCKET_NAME, _ONPREM_MINIO_BUCKET)
-        set_secret(_SECRET_MLFLOW_BACKEND_STORE_URI, _ONPREM_POSTGRES_URI)
-        set_secret(_SECRET_AWS_S3_ENDPOINT_URL, _ONPREM_MINIO_ENDPOINT)
+    def teardown(self, deps: dict) -> None:
+        # Tolerated if missing (delete_secret is idempotent). On the on-prem
+        # profile these keys may have been written by minio/publish-config
+        # rather than this operator, but deleting on teardown is still
+        # appropriate -- the cluster is going away.
+        delete_secret(_SECRET_S3_ACCESS_KEY_ID)
+        delete_secret(_SECRET_S3_SECRET_ACCESS_KEY)

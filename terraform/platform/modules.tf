@@ -11,7 +11,8 @@ module "head" {
 }
 
 module "s3" {
-  source = "./s3"
+  source     = "./s3"
+  aws_region = var.aws_region
 }
 
 module "rds" {
