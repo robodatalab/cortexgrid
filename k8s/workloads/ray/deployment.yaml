@@ -17,9 +17,8 @@ spec:
       labels:
         app: ray-head
     spec:
-      runtimeClassName: nvidia
       nodeSelector:
-        role: worker
+        role: head
       imagePullSecrets:
         - name: ghcr-pull
       containers:
@@ -29,18 +28,15 @@ spec:
             requests:
               cpu: "1"
               memory: 4Gi
-              nvidia.com/gpu: "1"
             limits:
               cpu: "2"
               memory: 8Gi
-              nvidia.com/gpu: "1"
           command:
             - ray
             - start
             - --head
             - --dashboard-host=0.0.0.0
             - --metrics-export-port=8080
-            - --num-gpus=1
             - --block
           env:
             - name: MLFLOW_TRACKING_URI
