@@ -22,6 +22,12 @@ def get_aws_region() -> str:
     return "eu-west-2"
 
 
+def get_s3_bucket() -> str:
+    # Provisioned by terraform/platform/s3 (aws_s3_bucket.main) on the AWS
+    # profile; created lazily on first upload against on-prem MinIO.
+    return get_secret("S3_BUCKET_NAME")
+
+
 def get_mlflow_run_url(run_id: str) -> str:
     base = get_mlflow_tracking_uri()
     client = MlflowClient(tracking_uri=base)
