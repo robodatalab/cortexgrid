@@ -52,28 +52,6 @@ class TestS3Client(unittest.TestCase):
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
 
-        no_such_bucket = type("NoSuchBucket", (Exception,), {})
-        mock_client.exceptions.NoSuchBucket = no_such_bucket
-        mock_client.head_bucket.side_effect = no_such_bucket()
-
-        result = upload("/tmp/data.parquet", bucket="new-bucket", key="file.parquet")
-
-        mock_client.head_bucket.assert_called_once_with(Bucket="new-bucket")
-        mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
-        mock_client.upload_file.assert_called_once_with(
-            "/tmp/data.parquet", "new-bucket", "file.parquet", Callback=ANY
-        )
-        self.assertEqual(result, "s3://new-bucket/file.parquet")
-
-    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
-    @patch("cortexflow.s3_util.get_s3_client")
-    def test_upload_creates_bucket_on_client_error(
-        self, mock_client_fn: MagicMock, _getsize: MagicMock
-    ) -> None:
-        mock_client = MagicMock()
-        mock_client_fn.return_value = mock_client
-
-        mock_client.exceptions.NoSuchBucket = type("NoSuchBucket", (Exception,), {})
         mock_client.exceptions.ClientError = ClientError
         mock_client.head_bucket.side_effect = ClientError(
             {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket"
@@ -81,6 +59,7 @@ class TestS3Client(unittest.TestCase):
 
         result = upload("/tmp/data.parquet", bucket="new-bucket", key="file.parquet")
 
+        mock_client.head_bucket.assert_called_once_with(Bucket="new-bucket")
         mock_client.create_bucket.assert_called_once_with(Bucket="new-bucket")
         mock_client.upload_file.assert_called_once_with(
             "/tmp/data.parquet", "new-bucket", "file.parquet", Callback=ANY
