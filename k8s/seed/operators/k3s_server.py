@@ -49,6 +49,11 @@ class K3sServer(Operator):
         # repeatedly until NodeLabel runs ~minutes later in the pipeline,
         # leaving stale state in argocd-secret/argocd-cm that breaks the
         # application controller's gRPC client.
+        # `flannel-iface tailscale0` pins flannel's VXLAN underlay to the
+        # Tailscale interface. Without this, flannel auto-picks the LAN
+        # interface (MTU 1500) and sets flannel.1 to MTU 1450; pod-to-pod
+        # packets then exceed Tailscale's 1280 MTU and get dropped, breaking
+        # cluster DNS and any cross-node TCP that produces large frames.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
@@ -59,6 +64,7 @@ class K3sServer(Operator):
 tls-san:
   - {node_ip}
 node-ip: {node_ip}
+flannel-iface: tailscale0
 node-label:
   - role=head
 EOF

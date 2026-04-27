@@ -59,6 +59,10 @@ class JoinCluster(Operator):
         log.info(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
         # `node-ip` pins the agent to advertise its Tailscale IP; otherwise
         # k3s picks the LAN interface and downstream await_node lookups miss it.
+        # `flannel-iface tailscale0` pins flannel's VXLAN underlay to Tailscale
+        # so flannel.1's auto-derived MTU (~1230) fits inside Tailscale's 1280
+        # MTU. Without this, cross-node pod traffic exceeds the tunnel and
+        # large packets (DNS replies, TCP handshakes) get dropped.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
@@ -66,6 +70,7 @@ class JoinCluster(Operator):
             mkdir -p /etc/rancher/k3s
             cat > /etc/rancher/k3s/config.yaml <<EOF
 node-ip: {node_ip}
+flannel-iface: tailscale0
 EOF
             if [[ ! -x /usr/local/bin/k3s-agent ]] && [[ ! -x /usr/local/bin/k3s ]]; then
                 curl -sfL https://get.k3s.io | K3S_URL={shlex.quote(f"https://{head_ip}:6443")} K3S_TOKEN={shlex.quote(head_token)} sh -
@@ -97,6 +102,7 @@ EOF
             mkdir -p /etc/rancher/k3s
             cat > /etc/rancher/k3s/config.yaml <<EOF
 node-ip: {node_ip}
+flannel-iface: tailscale0
 EOF
         """),
         )
