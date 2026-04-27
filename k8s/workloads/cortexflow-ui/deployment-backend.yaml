@@ -22,7 +22,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: cortexflow-ui-backend
-          image: ghcr.io/paksas/cortexflow-ui-backend:main-a19a2fa51eecfa3b2171f3287a3bfdd8a30ad7cc
+          image: ghcr.io/paksas/cortexflow-ui-backend:main-cd4da59a4bbecfa337370b169ac21c19096769c6
           envFrom:
             # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for boto3's default
             # credential chain (used when cortexflow.secrets reads SM).
