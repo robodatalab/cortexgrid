@@ -32,7 +32,7 @@ variable "db_name" {
 }
 
 variable "engine_version" {
-  description = "PostgreSQL major.minor version pinned for reproducibility."
+  description = "PostgreSQL major.minor version pinned for reproducibility. AWS deprecates older minor versions periodically; bump as needed (check `aws rds describe-db-engine-versions --engine postgres`)."
   type        = string
-  default     = "16.4"
+  default     = "16.13"
 }

@@ -9,9 +9,9 @@ variable "private_subnet_ids" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for the k3s head. amd64 because most workload images are not yet multi-arch — only ray is."
+  description = "EC2 instance type for the k3s head. amd64 because most workload images are not yet multi-arch (only ray is). Sized for argocd + mlflow + cortexflow-ui + jobs-control-plane + prometheus stack sharing the box; t3.large saturated under reconciliation spikes."
   type        = string
-  default     = "t3.large"
+  default     = "t3.xlarge"
 }
 
 variable "ebs_size_gb" {

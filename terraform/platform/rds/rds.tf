@@ -11,6 +11,11 @@ resource "random_password" "master" {
 # and the RDS instance itself.
 resource "aws_secretsmanager_secret" "mlflow_backend_store_uri" {
   name = "robolab/infra/MLFLOW_BACKEND_STORE_URI"
+  # Purge immediately on destroy. Default 30-day recovery window blocks
+  # subsequent apply with "scheduled for deletion" -- bad for dev infra that
+  # cycles destroy/apply. The composed URI is regenerated from RDS attrs
+  # on every apply so there's nothing here worth preserving.
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "mlflow_backend_store_uri" {
