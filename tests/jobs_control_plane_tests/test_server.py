@@ -99,27 +99,30 @@ class FakeMLflow:
             tarball = staging / "project_code_root.tar.gz"
             with tarfile.open(tarball, "w:gz") as tar:
                 tar.add(str(project_dest), arcname="project_code_root")
-            uri = fake_s3.upload(str(tarball), key=f"job/{job_id}/project_code_root.tar.gz")
+            uri = fake_s3.upload(
+                str(tarball), dest_path=f"job/{job_id}/project_code_root.tar.gz"
+            )
             (job_dir / "manifest.json").write_text(json.dumps({"code_tarball_uri": uri}))
 
 
 class FakeS3:
     """Fake s3_util backed by a temp directory."""
 
+    BUCKET = "canonical"
+
     def __init__(self) -> None:
         self.root = Path(tempfile.mkdtemp())
 
-    def upload(self, local_path: str, bucket: str | None = None, key: str | None = None) -> str:
-        bucket = bucket or "ray-checkpoints"
-        key = key or Path(local_path).name
-        dest = self.root / bucket / key
+    def upload(self, local_path: str, dest_path: str | None = None) -> str:
+        dest_path = dest_path or Path(local_path).name
+        dest = self.root / self.BUCKET / dest_path
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(local_path, dest)
-        return f"s3://{bucket}/{key}"
+        return f"s3://{self.BUCKET}/{dest_path}"
 
-    def download(self, bucket: str, key: str, local_path: str | None = None) -> str:
-        local_path = local_path or Path(key).name
-        shutil.copy2(self.root / bucket / key, local_path)
+    def download(self, src_path: str, local_path: str | None = None) -> str:
+        local_path = local_path or Path(src_path).name
+        shutil.copy2(self.root / self.BUCKET / src_path, local_path)
         return local_path
 
 

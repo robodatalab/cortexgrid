@@ -104,9 +104,13 @@ class JobLifecycle:
             self.run_id, f"job/{self.job_id}/manifest.json"
         )
         manifest = json.loads(Path(manifest_path).read_text())
-        bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        _, _, src_path = (
+            manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        )
         extract_dir = Path(tempfile.mkdtemp())
-        tarball_local = s3_util.download(bucket, key, str(extract_dir / "project_code_root.tar.gz"))
+        tarball_local = s3_util.download(
+            src_path, local_path=str(extract_dir / "project_code_root.tar.gz")
+        )
         with tarfile.open(tarball_local, "r:gz") as tar:
             tar.extractall(extract_dir)
         return str(extract_dir / "project_code_root")
@@ -179,11 +183,13 @@ class Payload(BaseModel):
                 tar.add(str(project_dest), arcname="project_code_root")
             tarball_uri = s3_util.upload(
                 str(tarball_path),
-                key=f"{artifact_path}/project_code_root.tar.gz",
+                dest_path=f"{artifact_path}/project_code_root.tar.gz",
             )
             manifest_path = Path(tmp_dir, "manifest.json")
             manifest_path.write_text(json.dumps({"code_tarball_uri": tarball_uri}))
-            client.log_artifact(self.run_id, str(manifest_path), artifact_path=artifact_path)
+            client.log_artifact(
+                self.run_id, str(manifest_path), artifact_path=artifact_path
+            )
             log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
@@ -192,9 +198,13 @@ class Payload(BaseModel):
         log.info("Downloading payload for job %s", job_id)
         manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
         manifest = json.loads(Path(manifest_path).read_text())
-        bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        _, _, src_path = (
+            manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+        )
         extract_dir = Path(tempfile.mkdtemp())
-        tarball_local = s3_util.download(bucket, key, str(extract_dir / "project_code_root.tar.gz"))
+        tarball_local = s3_util.download(
+            src_path, local_path=str(extract_dir / "project_code_root.tar.gz")
+        )
         with tarfile.open(tarball_local, "r:gz") as tar:
             tar.extractall(extract_dir)
         project_code_root = str(extract_dir / "project_code_root")
