@@ -28,11 +28,12 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GH_TOKEN }}
 
       - name: Compute branch slug
         id: slug
-        run: echo "value=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(echo '${{ github.ref_name }}' | tr '/' '-')" >>
+          "$GITHUB_OUTPUT"
 
       - name: Build and push
         run: |
