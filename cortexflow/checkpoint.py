@@ -155,11 +155,15 @@ class Checkpoint:
             data, fmt = _serialize(value)
             filename = f"{name}{_ext_for(fmt)}"
             (tmpdir / filename).write_bytes(data)
-            uri = s3_util.upload(str(tmpdir / filename), key=f"{self._prefix}/{filename}")
+            uri = s3_util.upload(
+                str(tmpdir / filename), dest_path=f"{self._prefix}/{filename}"
+            )
             manifest["attrs"][name] = {"uri": uri, "format": fmt}
 
         (tmpdir / "manifest.json").write_text(json.dumps(manifest))
-        client.log_artifact(exp.run_id, str(tmpdir / "manifest.json"), artifact_path=self._prefix)
+        client.log_artifact(
+            exp.run_id, str(tmpdir / "manifest.json"), artifact_path=self._prefix
+        )
         log.info("Checkpoint saved: %s (%d attrs)", self._prefix, len(self._data))
 
     @classmethod
@@ -169,7 +173,9 @@ class Checkpoint:
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
         try:
-            manifest_path = client.download_artifacts(exp.run_id, f"{prefix}/manifest.json")
+            manifest_path = client.download_artifacts(
+                exp.run_id, f"{prefix}/manifest.json"
+            )
             manifest = json.loads(Path(manifest_path).read_text())
         except Exception:
             return None
@@ -178,8 +184,10 @@ class Checkpoint:
         tmpdir = Path(tempfile.mkdtemp())
         for name, info in manifest["attrs"].items():
             try:
-                bucket, _, key = info["uri"].removeprefix("s3://").partition("/")
-                file_path = s3_util.download(bucket, key, str(tmpdir / Path(key).name))
+                _, _, src_path = info["uri"].removeprefix("s3://").partition("/")
+                file_path = s3_util.download(
+                    src_path, local_path=str(tmpdir / Path(src_path).name)
+                )
                 raw = Path(file_path).read_bytes()
                 data[name] = _deserialize(raw, info["format"])
             except Exception:

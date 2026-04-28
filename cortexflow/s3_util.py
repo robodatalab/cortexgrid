@@ -61,25 +61,19 @@ def _ensure_bucket(client: Any, bucket: str) -> None:
         )
 
 
-def upload(
-    local_path: str,
-    dest_root_folder: str | None = None,
-    key: str | None = None,
-) -> str:
+def upload(local_path: str, dest_path: str | None = None) -> str:
     """Upload a local file to the canonical S3/MinIO bucket.
 
     Args:
         local_path: Path to the local file.
-        dest_root_folder: Optional folder inside the bucket. The folder is
-            created implicitly when the object's key prefix is written.
-        key: Object key inside the folder. Defaults to the file's basename.
+        dest_path: Full object key in the bucket (folder/filename). Defaults
+            to the local file's basename at the bucket root.
 
     Returns:
-        The s3://bucket/<full-key> URI of the uploaded object.
+        The s3://bucket/<dest_path> URI of the uploaded object.
     """
     bucket = get_s3_bucket()
-    key = key or os.path.basename(local_path)
-    full_key = f"{dest_root_folder}/{key}" if dest_root_folder else key
+    dest_path = dest_path or os.path.basename(local_path)
 
     client = get_s3_client()
     _ensure_bucket(client, bucket)
@@ -90,24 +84,20 @@ def upload(
         unit_scale=True,
         desc=f"Uploading {os.path.basename(local_path)}",
     ) as pbar:
-        client.upload_file(local_path, bucket, full_key, Callback=pbar.update)
-    return f"s3://{bucket}/{full_key}"
+        client.upload_file(local_path, bucket, dest_path, Callback=pbar.update)
+    return f"s3://{bucket}/{dest_path}"
 
 
-def upload_dir(
-    local_dir: str,
-    dest_root_folder: str | None = None,
-    prefix: str = "",
-) -> list[str]:
+def upload_dir(local_dir: str, dest_path: str = "") -> list[str]:
     """Upload all files in a directory tree to the canonical S3/MinIO bucket.
 
     Args:
         local_dir: Path to the local directory.
-        dest_root_folder: Optional folder inside the bucket. Implicitly created.
-        prefix: Additional key prefix nested under dest_root_folder.
+        dest_path: Folder inside the bucket where the tree lands. Each file's
+            key is dest_path/<path relative to local_dir>. Defaults to bucket root.
 
     Returns:
-        List of s3://bucket/<full-key> URIs for uploaded objects.
+        List of s3://bucket/<key> URIs for uploaded objects.
     """
     bucket = get_s3_bucket()
 
@@ -119,31 +109,24 @@ def upload_dir(
         for filename in files:
             local_path = os.path.join(root, filename)
             rel_path = os.path.relpath(local_path, local_dir).replace(os.sep, "/")
-            parts = [p for p in (dest_root_folder, prefix, rel_path) if p]
-            key = "/".join(parts)
+            key = f"{dest_path}/{rel_path}" if dest_path else rel_path
             client.upload_file(local_path, bucket, key)
             uploaded.append(f"s3://{bucket}/{key}")
 
     return uploaded
 
 
-def download(
-    key: str,
-    src_root_folder: str | None = None,
-    local_path: str | None = None,
-) -> str:
+def download(src_path: str, local_path: str | None = None) -> str:
     """Download a file from the canonical S3/MinIO bucket.
 
     Args:
-        key: Object key inside the folder.
-        src_root_folder: Optional folder inside the bucket the key sits in.
-        local_path: Where to save locally. Defaults to the key's basename.
+        src_path: Full object key in the bucket (folder/filename).
+        local_path: Where to save locally. Defaults to the src_path basename.
 
     Returns:
         The local file path.
     """
-    full_key = f"{src_root_folder}/{key}" if src_root_folder else key
-    local_path = local_path or os.path.basename(key)
+    local_path = local_path or os.path.basename(src_path)
     client = get_s3_client()
-    client.download_file(get_s3_bucket(), full_key, local_path)
+    client.download_file(get_s3_bucket(), src_path, local_path)
     return local_path
