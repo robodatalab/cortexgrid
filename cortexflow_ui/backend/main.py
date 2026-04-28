@@ -4,17 +4,16 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from cortexflow import s3_util
-from cortexflow.experiment import get_mlflow_tracking_uri, list_experiments
+from cortexflow.experiment import get_mlflow_tracking_uri
 from cortexflow.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
-    get_ray_job_id_for_cortexflow_job,
 )
 from cortexflow.infra import get_mlflow_run_url, get_ray_job_server_uri
 from cortexflow.jobs import (
@@ -37,11 +36,16 @@ from cortexflow.secrets import (
     set_secret,
 )
 
+from cortexflow_ui.backend import experiments_stream
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 log = logging.getLogger("cortexflow_ui_backend")
 
-app = FastAPI(title="CortexFlow UI", version="0.1.0")
+app = FastAPI(
+    title="CortexFlow UI",
+    version="0.1.0",
+    lifespan=experiments_stream.lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,31 +105,21 @@ def secret_delete(id: str) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/experiments")
-def experiments() -> list[dict]:
-    log.info("Listing experiments")
-    all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    result = []
-    for exp in list_experiments():
-        jobs = []
-        for job_id in exp.get_jobs():
-            try:
-                ray_job_id = get_ray_job_id_for_cortexflow_job(
-                    exp.run_id, job_id, all_ray_submission_ids
-                )
-                status = get_ray_job_status(ray_job_id).value
-            except Exception:
-                status = "broken"
-            jobs.append({"job_id": job_id, "status": status})
-        result.append(
-            {
-                "experiment_name": exp.experiment_name,
-                "run_id": exp.run_id,
-                "run_name": exp.run_name(),
-                "jobs": jobs,
-            }
-        )
-    return result
+@app.websocket("/api/experiments/stream")
+async def experiments_stream_endpoint(ws: WebSocket) -> None:
+    await ws.accept()
+    experiments_stream.ws_clients.add(ws)
+    try:
+        for run in list(experiments_stream.runs_cache.values()):
+            await ws.send_json({"type": "added", "run": run})
+        while True:
+            msg = await ws.receive_json()
+            if msg.get("type") == "force_refresh":
+                experiments_stream.force_refresh.set()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        experiments_stream.ws_clients.discard(ws)
 
 
 def _list_run_jobs(run_id: str) -> list[dict]:

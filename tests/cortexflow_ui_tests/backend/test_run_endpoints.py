@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from cortexflow.ray_util import JobStatus
 from cortexflow.jobs import JobLifecycle, LifecycleEvent
+from cortexflow_ui.backend import experiments_stream as stream_mod
 from cortexflow_ui.backend.main import _tarball_exists, app
 
 
@@ -388,6 +389,37 @@ class TestTarballExists(unittest.TestCase):
         self.fake_s3.head_object.side_effect = Exception("404 NoSuchKey")
 
         self.assertFalse(_tarball_exists("run-1", "job-1"))
+
+
+class TestExperimentsStream(unittest.TestCase):
+    def setUp(self) -> None:
+        self._saved_cache = dict(stream_mod.runs_cache)
+        stream_mod.runs_cache.clear()
+        self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        stream_mod.runs_cache.clear()
+        stream_mod.runs_cache.update(self._saved_cache)
+
+    def test_snapshot_sent_on_connect(self) -> None:
+        stream_mod.runs_cache["r1"] = {
+            "experiment_name": "alpha",
+            "run_id": "r1",
+            "run_name": "alpha-run",
+            "jobs": [],
+        }
+        with self.client.websocket_connect("/api/experiments/stream") as ws:
+            event = ws.receive_json()
+            self.assertEqual(event["type"], "added")
+            self.assertEqual(event["run"]["run_id"], "r1")
+
+    def test_force_refresh_signals_poll_event(self) -> None:
+        stream_mod.force_refresh.clear()
+        with self.client.websocket_connect("/api/experiments/stream") as ws:
+            ws.send_json({"type": "force_refresh"})
+            ws.send_json({"type": "ping"})  # follow-up keeps the handler alive long enough to process the prior message
+        self.assertTrue(stream_mod.force_refresh.is_set())
+        stream_mod.force_refresh.clear()
 
 
 if __name__ == "__main__":
