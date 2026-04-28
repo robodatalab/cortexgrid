@@ -30,7 +30,9 @@ def _load_kube_config() -> None:
         config.load_kube_config()
 
 
-def _classify(pod) -> tuple[bool, str]:
+def _classify(pod, unreachable_nodes: dict[str, str] | None = None) -> tuple[bool, str]:
+    if unreachable_nodes and pod.spec.node_name in unreachable_nodes:
+        return False, f"node-unreachable: {unreachable_nodes[pod.spec.node_name]}"
     phase = pod.status.phase or "Unknown"
     statuses = pod.status.container_statuses or []
     if phase == "Succeeded":
@@ -54,8 +56,10 @@ def _fetch_logs(v1: client.CoreV1Api, pod) -> str | None:
         return None
 
 
-def _pod_to_status(pod, v1: client.CoreV1Api) -> PodStatus:
-    healthy, health = _classify(pod)
+def _pod_to_status(
+    pod, v1: client.CoreV1Api, unreachable_nodes: dict[str, str] | None = None
+) -> PodStatus:
+    healthy, health = _classify(pod, unreachable_nodes)
     return PodStatus(
         name=pod.metadata.name,
         namespace=pod.metadata.namespace,
@@ -67,12 +71,27 @@ def _pod_to_status(pod, v1: client.CoreV1Api) -> PodStatus:
     )
 
 
+def _collect_unreachable_nodes(v1: client.CoreV1Api) -> dict[str, str]:
+    unreachable: dict[str, str] = {}
+    for node in v1.list_node().items:
+        ready = next(
+            (c for c in (node.status.conditions or []) if c.type == "Ready"),
+            None,
+        )
+        if ready is None or ready.status != "True":
+            unreachable[node.metadata.name] = (
+                (ready.reason or ready.status) if ready else "Unknown"
+            )
+    return unreachable
+
+
 def get_infra_status() -> InfraStatus:
     _load_kube_config()
     v1 = client.CoreV1Api()
+    unreachable_nodes = _collect_unreachable_nodes(v1)
     pods = v1.list_pod_for_all_namespaces(watch=False).items
     statuses = sorted(
-        (_pod_to_status(p, v1) for p in pods),
+        (_pod_to_status(p, v1, unreachable_nodes) for p in pods),
         key=lambda s: (s.namespace, s.name),
     )
     overall = all(s.healthy for s in statuses)
