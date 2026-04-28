@@ -1,33 +1,15 @@
-import asyncio
-import json
 import logging
-from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow import s3_util
-from cortexflow.experiment import get_mlflow_tracking_uri, list_experiments
-from cortexflow.ray_util import (
-    get_ray_job_status,
-    list_ray_jobs_with_submission_id,
-    get_ray_job_id_for_cortexflow_job,
-)
-from cortexflow.infra import get_mlflow_run_url, get_ray_job_server_uri
-from cortexflow.jobs import (
-    list_experiment_run_jobs,
-    stop_experiment_run_jobs,
-    JobLifecycle,
-)
-from cortexflow.mlflow_util import (
-    get_metric_history,
-    list_run_artifacts,
-)
-from mlflow.tracking import MlflowClient
-from cortexflow.ray_util import get_ray_job_url, get_ray_logs
+from cortexflow.experiment import get_mlflow_tracking_uri
+from cortexflow.infra import get_ray_job_server_uri
+from cortexflow.jobs import stop_experiment_run_jobs
+from cortexflow.ray_util import get_ray_logs
 from cortexflow.secrets import (
     delete_secret,
     get_secret,
@@ -35,11 +17,21 @@ from cortexflow.secrets import (
     set_secret,
 )
 
+from cortexflow_ui.backend import (
+    experiments_stream,
+    job_stream,
+    run_dashboard_stream,
+    run_jobs_stream,
+)
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 log = logging.getLogger("cortexflow_ui_backend")
 
-app = FastAPI(title="CortexFlow UI", version="0.1.0")
+app = FastAPI(
+    title="CortexFlow UI",
+    version="0.1.0",
+    lifespan=experiments_stream.lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -99,134 +91,36 @@ def secret_delete(id: str) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/experiments")
-def experiments() -> list[dict]:
-    log.info("Listing experiments")
-    all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    result = []
-    for exp in list_experiments():
-        jobs = []
-        for job_id in exp.get_jobs():
-            try:
-                ray_job_id = get_ray_job_id_for_cortexflow_job(
-                    exp.run_id, job_id, all_ray_submission_ids
-                )
-                status = get_ray_job_status(ray_job_id).value
-            except Exception:
-                status = "broken"
-            jobs.append({"job_id": job_id, "status": status})
-        result.append(
-            {
-                "experiment_name": exp.experiment_name,
-                "run_id": exp.run_id,
-                "run_name": exp.run_name(),
-                "jobs": jobs,
-            }
-        )
-    return result
-
-
-def _list_run_jobs(run_id: str) -> list[dict]:
-    all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    return [
-        {
-            "job_id": j.job_id,
-            "status": get_ray_job_status(
-                j.get_ray_job_id(all_ray_submission_ids)
-            ).value,
-            "retry": j.retry,
-        }
-        for j in list_experiment_run_jobs(run_id)
-    ]
-
-
-@app.get("/api/runs/{run_id}/jobs")
-def run_jobs(run_id: str) -> list[dict]:
-    return _list_run_jobs(run_id)
-
-
-@app.get("/api/runs/{run_id}/dashboard")
-async def run_dashboard(run_id: str) -> dict:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    run = await asyncio.to_thread(client.get_run, run_id)
-    params = dict(run.data.params)
-    metric_keys = list(run.data.metrics.keys())
-
-    artifacts_task = asyncio.create_task(asyncio.to_thread(list_run_artifacts, run_id))
-    jobs_task = asyncio.create_task(asyncio.to_thread(_list_run_jobs, run_id))
-    metric_tasks = {
-        key: asyncio.create_task(
-            asyncio.to_thread(get_metric_history, run_id, key, max_points=500)
-        )
-        for key in metric_keys
-    }
-
-    metrics = {key: await task for key, task in metric_tasks.items()}
-    artifacts = await artifacts_task
-    jobs = await jobs_task
-
-    return {
-        "params": params,
-        "metrics": metrics,
-        "artifacts": artifacts,
-        "url": get_mlflow_run_url(run_id),
-        "jobs": jobs,
-    }
-
-
-def _tarball_exists(run_id: str, job_id: str) -> bool:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
-    manifest = json.loads(Path(manifest_path).read_text())
-    bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
+@app.websocket("/api/experiments/stream")
+async def experiments_stream_endpoint(ws: WebSocket) -> None:
+    await ws.accept()
+    experiments_stream.ws_clients.add(ws)
     try:
-        s3_util.get_s3_client().head_object(Bucket=bucket, Key=key)
-        return True
-    except Exception:
-        return False
+        for run in list(experiments_stream.runs_cache.values()):
+            await ws.send_json({"type": "added", "run": run})
+        while True:
+            msg = await ws.receive_json()
+            if msg.get("type") == "force_refresh":
+                experiments_stream.force_refresh.set()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        experiments_stream.ws_clients.discard(ws)
 
 
-@app.get("/api/runs/{run_id}/jobs/{job_id}")
-async def job_detail(run_id: str, job_id: str) -> dict:
-    job_entries = await asyncio.to_thread(list_run_artifacts, run_id, f"job/{job_id}")
-    lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
-    manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
+@app.websocket("/api/runs/{run_id}/jobs/stream")
+async def run_jobs_stream_endpoint(ws: WebSocket, run_id: str) -> None:
+    await run_jobs_stream.stream.serve(ws, run_id)
 
-    tarball_task = (
-        asyncio.create_task(asyncio.to_thread(_tarball_exists, run_id, job_id))
-        if manifest_ready
-        else None
-    )
-    lifecycle_task = (
-        asyncio.create_task(asyncio.to_thread(JobLifecycle.load_from_mlflow, run_id, job_id))
-        if lifecycle_ready
-        else None
-    )
 
-    code_ready = bool(await tarball_task) if tarball_task else False
-    readiness = {
-        "code": code_ready,
-        "lifecycle": lifecycle_ready,
-        "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
-    }
-    if lifecycle_task is None:
-        return {"job_id": job_id, "readiness": readiness}
+@app.websocket("/api/runs/{run_id}/stream")
+async def run_dashboard_stream_endpoint(ws: WebSocket, run_id: str) -> None:
+    await run_dashboard_stream.stream.serve(ws, run_id)
 
-    lifecycle = await lifecycle_task
-    ray_job_id = lifecycle.get_ray_job_id()
-    history = [asdict(event) for event in lifecycle.history]
-    for event in history:
-        event["ray_url"] = get_ray_job_url(event["ray_job_id"])
-    status = await asyncio.to_thread(get_ray_job_status, ray_job_id)
 
-    return {
-        "job_id": lifecycle.job_id,
-        "readiness": readiness,
-        "status": status.value,
-        "retry": lifecycle.retry,
-        "stop_requested": lifecycle.stop_requested,
-        "history": history,
-    }
+@app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")
+async def job_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
+    await job_stream.stream.serve(ws, (run_id, job_id))
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")

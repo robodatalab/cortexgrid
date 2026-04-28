@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush } from 'recharts'
 import { TitledFrame } from './TitledFrame'
+import { useStreamState } from '../useStreamState'
 import './RunDashboard.css'
 
 type MetricPoint = { step: number; value: number }
-type Job = { job_id: string; status: string; retry: boolean }
+
+export type Job = { job_id: string; status: string; retry: boolean }
+
+type DashboardData = {
+  params: Record<string, string>
+  metrics: Record<string, MetricPoint[]>
+  artifacts: string[]
+  url: string
+}
 
 const STOPPABLE_STATUSES = new Set(['pending', 'running'])
 
@@ -17,64 +26,25 @@ type Props = {
   runId: string
   runName: string
   experimentName: string
+  jobs: Job[] | null
 }
 
-export function RunDashboard({ runId, runName, experimentName }: Props) {
-  const [params, setParams] = useState<Record<string, string>>({})
-  const [metricKeys, setMetricKeys] = useState<string[]>([])
-  const [metricData, setMetricData] = useState<Record<string, MetricPoint[]>>({})
-  const [artifacts, setArtifacts] = useState<string[]>([])
-  const [mlflowUrl, setMlflowUrl] = useState<string | null>(null)
-  const [jobs, setJobs] = useState<Job[]>([])
+export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
+  const data = useStreamState<DashboardData>(`/api/runs/${runId}/stream`)
   const [stopping, setStopping] = useState(false)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
-  useEffect(() => {
-    setStatus('loading')
-    const controller = new AbortController()
-    fetch(`/api/runs/${runId}/dashboard`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<{
-          params: Record<string, string>
-          metrics: Record<string, MetricPoint[]>
-          artifacts: string[]
-          url: string
-          jobs: Job[]
-        }>
-      })
-      .then((d) => {
-        setParams(d.params)
-        setMetricKeys(Object.keys(d.metrics))
-        setMetricData(d.metrics)
-        setArtifacts(d.artifacts)
-        setMlflowUrl(d.url)
-        setJobs(d.jobs)
-        setStatus('ready')
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setStatus('error')
-      })
-
-    return () => controller.abort()
-  }, [runId])
-
-  const hasStoppableJobs = jobs.some(isStoppable)
+  const hasStoppableJobs = jobs?.some(isStoppable) ?? false
 
   async function handleStop() {
     setStopping(true)
     try {
       await fetch(`/api/runs/${runId}/stop`, { method: 'POST' })
-      const res = await fetch(`/api/runs/${runId}/jobs`)
-      setJobs(await res.json())
     } finally {
       setStopping(false)
     }
   }
 
-  if (status === 'loading') return <div className="run-dashboard__status">Loading...</div>
-  if (status === 'error') return <div className="run-dashboard__status">Failed to load</div>
+  const metricKeys = data ? Object.keys(data.metrics) : []
 
   return (
     <div className="run-dashboard">
@@ -91,10 +61,10 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
               {stopping ? 'Stopping...' : 'Stop all jobs'}
             </button>
           )}
-          {mlflowUrl && (
+          {data && (
             <a
               className="run-dashboard__open-button"
-              href={mlflowUrl}
+              href={data.url}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -104,12 +74,12 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
         </div>
       </div>
 
-      {Object.keys(params).length > 0 && (
+      {data && Object.keys(data.params).length > 0 && (
         <div className="run-dashboard__section">
           <div className="run-dashboard__section-title">Parameters</div>
           <table className="run-dashboard__table">
             <tbody>
-              {Object.entries(params).map(([k, v]) => (
+              {Object.entries(data.params).map(([k, v]) => (
                 <tr key={k}><td>{k}</td><td>{v}</td></tr>
               ))}
             </tbody>
@@ -117,14 +87,14 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
         </div>
       )}
 
-      {metricKeys.length > 0 && (
+      {metricKeys.length > 0 && data && (
         <div className="run-dashboard__section">
           <div className="run-dashboard__section-title">Metrics</div>
           {metricKeys.map((key) => (
             <div key={key} className="run-dashboard__chart">
               <div className="run-dashboard__chart-title">{key}</div>
               <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={metricData[key] ?? []}>
+                <LineChart data={data.metrics[key]}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="step" />
                   <YAxis />
@@ -138,11 +108,11 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
         </div>
       )}
 
-      {artifacts.length > 0 && (
+      {data && data.artifacts.length > 0 && (
         <div className="run-dashboard__section">
           <TitledFrame title="Artifacts">
             <ul className="run-dashboard__artifacts">
-              {artifacts.map((a) => (
+              {data.artifacts.map((a) => (
                 <li key={a}>{a}</li>
               ))}
             </ul>

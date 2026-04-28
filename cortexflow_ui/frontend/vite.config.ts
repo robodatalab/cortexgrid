@@ -6,7 +6,10 @@ export default defineConfig({
   server: {
     host: true,
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': {
+        target: 'http://localhost:8000',
+        ws: true,
+      },
     },
   },
   test: {

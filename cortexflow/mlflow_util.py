@@ -9,6 +9,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import requests
+
 from cortexflow.experiment import Experiment
 from cortexflow.infra import get_mlflow_tracking_uri
 from mlflow.entities import Metric
@@ -70,18 +72,29 @@ def get_metric_history(
 ) -> list[dict[str, Any]]:
     """Return the history of a metric as [{step, value, timestamp}, ...].
 
-    If `max_points` is given and the series is longer, downsample to
-    that many evenly-spaced points; the first and last are always kept.
+    When `max_points` is given, MLflow samples server-side and returns at
+    most that many points (saves DB work and bytes-on-the-wire). Without
+    `max_points`, the full history is returned.
     """
+    if max_points is not None:
+        url = (
+            f"{get_mlflow_tracking_uri().rstrip('/')}"
+            "/ajax-api/2.0/mlflow/metrics/get-history-bulk-interval"
+        )
+        response = requests.get(
+            url,
+            params={"run_ids": run_id, "metric_key": key, "max_results": max_points},
+        )
+        response.raise_for_status()
+        return [
+            {"step": int(m["step"]), "value": float(m["value"]), "timestamp": int(m["timestamp"])}
+            for m in response.json().get("metrics", [])
+        ]
     client = get_mlflow_client()
     history = client.get_metric_history(run_id, key)
-    points = [
+    return [
         {"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history
     ]
-    if max_points is None or len(points) <= max_points:
-        return points
-    indices = [round(i * (len(points) - 1) / (max_points - 1)) for i in range(max_points)]
-    return [points[i] for i in indices]
 
 
 def list_run_params(run_id: str) -> dict[str, str]:

@@ -39,6 +39,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
+  font-family: inherit;
   font-size: 14px;
   font-weight: 500;
   color: #444;
@@ -73,6 +74,10 @@
 
 .experiment-tree__row:hover {
   background: #f0f0f0;
+}
+
+.experiment-tree__row--nested {
+  padding-left: 32px;
 }
 
 .experiment-tree__job-status {
