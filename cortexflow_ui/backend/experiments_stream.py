@@ -49,11 +49,6 @@ def _build_run_data(exp, all_ray_submission_ids: list[str]) -> dict:
     }
 
 
-def _poll_once_blocking() -> list[dict]:
-    all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    return [_build_run_data(exp, all_ray_submission_ids) for exp in list_experiments()]
-
-
 async def _broadcast(event: dict) -> None:
     for ws in list(ws_clients):
         try:
@@ -78,24 +73,37 @@ async def _poll_loop() -> None:
     log.info("Experiments poll loop started")
     while True:
         try:
-            new_runs = await asyncio.to_thread(_poll_once_blocking)
+            experiments = await asyncio.to_thread(list_experiments)
+            all_ray_submission_ids = await asyncio.to_thread(
+                list_ray_jobs_with_submission_id
+            )
         except Exception:
             log.exception("Experiments poll failed")
             await _wait_for_next_poll()
             continue
-        new_by_id = {r["run_id"]: r for r in new_runs}
-        added = [r for rid, r in new_by_id.items() if rid not in runs_cache]
-        removed = [rid for rid in runs_cache if rid not in new_by_id]
-        runs_cache.clear()
-        runs_cache.update(new_by_id)
+        seen: set[str] = set()
+        added_count = 0
+        for exp in experiments:
+            try:
+                run = await asyncio.to_thread(
+                    _build_run_data, exp, all_ray_submission_ids
+                )
+            except Exception:
+                log.exception("Building run data failed for %s", exp.run_id)
+                continue
+            seen.add(run["run_id"])
+            if run["run_id"] not in runs_cache:
+                added_count += 1
+                await _broadcast({"type": "added", "run": run})
+            runs_cache[run["run_id"]] = run
+        removed = [rid for rid in list(runs_cache) if rid not in seen]
+        for run_id in removed:
+            del runs_cache[run_id]
+            await _broadcast({"type": "removed", "run_id": run_id})
         log.info(
             "Experiments poll: %d cached, %d added, %d removed, %d clients",
-            len(runs_cache), len(added), len(removed), len(ws_clients),
+            len(runs_cache), added_count, len(removed), len(ws_clients),
         )
-        for run in added:
-            await _broadcast({"type": "added", "run": run})
-        for run_id in removed:
-            await _broadcast({"type": "removed", "run_id": run_id})
         await _wait_for_next_poll()
 
 
