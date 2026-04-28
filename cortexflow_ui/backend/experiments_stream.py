@@ -21,10 +21,9 @@ from cortexflow.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
+from cortexflow_ui.backend.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 
 log = logging.getLogger(__name__)
-
-POLL_INTERVAL_SEC = 10
 
 runs_cache: dict[str, dict] = {}
 ws_clients: set[WebSocket] = set()
@@ -65,7 +64,9 @@ async def _broadcast(event: dict) -> None:
 
 async def _wait_for_next_poll() -> None:
     try:
-        await asyncio.wait_for(force_refresh.wait(), timeout=POLL_INTERVAL_SEC)
+        await asyncio.wait_for(
+            force_refresh.wait(), timeout=EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+        )
     except asyncio.TimeoutError:
         return
     force_refresh.clear()

@@ -7,10 +7,12 @@ import { ExperimentTree } from './components/ExperimentTree'
 import type { Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
+import type { Job } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
 import { InfraStatusIndicator } from './components/InfraStatusIndicator'
 import { InfraDashboard } from './components/InfraDashboard'
 import { SecretsDashboard } from './components/SecretsDashboard'
+import { useStreamState } from './useStreamState'
 
 type Dashboard = {
   id: string
@@ -26,6 +28,14 @@ function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
   const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
+
+  const activeRunId =
+    selection?.kind === 'run' || selection?.kind === 'job'
+      ? selection.run_id
+      : null
+  const activeRunJobs = useStreamState<Job[]>(
+    activeRunId ? `/api/runs/${activeRunId}/jobs/stream` : null,
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -105,7 +115,12 @@ function App() {
                 {selection?.kind === 'experiment' ? (
                   <ExperimentDashboard experimentName={selection.experiment_name} />
                 ) : selection?.kind === 'run' ? (
-                  <RunDashboard runId={selection.run_id} runName={selection.run_name} experimentName={selection.experiment_name} />
+                  <RunDashboard
+                    runId={selection.run_id}
+                    runName={selection.run_name}
+                    experimentName={selection.experiment_name}
+                    jobs={activeRunJobs}
+                  />
                 ) : selection?.kind === 'job' ? (
                   <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
                 ) : (

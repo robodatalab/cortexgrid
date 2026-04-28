@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TitledFrame } from "./TitledFrame";
+import { useStreamState } from "../useStreamState";
 import "./JobDashboard.css";
 
 type LifecycleEvent = {
@@ -205,64 +206,51 @@ function ReadinessPanel({ readiness }: { readiness: Readiness }) {
 }
 
 export function JobDashboard({ runId, jobId }: Props) {
-    const [detail, setDetail] = useState<JobDetail | null>(null);
+    const detail = useStreamState<JobDetail>(
+        `/api/runs/${runId}/jobs/${jobId}/stream`,
+    );
     const [logsByRayJobId, setLogsByRayJobId] = useState<
         Record<string, string>
     >({});
-    const [status, setStatus] = useState<"loading" | "ready" | "error">(
-        "loading",
-    );
+    const fetchedRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
-        setStatus("loading");
-        const controller = new AbortController();
-        fetch(`/api/runs/${runId}/jobs/${jobId}`, { signal: controller.signal })
-            .then((res) => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json() as Promise<JobDetail>;
-            })
-            .then((data) => {
-                setDetail(data);
-                setStatus("ready");
-                for (const rayJobId of failedAttemptRayJobIds(
-                    data.history ?? [],
-                )) {
-                    fetch(`/api/ray/jobs/${rayJobId}/logs`, {
-                        signal: controller.signal,
-                    })
-                        .then((r) =>
-                            r.ok
-                                ? (r.json() as Promise<{ logs: string }>)
-                                : null,
-                        )
-                        .then((j) => {
-                            if (j)
-                                setLogsByRayJobId((prev) => ({
-                                    ...prev,
-                                    [rayJobId]: j.logs,
-                                }));
-                        })
-                        .catch((err: unknown) => {
-                            if (
-                                err instanceof DOMException &&
-                                err.name === "AbortError"
-                            )
-                                return;
-                        });
-                }
-            })
-            .catch((err: unknown) => {
-                if (err instanceof DOMException && err.name === "AbortError")
-                    return;
-                setStatus("error");
-            });
-        return () => controller.abort();
+        fetchedRef.current = new Set();
+        setLogsByRayJobId({});
     }, [runId, jobId]);
 
-    if (status === "loading")
+    useEffect(() => {
+        if (!detail) return;
+        const controller = new AbortController();
+        for (const rayJobId of failedAttemptRayJobIds(detail.history ?? [])) {
+            if (fetchedRef.current.has(rayJobId)) continue;
+            fetchedRef.current.add(rayJobId);
+            fetch(`/api/ray/jobs/${rayJobId}/logs`, {
+                signal: controller.signal,
+            })
+                .then((r) =>
+                    r.ok ? (r.json() as Promise<{ logs: string }>) : null,
+                )
+                .then((j) => {
+                    if (j)
+                        setLogsByRayJobId((prev) => ({
+                            ...prev,
+                            [rayJobId]: j.logs,
+                        }));
+                })
+                .catch((err: unknown) => {
+                    if (
+                        err instanceof DOMException &&
+                        err.name === "AbortError"
+                    )
+                        return;
+                });
+        }
+        return () => controller.abort();
+    }, [detail]);
+
+    if (!detail)
         return <div className="job-dashboard__status">Loading...</div>;
-    if (status === "error" || !detail)
-        return <div className="job-dashboard__status">Failed to load</div>;
 
     return (
         <div className="job-dashboard">
