@@ -65,13 +65,23 @@ def list_run_metrics(run_id: str) -> list[str]:
     return list(run.data.metrics.keys())
 
 
-def get_metric_history(run_id: str, key: str) -> list[dict[str, Any]]:
-    """Return the full history of a metric as [{step, value, timestamp}, ...]."""
+def get_metric_history(
+    run_id: str, key: str, max_points: int | None = None
+) -> list[dict[str, Any]]:
+    """Return the history of a metric as [{step, value, timestamp}, ...].
+
+    If `max_points` is given and the series is longer, downsample to
+    that many evenly-spaced points; the first and last are always kept.
+    """
     client = get_mlflow_client()
     history = client.get_metric_history(run_id, key)
-    return [
+    points = [
         {"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history
     ]
+    if max_points is None or len(points) <= max_points:
+        return points
+    indices = [round(i * (len(points) - 1) / (max_points - 1)) for i in range(max_points)]
+    return [points[i] for i in indices]
 
 
 def list_run_params(run_id: str) -> dict[str, str]:

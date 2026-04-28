@@ -32,31 +32,24 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
   useEffect(() => {
     setStatus('loading')
     const controller = new AbortController()
-    const opts = { signal: controller.signal }
-
-    Promise.all([
-      fetch(`/api/runs/${runId}/params`, opts).then((r) => r.json() as Promise<Record<string, string>>),
-      fetch(`/api/runs/${runId}/metrics`, opts).then((r) => r.json() as Promise<string[]>),
-      fetch(`/api/runs/${runId}/artifacts`, opts).then((r) => r.json() as Promise<string[]>),
-      fetch(`/api/runs/${runId}/url`, opts).then((r) => r.json() as Promise<{ url: string }>),
-      fetch(`/api/runs/${runId}/jobs`, opts).then((r) => r.json() as Promise<Job[]>),
-    ])
-      .then(([p, m, a, u, j]) => {
-        setParams(p)
-        setMetricKeys(m)
-        setArtifacts(a)
-        setMlflowUrl(u.url)
-        setJobs(j)
-        return Promise.all(
-          m.map((key) =>
-            fetch(`/api/runs/${runId}/metrics/${encodeURIComponent(key)}`, opts)
-              .then((r) => r.json() as Promise<MetricPoint[]>)
-              .then((points) => [key, points] as const)
-          )
-        )
+    fetch(`/api/runs/${runId}/dashboard`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json() as Promise<{
+          params: Record<string, string>
+          metrics: Record<string, MetricPoint[]>
+          artifacts: string[]
+          url: string
+          jobs: Job[]
+        }>
       })
-      .then((entries) => {
-        setMetricData(Object.fromEntries(entries))
+      .then((d) => {
+        setParams(d.params)
+        setMetricKeys(Object.keys(d.metrics))
+        setMetricData(d.metrics)
+        setArtifacts(d.artifacts)
+        setMlflowUrl(d.url)
+        setJobs(d.jobs)
         setStatus('ready')
       })
       .catch((err: unknown) => {

@@ -18,67 +18,53 @@ class TestRunEndpoints(unittest.TestCase):
         self.client = TestClient(app)
 
     @patch(
-        "cortexflow_ui.backend.main.list_run_metrics", return_value=["loss", "accuracy"]
+        "cortexflow_ui.backend.main._list_run_jobs",
+        return_value=[{"job_id": "j1", "status": "running", "retry": False}],
     )
-    def test_run_metrics_returns_keys(self, _mock: MagicMock) -> None:
-        response = self.client.get("/api/runs/run-1/metrics")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), ["loss", "accuracy"])
-
     @patch(
-        "cortexflow_ui.backend.main.get_metric_history",
-        return_value=[
-            {"step": 1, "value": 0.9, "timestamp": 1000},
-            {"step": 2, "value": 0.8, "timestamp": 2000},
-        ],
+        "cortexflow_ui.backend.main.list_run_artifacts",
+        return_value=["model.pt", "job/j1"],
     )
-    def test_run_metric_history_returns_points(self, _mock: MagicMock) -> None:
-        response = self.client.get("/api/runs/run-1/metrics/loss")
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertEqual(len(data), 2)
-        self.assertEqual(data[0]["step"], 1)
-        self.assertEqual(data[1]["value"], 0.8)
-
     @patch(
         "cortexflow_ui.backend.main.get_metric_history",
         return_value=[{"step": 1, "value": 0.5, "timestamp": 1000}],
     )
-    def test_run_metric_history_supports_slashed_keys(
-        self, mock_history: MagicMock
-    ) -> None:
-        response = self.client.get("/api/runs/run-1/metrics/train/loss")
-        self.assertEqual(response.status_code, 200)
-        mock_history.assert_called_once_with("run-1", "train/loss")
-
-    @patch(
-        "cortexflow_ui.backend.main.list_run_params",
-        return_value={"lr": "0.001", "epochs": "10"},
-    )
-    def test_run_params_returns_dict(self, _mock: MagicMock) -> None:
-        response = self.client.get("/api/runs/run-1/params")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"lr": "0.001", "epochs": "10"})
-
-    @patch(
-        "cortexflow_ui.backend.main.list_run_artifacts",
-        return_value=["model.pt", "job/job-1"],
-    )
-    def test_run_artifacts_returns_paths(self, _mock: MagicMock) -> None:
-        response = self.client.get("/api/runs/run-1/artifacts")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), ["model.pt", "job/job-1"])
-
     @patch(
         "cortexflow_ui.backend.main.get_mlflow_run_url",
-        return_value="http://test:5000/#/experiments/1/runs/run-1",
+        return_value="http://test:5000/#/x",
     )
-    def test_run_url_returns_mlflow_url(self, _mock: MagicMock) -> None:
-        response = self.client.get("/api/runs/run-1/url")
+    @patch(
+        "cortexflow_ui.backend.main.get_mlflow_tracking_uri",
+        return_value="http://test:5000",
+    )
+    @patch("cortexflow_ui.backend.main.MlflowClient")
+    def test_run_dashboard_returns_bundled_response(
+        self,
+        mock_client_cls: MagicMock,
+        _mock_uri: MagicMock,
+        _mock_run_url: MagicMock,
+        mock_metric_history: MagicMock,
+        _mock_artifacts: MagicMock,
+        _mock_jobs: MagicMock,
+    ) -> None:
+        fake_run = MagicMock()
+        fake_run.data.params = {"lr": "0.001"}
+        fake_run.data.metrics = {"loss": 0.5, "rmse": 0.7}
+        mock_client_cls.return_value.get_run.return_value = fake_run
+
+        response = self.client.get("/api/runs/run-1/dashboard")
+
         self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["params"], {"lr": "0.001"})
+        self.assertEqual(set(data["metrics"].keys()), {"loss", "rmse"})
+        self.assertEqual(data["artifacts"], ["model.pt", "job/j1"])
+        self.assertEqual(data["url"], "http://test:5000/#/x")
         self.assertEqual(
-            response.json(), {"url": "http://test:5000/#/experiments/1/runs/run-1"}
+            data["jobs"], [{"job_id": "j1", "status": "running", "retry": False}]
         )
+        for call in mock_metric_history.call_args_list:
+            self.assertEqual(call.kwargs.get("max_points"), 500)
 
     @patch(
         "cortexflow_ui.backend.main.list_run_artifacts",

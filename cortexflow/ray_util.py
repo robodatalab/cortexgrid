@@ -16,6 +16,17 @@ class JobStatus(str, Enum):
     STOPPED = "stopped"
 
 
+_ray_job_submission_client: JobSubmissionClient | None = None
+
+
+def get_ray_job_submission_client() -> JobSubmissionClient:
+    """Return a cached JobSubmissionClient. Each constructor call does a version-check RTT, so we share one."""
+    global _ray_job_submission_client
+    if _ray_job_submission_client is None:
+        _ray_job_submission_client = JobSubmissionClient(get_ray_job_server_uri())
+    return _ray_job_submission_client
+
+
 def get_ray_job_id_for_cortexflow_job(
     run_id: str, job_id: str, all_ray_submission_ids: list[str] | None = None
 ) -> str | None:
@@ -31,7 +42,7 @@ def get_ray_status(ray_job_id: str | None) -> str | None:
     if ray_job_id is None:
         return None
 
-    client = JobSubmissionClient(get_ray_job_server_uri())
+    client = get_ray_job_submission_client()
     return client.get_job_status(ray_job_id).value
 
 
@@ -59,7 +70,7 @@ def get_ray_logs(ray_job_id: str | None) -> str | None:
     if ray_job_id is None:
         return None
 
-    client = JobSubmissionClient(get_ray_job_server_uri())
+    client = get_ray_job_submission_client()
     return client.get_job_logs(ray_job_id)
 
 
@@ -74,13 +85,13 @@ def get_ray_job_url(ray_job_id: str | None) -> str | None:
 
 def stop_ray_job(ray_job_id: str) -> None:
     """Stop a running ray job."""
-    client = JobSubmissionClient(get_ray_job_server_uri())
+    client = get_ray_job_submission_client()
     client.stop_job(ray_job_id)
 
 
 def list_ray_jobs_with_submission_id() -> list[str]:
     """List all ray jobs, the ones that received submission id."""
-    client = JobSubmissionClient(get_ray_job_server_uri())
+    client = get_ray_job_submission_client()
     return [
         job.submission_id for job in client.list_jobs() if job.submission_id is not None
     ]
@@ -115,7 +126,7 @@ def submit_ray_job(
     control plane relies on that exception to short-circuit re-submission
     on retry paths.
     """
-    client = JobSubmissionClient(get_ray_job_server_uri())
+    client = get_ray_job_submission_client()
     client.submit_job(
         submission_id=submission_id,
         entrypoint=entrypoint,

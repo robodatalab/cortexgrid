@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FlaskConical, Play, Cog, RefreshCw } from 'lucide-react'
+import { FlaskConical, Play, Cog, RefreshCw, ArrowLeft } from 'lucide-react'
 import './ExperimentTree.css'
 
 type Job = {
@@ -18,27 +18,21 @@ type Run = {
   run_id: string
   run_name: string
   jobs: Job[]
-  expanded: boolean
 }
 
-type TreeNode = {
+type Experiment = {
   experiment_name: string
   runs: Run[]
-  expanded: boolean
 }
 
-function groupByExperiment(items: ExperimentRun[]): TreeNode[] {
+function groupByExperiment(items: ExperimentRun[]): Experiment[] {
   const map = new Map<string, Run[]>()
   for (const r of items) {
     const list = map.get(r.experiment_name) ?? []
-    list.push({ run_id: r.run_id, run_name: r.run_name, jobs: r.jobs, expanded: false })
+    list.push({ run_id: r.run_id, run_name: r.run_name, jobs: r.jobs })
     map.set(r.experiment_name, list)
   }
-  return Array.from(map, ([experiment_name, runs]) => ({
-    experiment_name,
-    runs,
-    expanded: false,
-  }))
+  return Array.from(map, ([experiment_name, runs]) => ({ experiment_name, runs }))
 }
 
 export type Selection =
@@ -50,10 +44,16 @@ type ExperimentTreeProps = {
   onSelect: (selection: Selection) => void
 }
 
+type View =
+  | { level: 'experiments' }
+  | { level: 'runs'; experiment: Experiment }
+  | { level: 'jobs'; experiment: Experiment; run: Run }
+
 export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
-  const [nodes, setNodes] = useState<TreeNode[]>([])
+  const [experiments, setExperiments] = useState<Experiment[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [selected, setSelected] = useState<string | null>(null)
+  const [view, setView] = useState<View>({ level: 'experiments' })
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
@@ -65,7 +65,7 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
         return res.json() as Promise<ExperimentRun[]>
       })
       .then((items) => {
-        setNodes(groupByExperiment(items))
+        setExperiments(groupByExperiment(items))
         setStatus('ready')
       })
       .catch((err: unknown) => {
@@ -75,20 +75,52 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
     return () => controller.abort()
   }, [refreshTick])
 
-  function toggleExperiment(index: number) {
-    setNodes((prev) =>
-      prev.map((n, i) => (i === index ? { ...n, expanded: !n.expanded } : n))
-    )
+  function pickExperiment(exp: Experiment) {
+    setView({ level: 'runs', experiment: exp })
+    setSelectedId(exp.experiment_name)
+    onSelect({ kind: 'experiment', experiment_name: exp.experiment_name })
   }
 
-  function toggleRun(expIndex: number, runIndex: number) {
-    setNodes((prev) =>
-      prev.map((n, i) =>
-        i === expIndex
-          ? { ...n, runs: n.runs.map((r, j) => (j === runIndex ? { ...r, expanded: !r.expanded } : r)) }
-          : n
-      )
-    )
+  function pickRun(exp: Experiment, run: Run) {
+    setView({ level: 'jobs', experiment: exp, run })
+    setSelectedId(run.run_id)
+    onSelect({
+      kind: 'run',
+      experiment_name: exp.experiment_name,
+      run_id: run.run_id,
+      run_name: run.run_name,
+    })
+  }
+
+  function pickJob(exp: Experiment, run: Run, job: Job) {
+    setSelectedId(job.job_id)
+    onSelect({
+      kind: 'job',
+      experiment_name: exp.experiment_name,
+      run_id: run.run_id,
+      job_id: job.job_id,
+    })
+  }
+
+  function backToExperiments() {
+    if (view.level !== 'runs') return
+    const exp = view.experiment
+    setView({ level: 'experiments' })
+    setSelectedId(exp.experiment_name)
+    onSelect({ kind: 'experiment', experiment_name: exp.experiment_name })
+  }
+
+  function backToRuns() {
+    if (view.level !== 'jobs') return
+    const { experiment, run } = view
+    setView({ level: 'runs', experiment })
+    setSelectedId(run.run_id)
+    onSelect({
+      kind: 'run',
+      experiment_name: experiment.experiment_name,
+      run_id: run.run_id,
+      run_name: run.run_name,
+    })
   }
 
   return (
@@ -110,55 +142,62 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
       {status === 'error' && (
         <div className="experiment-tree__status">Failed to load</div>
       )}
-      {status === 'ready' && nodes.length === 0 && (
+      {status === 'ready' && view.level === 'experiments' && experiments.length === 0 && (
         <div className="experiment-tree__status">No experiments</div>
       )}
-      {nodes.map((node, ei) => (
-        <div key={node.experiment_name}>
+      {status === 'ready' && view.level === 'experiments' &&
+        experiments.map((exp) => (
           <div
-            className={`experiment-tree__experiment${selected === node.experiment_name ? ' experiment-tree--selected' : ''}`}
-            onClick={() => {
-              toggleExperiment(ei)
-              setSelected(node.experiment_name)
-              onSelect({ kind: 'experiment', experiment_name: node.experiment_name })
-            }}
+            key={exp.experiment_name}
+            className={`experiment-tree__row${selectedId === exp.experiment_name ? ' experiment-tree--selected' : ''}`}
+            onClick={() => pickExperiment(exp)}
           >
-            <FlaskConical size={14} /> {node.experiment_name}
+            <FlaskConical size={16} /> {exp.experiment_name}
           </div>
-          {node.expanded &&
-            node.runs.map((run, ri) => (
-              <div key={run.run_id}>
-                <div
-                  className={`experiment-tree__run${selected === run.run_id ? ' experiment-tree--selected' : ''}`}
-                  onClick={() => {
-                    if (run.jobs.length > 0) toggleRun(ei, ri)
-                    setSelected(run.run_id)
-                    onSelect({ kind: 'run', experiment_name: node.experiment_name, run_id: run.run_id, run_name: run.run_name })
-                  }}
-                >
-                  <Play size={12} /> {run.run_name}
-                </div>
-                {run.expanded &&
-                  run.jobs.map((job) => (
-                    <div
-                      key={job.job_id}
-                      className={`experiment-tree__job${selected === job.job_id ? ' experiment-tree--selected' : ''}`}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelected(job.job_id)
-                        onSelect({ kind: 'job', experiment_name: node.experiment_name, run_id: run.run_id, job_id: job.job_id })
-                      }}
-                    >
-                      <Cog size={12} /> {job.job_id}
-                      <span className={`experiment-tree__job-status experiment-tree__job-status--${job.status}`}>
-                        {job.status}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            ))}
-        </div>
-      ))}
+        ))}
+      {status === 'ready' && view.level === 'runs' && (
+        <>
+          <button
+            type="button"
+            className="experiment-tree__back"
+            onClick={backToExperiments}
+          >
+            <ArrowLeft size={16} /> {view.experiment.experiment_name}
+          </button>
+          {view.experiment.runs.map((run) => (
+            <div
+              key={run.run_id}
+              className={`experiment-tree__row${selectedId === run.run_id ? ' experiment-tree--selected' : ''}`}
+              onClick={() => pickRun(view.experiment, run)}
+            >
+              <Play size={16} /> {run.run_name}
+            </div>
+          ))}
+        </>
+      )}
+      {status === 'ready' && view.level === 'jobs' && (
+        <>
+          <button
+            type="button"
+            className="experiment-tree__back"
+            onClick={backToRuns}
+          >
+            <ArrowLeft size={16} /> {view.run.run_name}
+          </button>
+          {view.run.jobs.map((job) => (
+            <div
+              key={job.job_id}
+              className={`experiment-tree__row${selectedId === job.job_id ? ' experiment-tree--selected' : ''}`}
+              onClick={() => pickJob(view.experiment, view.run, job)}
+            >
+              <Cog size={16} /> {job.job_id}
+              <span className={`experiment-tree__job-status experiment-tree__job-status--${job.status}`}>
+                {job.status}
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }

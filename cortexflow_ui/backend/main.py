@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from dataclasses import asdict
@@ -24,8 +25,6 @@ from cortexflow.jobs import (
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
-    list_run_metrics,
-    list_run_params,
 )
 from mlflow.tracking import MlflowClient
 from cortexflow.ray_util import get_ray_job_url, get_ray_logs
@@ -127,33 +126,7 @@ def experiments() -> list[dict]:
     return result
 
 
-@app.get("/api/runs/{run_id}/metrics")
-def run_metrics(run_id: str) -> list[str]:
-    return list_run_metrics(run_id)
-
-
-@app.get("/api/runs/{run_id}/metrics/{key:path}")
-def run_metric_history(run_id: str, key: str) -> list[dict]:
-    return get_metric_history(run_id, key)
-
-
-@app.get("/api/runs/{run_id}/params")
-def run_params(run_id: str) -> dict[str, str]:
-    return list_run_params(run_id)
-
-
-@app.get("/api/runs/{run_id}/artifacts")
-def run_artifacts(run_id: str) -> list[str]:
-    return list_run_artifacts(run_id)
-
-
-@app.get("/api/runs/{run_id}/url")
-def run_url(run_id: str) -> dict[str, str]:
-    return {"url": get_mlflow_run_url(run_id)}
-
-
-@app.get("/api/runs/{run_id}/jobs")
-def run_jobs(run_id: str) -> list[dict]:
+def _list_run_jobs(run_id: str) -> list[dict]:
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     return [
         {
@@ -167,15 +140,37 @@ def run_jobs(run_id: str) -> list[dict]:
     ]
 
 
-def check_job_readiness(run_id: str, job_id: str) -> dict:
-    job_entries = list_run_artifacts(run_id, f"job/{job_id}")
-    lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
-    manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
-    code_ready = manifest_ready and _tarball_exists(run_id, job_id)
+@app.get("/api/runs/{run_id}/jobs")
+def run_jobs(run_id: str) -> list[dict]:
+    return _list_run_jobs(run_id)
+
+
+@app.get("/api/runs/{run_id}/dashboard")
+async def run_dashboard(run_id: str) -> dict:
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    run = await asyncio.to_thread(client.get_run, run_id)
+    params = dict(run.data.params)
+    metric_keys = list(run.data.metrics.keys())
+
+    artifacts_task = asyncio.create_task(asyncio.to_thread(list_run_artifacts, run_id))
+    jobs_task = asyncio.create_task(asyncio.to_thread(_list_run_jobs, run_id))
+    metric_tasks = {
+        key: asyncio.create_task(
+            asyncio.to_thread(get_metric_history, run_id, key, max_points=500)
+        )
+        for key in metric_keys
+    }
+
+    metrics = {key: await task for key, task in metric_tasks.items()}
+    artifacts = await artifacts_task
+    jobs = await jobs_task
+
     return {
-        "code": code_ready,
-        "lifecycle": lifecycle_ready,
-        "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
+        "params": params,
+        "metrics": metrics,
+        "artifacts": artifacts,
+        "url": get_mlflow_run_url(run_id),
+        "jobs": jobs,
     }
 
 
@@ -192,21 +187,42 @@ def _tarball_exists(run_id: str, job_id: str) -> bool:
 
 
 @app.get("/api/runs/{run_id}/jobs/{job_id}")
-def job_detail(run_id: str, job_id: str) -> dict:
-    readiness = check_job_readiness(run_id, job_id)
-    if not readiness["lifecycle"]:
-        return {"job_id": job_id, "readiness": readiness}
-    lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    ray_job_id = lifecycle.get_ray_job_id()
+async def job_detail(run_id: str, job_id: str) -> dict:
+    job_entries = await asyncio.to_thread(list_run_artifacts, run_id, f"job/{job_id}")
+    lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
+    manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
 
+    tarball_task = (
+        asyncio.create_task(asyncio.to_thread(_tarball_exists, run_id, job_id))
+        if manifest_ready
+        else None
+    )
+    lifecycle_task = (
+        asyncio.create_task(asyncio.to_thread(JobLifecycle.load_from_mlflow, run_id, job_id))
+        if lifecycle_ready
+        else None
+    )
+
+    code_ready = bool(await tarball_task) if tarball_task else False
+    readiness = {
+        "code": code_ready,
+        "lifecycle": lifecycle_ready,
+        "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
+    }
+    if lifecycle_task is None:
+        return {"job_id": job_id, "readiness": readiness}
+
+    lifecycle = await lifecycle_task
+    ray_job_id = lifecycle.get_ray_job_id()
     history = [asdict(event) for event in lifecycle.history]
     for event in history:
         event["ray_url"] = get_ray_job_url(event["ray_job_id"])
+    status = await asyncio.to_thread(get_ray_job_status, ray_job_id)
 
     return {
         "job_id": lifecycle.job_id,
         "readiness": readiness,
-        "status": get_ray_job_status(ray_job_id).value,
+        "status": status.value,
         "retry": lifecycle.retry,
         "stop_requested": lifecycle.stop_requested,
         "history": history,
