@@ -13,6 +13,10 @@ function isStoppable(job: Job): boolean {
   return job.status === 'failed' && job.retry
 }
 
+function ignoreAbort(err: unknown): void {
+  if (err instanceof DOMException && err.name === 'AbortError') return
+}
+
 type Props = {
   runId: string
   runName: string
@@ -20,47 +24,67 @@ type Props = {
 }
 
 export function RunDashboard({ runId, runName, experimentName }: Props) {
-  const [params, setParams] = useState<Record<string, string>>({})
-  const [metricKeys, setMetricKeys] = useState<string[]>([])
+  const [params, setParams] = useState<Record<string, string> | null>(null)
+  const [metricKeys, setMetricKeys] = useState<string[] | null>(null)
   const [metricData, setMetricData] = useState<Record<string, MetricPoint[]>>({})
-  const [artifacts, setArtifacts] = useState<string[]>([])
+  const [artifacts, setArtifacts] = useState<string[] | null>(null)
   const [mlflowUrl, setMlflowUrl] = useState<string | null>(null)
-  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobs, setJobs] = useState<Job[] | null>(null)
   const [stopping, setStopping] = useState(false)
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
-    setStatus('loading')
-    const controller = new AbortController()
-    fetch(`/api/runs/${runId}/dashboard`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json() as Promise<{
-          params: Record<string, string>
-          metrics: Record<string, MetricPoint[]>
-          artifacts: string[]
-          url: string
-          jobs: Job[]
-        }>
-      })
-      .then((d) => {
-        setParams(d.params)
-        setMetricKeys(Object.keys(d.metrics))
-        setMetricData(d.metrics)
-        setArtifacts(d.artifacts)
-        setMlflowUrl(d.url)
-        setJobs(d.jobs)
-        setStatus('ready')
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setStatus('error')
-      })
+    setParams(null)
+    setMetricKeys(null)
+    setMetricData({})
+    setArtifacts(null)
+    setMlflowUrl(null)
+    setJobs(null)
+    const c = new AbortController()
+    const opts = { signal: c.signal }
 
-    return () => controller.abort()
+    fetch(`/api/runs/${runId}/params`, opts)
+      .then((r) => r.json() as Promise<Record<string, string>>)
+      .then(setParams)
+      .catch(ignoreAbort)
+
+    fetch(`/api/runs/${runId}/metrics`, opts)
+      .then((r) => r.json() as Promise<string[]>)
+      .then(setMetricKeys)
+      .catch(ignoreAbort)
+
+    fetch(`/api/runs/${runId}/artifacts`, opts)
+      .then((r) => r.json() as Promise<string[]>)
+      .then(setArtifacts)
+      .catch(ignoreAbort)
+
+    fetch(`/api/runs/${runId}/url`, opts)
+      .then((r) => r.json() as Promise<{ url: string }>)
+      .then((d) => setMlflowUrl(d.url))
+      .catch(ignoreAbort)
+
+    fetch(`/api/runs/${runId}/jobs`, opts)
+      .then((r) => r.json() as Promise<Job[]>)
+      .then(setJobs)
+      .catch(ignoreAbort)
+
+    return () => c.abort()
   }, [runId])
 
-  const hasStoppableJobs = jobs.some(isStoppable)
+  useEffect(() => {
+    if (metricKeys === null) return
+    const c = new AbortController()
+    metricKeys.forEach((key) => {
+      fetch(`/api/runs/${runId}/metrics/${encodeURIComponent(key)}`, {
+        signal: c.signal,
+      })
+        .then((r) => r.json() as Promise<MetricPoint[]>)
+        .then((points) => setMetricData((prev) => ({ ...prev, [key]: points })))
+        .catch(ignoreAbort)
+    })
+    return () => c.abort()
+  }, [runId, metricKeys])
+
+  const hasStoppableJobs = jobs?.some(isStoppable) ?? false
 
   async function handleStop() {
     setStopping(true)
@@ -72,9 +96,6 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
       setStopping(false)
     }
   }
-
-  if (status === 'loading') return <div className="run-dashboard__status">Loading...</div>
-  if (status === 'error') return <div className="run-dashboard__status">Failed to load</div>
 
   return (
     <div className="run-dashboard">
@@ -104,7 +125,7 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
         </div>
       </div>
 
-      {Object.keys(params).length > 0 && (
+      {params !== null && Object.keys(params).length > 0 && (
         <div className="run-dashboard__section">
           <div className="run-dashboard__section-title">Parameters</div>
           <table className="run-dashboard__table">
@@ -117,28 +138,32 @@ export function RunDashboard({ runId, runName, experimentName }: Props) {
         </div>
       )}
 
-      {metricKeys.length > 0 && (
+      {metricKeys !== null && metricKeys.length > 0 && (
         <div className="run-dashboard__section">
           <div className="run-dashboard__section-title">Metrics</div>
           {metricKeys.map((key) => (
             <div key={key} className="run-dashboard__chart">
               <div className="run-dashboard__chart-title">{key}</div>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={metricData[key] ?? []}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="step" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="value" stroke="#000" dot={false} />
-                  <Brush dataKey="step" height={20} stroke="#999" />
-                </LineChart>
-              </ResponsiveContainer>
+              {metricData[key] === undefined ? (
+                <div className="run-dashboard__chart-loading">Loading...</div>
+              ) : (
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={metricData[key]}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="step" />
+                    <YAxis />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="value" stroke="#000" dot={false} />
+                    <Brush dataKey="step" height={20} stroke="#999" />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      {artifacts.length > 0 && (
+      {artifacts !== null && artifacts.length > 0 && (
         <div className="run-dashboard__section">
           <TitledFrame title="Artifacts">
             <ul className="run-dashboard__artifacts">

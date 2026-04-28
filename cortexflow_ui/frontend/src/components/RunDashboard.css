@@ -83,6 +83,15 @@
   margin-bottom: 4px;
 }
 
+.run-dashboard__chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  font-size: 12px;
+  color: #999;
+}
+
 .run-dashboard__status {
   padding: 24px;
   font-size: 13px;

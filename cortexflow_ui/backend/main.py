@@ -25,6 +25,8 @@ from cortexflow.jobs import (
 from cortexflow.mlflow_util import (
     get_metric_history,
     list_run_artifacts,
+    list_run_metrics,
+    list_run_params,
 )
 from mlflow.tracking import MlflowClient
 from cortexflow.ray_util import get_ray_job_url, get_ray_logs
@@ -145,33 +147,29 @@ def run_jobs(run_id: str) -> list[dict]:
     return _list_run_jobs(run_id)
 
 
-@app.get("/api/runs/{run_id}/dashboard")
-async def run_dashboard(run_id: str) -> dict:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    run = await asyncio.to_thread(client.get_run, run_id)
-    params = dict(run.data.params)
-    metric_keys = list(run.data.metrics.keys())
+@app.get("/api/runs/{run_id}/params")
+def run_params(run_id: str) -> dict[str, str]:
+    return list_run_params(run_id)
 
-    artifacts_task = asyncio.create_task(asyncio.to_thread(list_run_artifacts, run_id))
-    jobs_task = asyncio.create_task(asyncio.to_thread(_list_run_jobs, run_id))
-    metric_tasks = {
-        key: asyncio.create_task(
-            asyncio.to_thread(get_metric_history, run_id, key, max_points=500)
-        )
-        for key in metric_keys
-    }
 
-    metrics = {key: await task for key, task in metric_tasks.items()}
-    artifacts = await artifacts_task
-    jobs = await jobs_task
+@app.get("/api/runs/{run_id}/metrics")
+def run_metrics(run_id: str) -> list[str]:
+    return list_run_metrics(run_id)
 
-    return {
-        "params": params,
-        "metrics": metrics,
-        "artifacts": artifacts,
-        "url": get_mlflow_run_url(run_id),
-        "jobs": jobs,
-    }
+
+@app.get("/api/runs/{run_id}/metrics/{key:path}")
+def run_metric_history(run_id: str, key: str) -> list[dict]:
+    return get_metric_history(run_id, key, max_points=500)
+
+
+@app.get("/api/runs/{run_id}/artifacts")
+def run_artifacts(run_id: str) -> list[str]:
+    return list_run_artifacts(run_id)
+
+
+@app.get("/api/runs/{run_id}/url")
+def run_url(run_id: str) -> dict[str, str]:
+    return {"url": get_mlflow_run_url(run_id)}
 
 
 def _tarball_exists(run_id: str, job_id: str) -> bool:
