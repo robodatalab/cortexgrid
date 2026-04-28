@@ -223,7 +223,7 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
           {currentExperiment.runs.map((run) => (
             <div
               key={run.run_id}
-              className={`experiment-tree__row${selectedId === run.run_id ? ' experiment-tree--selected' : ''}`}
+              className={`experiment-tree__row experiment-tree__row--nested${selectedId === run.run_id ? ' experiment-tree--selected' : ''}`}
               onClick={() => pickRun(currentExperiment.experiment_name, run)}
             >
               <Play size={16} /> {run.run_name}
@@ -243,7 +243,7 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
           {currentRun.jobs.map((job) => (
             <div
               key={job.job_id}
-              className={`experiment-tree__row${selectedId === job.job_id ? ' experiment-tree--selected' : ''}`}
+              className={`experiment-tree__row experiment-tree__row--nested${selectedId === job.job_id ? ' experiment-tree--selected' : ''}`}
               onClick={() =>
                 pickJob(currentExperiment.experiment_name, currentRun.run_id, job)
               }
