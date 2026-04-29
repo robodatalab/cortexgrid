@@ -31,3 +31,97 @@
   font-size: 13px;
   color: #666;
 }
+
+.experiment-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.experiment-notes__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.experiment-notes__empty {
+  font-size: 12px;
+  color: #999;
+}
+
+.experiment-notes__item {
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.experiment-notes__item--run {
+  border-left: 3px solid #888;
+}
+
+.experiment-notes__item--experiment {
+  border-left: 3px solid #000;
+}
+
+.experiment-notes__label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+}
+
+.experiment-notes__body {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.experiment-notes__meta {
+  font-size: 11px;
+  color: #999;
+}
+
+.experiment-notes__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.experiment-notes__button {
+  border: 1px solid #000;
+  background: #fff;
+  color: #000;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.experiment-notes__button:hover:not(:disabled) {
+  background: #000;
+  color: #fff;
+}
+
+.experiment-notes__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.experiment-notes__compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.experiment-notes__textarea {
+  width: 100%;
+  min-height: 60px;
+  font-family: inherit;
+  font-size: 13px;
+  border: 1px solid #ddd;
+  padding: 6px;
+  box-sizing: border-box;
+  resize: vertical;
+}

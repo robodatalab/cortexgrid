@@ -1,7 +1,9 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -18,10 +20,13 @@ from cortexflow.secrets import (
 )
 
 from cortexflow_ui.backend import (
+    experiment_notes_stream,
     experiments_stream,
     job_stream,
+    notes,
     run_dashboard_stream,
     run_jobs_stream,
+    run_notes_stream,
 )
 from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
@@ -54,6 +59,10 @@ class Secret(BaseModel):
 
 class SecretValue(BaseModel):
     value: str
+
+
+class NoteBody(BaseModel):
+    body: str
 
 
 @app.get("/health")
@@ -132,6 +141,58 @@ def ray_job_logs(ray_job_id: str) -> dict[str, str]:
 @app.post("/api/runs/{run_id}/stop")
 def stop_run(run_id: str) -> dict[str, str]:
     stop_experiment_run_jobs(run_id)
+    return {"status": "ok"}
+
+
+@app.websocket("/api/runs/{run_id}/notes/stream")
+async def run_notes_stream_endpoint(ws: WebSocket, run_id: str) -> None:
+    await run_notes_stream.stream.serve(ws, run_id)
+
+
+@app.websocket("/api/experiments/{experiment_name}/notes/stream")
+async def experiment_notes_stream_endpoint(
+    ws: WebSocket, experiment_name: str
+) -> None:
+    await experiment_notes_stream.stream.serve(ws, experiment_name)
+
+
+@app.post("/api/runs/{run_id}/notes")
+def add_run_note(run_id: str, body: NoteBody) -> dict[str, Any]:
+    return notes.add_run_note(run_id, body.body)
+
+
+@app.put("/api/notes/run/{note_id}")
+def update_run_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+    note = notes.update_run_note(note_id, body.body)
+    if note is None:
+        raise HTTPException(status_code=404, detail="note not found")
+    return note
+
+
+@app.delete("/api/notes/run/{note_id}")
+def delete_run_note(note_id: str) -> dict[str, str]:
+    if not notes.delete_run_note(note_id):
+        raise HTTPException(status_code=404, detail="note not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/experiments/{experiment_name}/notes")
+def add_experiment_note(experiment_name: str, body: NoteBody) -> dict[str, Any]:
+    return notes.add_experiment_note(experiment_name, body.body)
+
+
+@app.put("/api/notes/experiment/{note_id}")
+def update_experiment_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+    note = notes.update_experiment_note(note_id, body.body)
+    if note is None:
+        raise HTTPException(status_code=404, detail="note not found")
+    return note
+
+
+@app.delete("/api/notes/experiment/{note_id}")
+def delete_experiment_note(note_id: str) -> dict[str, str]:
+    if not notes.delete_experiment_note(note_id):
+        raise HTTPException(status_code=404, detail="note not found")
     return {"status": "ok"}
 
 
