@@ -15,6 +15,6 @@ from cortexflow_ui.backend.models.notes import list_run_notes
 stream = KeyedDiffStream(
     name="run_notes_stream",
     list_fn=list_run_notes,
-    id_fn=lambda note: note["id"],
+    id_fn=lambda note: note.id,
     poll_interval_sec=NOTES_STREAM_POLL_INTERVAL_SEC,
 )

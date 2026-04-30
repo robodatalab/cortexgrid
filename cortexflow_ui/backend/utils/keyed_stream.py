@@ -13,11 +13,39 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+from dataclasses import asdict, dataclass
 from typing import Any, Callable, Hashable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class StateEvent:
+    data: Any
+    type: str = "state"
+
+
+@dataclass
+class AddedEvent:
+    item: Any
+    type: str = "added"
+
+
+@dataclass
+class UpdatedEvent:
+    item: Any
+    type: str = "updated"
+
+
+@dataclass
+class RemovedEvent:
+    id: str
+    type: str = "removed"
+
+
+DiffEvent = AddedEvent | UpdatedEvent | RemovedEvent
 
 
 class KeyedStreamBase(abc.ABC):
@@ -81,10 +109,13 @@ class KeyedStreamBase(abc.ABC):
             log.info("%s poll loop cancelled for key=%s", self.name, key)
             raise
 
-    async def _broadcast(self, key: Hashable, event: dict) -> None:
+    async def _broadcast(
+        self, key: Hashable, event: StateEvent | DiffEvent
+    ) -> None:
+        payload = asdict(event)
         for ws in list(self._clients.get(key, ())):
             try:
-                await ws.send_json(event)
+                await ws.send_json(payload)
             except Exception:
                 clients = self._clients.get(key)
                 if clients is not None:
@@ -115,7 +146,7 @@ class KeyedStream(KeyedStreamBase):
 
     async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
         try:
-            await ws.send_json({"type": "state", "data": self._cache[key]})
+            await ws.send_json(asdict(StateEvent(data=self._cache[key])))
         except Exception:
             pass
 
@@ -129,13 +160,8 @@ class KeyedStream(KeyedStreamBase):
             await asyncio.sleep(self.poll_interval_sec)
             return
 
-        old_data = self._cache.get(key, {})
         self._cache[key] = data
-        events = [{"type": "state", "data": data}]
-        # events = _diff_dict(old_data, data)
-
-        for event in events:
-            await self._broadcast(key, event)
+        await self._broadcast(key, StateEvent(data=data))
 
 
 class KeyedDiffStream(KeyedStreamBase):
@@ -151,8 +177,9 @@ class KeyedDiffStream(KeyedStreamBase):
     def __init__(
         self,
         name: str,
-        list_fn: Callable[[Any], list[dict]],
-        id_fn: Callable[[dict], str],
+        list_fn: Callable[[Any], list[Any]],
+        id_fn: Callable[[Any], str],
+        version_fn: Callable[[Any], Hashable] = lambda i: i.updated_at,
         poll_interval_sec: float = 30,
     ):
         super().__init__(
@@ -165,11 +192,12 @@ class KeyedDiffStream(KeyedStreamBase):
             return {id_fn(item): item for item in items}
 
         self._poll = poll
+        self._version_fn = version_fn
 
     async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
         for item in self._cache.get(key, {}).values():
             try:
-                await ws.send_json({"type": "added", "item": item})
+                await ws.send_json(asdict(AddedEvent(item=item)))
             except Exception:
                 pass
 
@@ -185,20 +213,24 @@ class KeyedDiffStream(KeyedStreamBase):
 
         old_data = self._cache.get(key, {})
         self._cache[key] = data
-        events = _diff_dict(old_data, data)
+        events = _diff_dict(old_data, data, self._version_fn)
 
         for event in events:
             await self._broadcast(key, event)
 
 
-def _diff_dict(old_by_id: dict, new_by_id: dict) -> list[dict]:
-    events: list[dict] = []
+def _diff_dict(
+    old_by_id: dict,
+    new_by_id: dict,
+    version_fn: Callable[[Any], Hashable],
+) -> list[DiffEvent]:
+    events: list[DiffEvent] = []
     for id_, item in new_by_id.items():
         if id_ not in old_by_id:
-            events.append({"type": "added", "item": item})
-        elif old_by_id[id_]["updated_at"] != item["updated_at"]:
-            events.append({"type": "updated", "item": item})
+            events.append(AddedEvent(item=item))
+        elif version_fn(old_by_id[id_]) != version_fn(item):
+            events.append(UpdatedEvent(item=item))
     for id_ in old_by_id:
         if id_ not in new_by_id:
-            events.append({"type": "removed", "id": id_})
+            events.append(RemovedEvent(id=id_))
     return events

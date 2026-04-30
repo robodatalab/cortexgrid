@@ -31,6 +31,15 @@ ws_clients: set[WebSocket] = set()
 force_refresh = asyncio.Event()
 
 
+def runs_for_experiment(experiment_name: str) -> list[str]:
+    global runs_cache
+    return [
+        r["run_id"]
+        for r in runs_cache.values()
+        if r["experiment_name"] == experiment_name
+    ]
+
+
 def _build_run_data(exp, all_ray_submission_ids: list[str]) -> dict:
     jobs = []
     for job_id in exp.get_jobs():
