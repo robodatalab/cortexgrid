@@ -1,35 +1,57 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
-from typing import Callable
+from typing import Any, Callable, MutableMapping
 from unittest.mock import patch
 
-from fastapi import WebSocketDisconnect
+from fastapi import WebSocket
+from starlette.websockets import WebSocketState
 
 from cortexflow.jobs import JobLifecycle
 from cortexflow.ray_util import JobStatus
 from cortexflow_ui.backend.streams import run_jobs_stream, run_notes_stream
 
 
-class FakeWebSocket:
+class FakeWebSocket(WebSocket):
+    """In-memory WebSocket that drives the real Starlette state machine.
+
+    Intercepts at the ASGI layer (receive/send callables) so accept(),
+    send_json(), and receive_text() flow through the parent class
+    unchanged. The first ASGI receive yields websocket.connect (consumed
+    by accept); subsequent receives block until disconnect() is called,
+    then yield websocket.disconnect (which makes receive_text raise
+    WebSocketDisconnect).
+    """
+
     def __init__(self) -> None:
-        self.accepted = False
         self.sent: list[dict] = []
         self._disconnect = asyncio.Event()
+        self._connect_consumed = False
+        super().__init__(
+            scope={"type": "websocket", "path": "/", "headers": []},
+            receive=self._asgi_receive,
+            send=self._asgi_send,
+        )
 
-    async def accept(self) -> None:
-        self.accepted = True
-
-    async def send_json(self, data: dict) -> None:
-        self.sent.append(data)
-
-    async def receive_text(self) -> str:
-        await self._disconnect.wait()
-        raise WebSocketDisconnect()
+    @property
+    def accepted(self) -> bool:
+        return self.application_state == WebSocketState.CONNECTED
 
     def disconnect(self) -> None:
         self._disconnect.set()
+
+    async def _asgi_receive(self) -> MutableMapping[str, Any]:
+        if not self._connect_consumed:
+            self._connect_consumed = True
+            return {"type": "websocket.connect"}
+        await self._disconnect.wait()
+        return {"type": "websocket.disconnect", "code": 1000}
+
+    async def _asgi_send(self, message: MutableMapping[str, Any]) -> None:
+        if message["type"] == "websocket.send" and "text" in message:
+            self.sent.append(json.loads(message["text"]))
 
 
 async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
@@ -136,8 +158,8 @@ class _FakePgCursor:
     def __enter__(self) -> "_FakePgCursor":
         return self
 
-    def __exit__(self, *args) -> bool:
-        return False
+    def __exit__(self, *args) -> None:
+        del args
 
 
 class _FakePgConn:
@@ -150,8 +172,8 @@ class _FakePgConn:
     def __enter__(self) -> "_FakePgConn":
         return self
 
-    def __exit__(self, *args) -> bool:
-        return False
+    def __exit__(self, *args) -> None:
+        del args
 
 
 class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
@@ -199,8 +221,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         try:
             await _wait_for(
                 lambda: any(
-                    e["type"] == "added" and e["item"]["id"] == "n1"
-                    for e in ws.sent
+                    e["type"] == "added" and e["item"]["id"] == "n1" for e in ws.sent
                 )
             )
         finally:
@@ -219,8 +240,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             )
             await _wait_for(
                 lambda: any(
-                    e["type"] == "added" and e["item"]["id"] == "n2"
-                    for e in ws.sent
+                    e["type"] == "added" and e["item"]["id"] == "n2" for e in ws.sent
                 )
             )
         finally:
@@ -236,15 +256,13 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         try:
             await _wait_for(
                 lambda: any(
-                    e["type"] == "added" and e["item"]["id"] == "n3"
-                    for e in ws.sent
+                    e["type"] == "added" and e["item"]["id"] == "n3" for e in ws.sent
                 )
             )
             self.notes[0] = {**self.notes[0], "updated_at": "t1"}
             await _wait_for(
                 lambda: any(
-                    e["type"] == "updated" and e["item"]["id"] == "n3"
-                    for e in ws.sent
+                    e["type"] == "updated" and e["item"]["id"] == "n3" for e in ws.sent
                 )
             )
         finally:
@@ -260,15 +278,13 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         try:
             await _wait_for(
                 lambda: any(
-                    e["type"] == "added" and e["item"]["id"] == "n4"
-                    for e in ws.sent
+                    e["type"] == "added" and e["item"]["id"] == "n4" for e in ws.sent
                 )
             )
             self.notes.clear()
             await _wait_for(
                 lambda: any(
-                    e["type"] == "removed" and e.get("id") == "n4"
-                    for e in ws.sent
+                    e["type"] == "removed" and e.get("id") == "n4" for e in ws.sent
                 )
             )
         finally:
@@ -284,8 +300,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         try:
             await _wait_for(
                 lambda: any(
-                    e["type"] == "added" and e["item"]["id"] == "n5"
-                    for e in ws_a.sent
+                    e["type"] == "added" and e["item"]["id"] == "n5" for e in ws_a.sent
                 )
             )
 
