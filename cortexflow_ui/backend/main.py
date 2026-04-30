@@ -146,9 +146,9 @@ def stop_run(run_id: str) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.websocket("/api/runs/{run_id}/notes/stream")
-async def run_notes_stream_endpoint(ws: WebSocket, run_id: str) -> None:
-    await run_notes_stream.stream.serve(ws, run_id)
+@app.websocket("/api/runs/{run_name}/notes/stream")
+async def run_notes_stream_endpoint(ws: WebSocket, run_name: str) -> None:
+    await run_notes_stream.stream.serve(ws, run_name)
 
 
 @app.websocket("/api/experiments/{experiment_name}/notes/stream")
@@ -156,9 +156,9 @@ async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) 
     await experiment_notes_stream.stream.serve(ws, experiment_name)
 
 
-@app.post("/api/runs/{run_id}/notes")
-def add_run_note(run_id: str, body: NoteBody) -> dict[str, Any]:
-    return notes.add_run_note(run_id, body.body)
+@app.post("/api/runs/{run_name}/notes")
+def add_run_note(run_name: str, body: NoteBody) -> dict[str, Any]:
+    return notes.add_run_note(run_name, body.body)
 
 
 @app.put("/api/notes/run/{note_id}")

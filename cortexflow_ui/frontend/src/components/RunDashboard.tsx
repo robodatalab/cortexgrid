@@ -126,7 +126,7 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
         </div>
       </Allotment.Pane>
       <Allotment.Pane preferredSize={400} minSize={240} maxSize={600}>
-        <RunNotesPanel runId={runId} />
+        <RunNotesPanel runName={runName} />
       </Allotment.Pane>
     </Allotment>
   )

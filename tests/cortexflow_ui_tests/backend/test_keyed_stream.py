@@ -205,6 +205,13 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+        resolve_patcher = patch(
+            "cortexflow_ui.backend.models.notes.resolve_run_id",
+            side_effect=lambda run_name: run_name,
+        )
+        resolve_patcher.start()
+        self.addCleanup(resolve_patcher.stop)
+
     @staticmethod
     def _has(events: list[dict], type_: str, **fields) -> bool:
         return any(

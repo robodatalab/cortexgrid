@@ -13,13 +13,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cortexflow.secrets import get_secret
+from cortexflow_ui.backend.streams.experiments_stream import (
+    resolve_run_id,
+    resolve_run_name,
+)
 import psycopg
 
 
 @dataclass
 class RunNote:
     id: str
-    run_id: str
+    run_name: str
     body: str
     created_at: str
     updated_at: str
@@ -29,7 +33,8 @@ def _connect() -> psycopg.Connection:
     return psycopg.connect(get_secret("NOTES_DB_URI"))
 
 
-def list_run_notes(run_id: str) -> list[RunNote]:
+def list_run_notes(run_name: str) -> list[RunNote]:
+    run_id = resolve_run_id(run_name)
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT id, body, created_at, updated_at FROM run_notes "
@@ -39,7 +44,7 @@ def list_run_notes(run_id: str) -> list[RunNote]:
         return [
             RunNote(
                 id=str(row[0]),
-                run_id=run_id,
+                run_name=run_name,
                 body=row[1],
                 created_at=row[2].isoformat(),
                 updated_at=row[3].isoformat(),
@@ -48,11 +53,12 @@ def list_run_notes(run_id: str) -> list[RunNote]:
         ]
 
 
-def add_run_note(run_id: str, body: str) -> RunNote | None:
+def add_run_note(run_name: str, body: str) -> RunNote | None:
+    run_id = resolve_run_id(run_name)
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO run_notes (run_id, body) VALUES (%s, %s) "
-            "RETURNING id, run_id, body, created_at, updated_at",
+            "RETURNING id, body, created_at, updated_at",
             (run_id, body),
         )
         row = cur.fetchone()
@@ -61,10 +67,10 @@ def add_run_note(run_id: str, body: str) -> RunNote | None:
 
         return RunNote(
             id=str(row[0]),
-            run_id=str(row[1]),
-            body=row[2],
-            created_at=row[3].isoformat(),
-            updated_at=row[4].isoformat(),
+            run_name=run_name,
+            body=row[1],
+            created_at=row[2].isoformat(),
+            updated_at=row[3].isoformat(),
         )
 
 
@@ -82,7 +88,7 @@ def update_run_note(note_id: str, body: str) -> RunNote | None:
 
         return RunNote(
             id=str(row[0]),
-            run_id=str(row[1]),
+            run_name=resolve_run_name(str(row[1])),
             body=row[2],
             created_at=row[3].isoformat(),
             updated_at=row[4].isoformat(),

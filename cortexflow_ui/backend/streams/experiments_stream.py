@@ -34,10 +34,23 @@ force_refresh = asyncio.Event()
 def runs_for_experiment(experiment_name: str) -> list[str]:
     global runs_cache
     return [
-        r["run_id"]
+        r["run_name"]
         for r in runs_cache.values()
         if r["experiment_name"] == experiment_name
     ]
+
+
+def resolve_run_id(run_name: str) -> str:
+    global runs_cache
+    for r in runs_cache.values():
+        if r["run_name"] == run_name:
+            return r["run_id"]
+    raise KeyError(f"unknown run_name: {run_name}")
+
+
+def resolve_run_name(run_id: str) -> str:
+    global runs_cache
+    return runs_cache[run_id]["run_name"]
 
 
 def _build_run_data(exp, all_ray_submission_ids: list[str]) -> dict:

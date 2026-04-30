@@ -2,14 +2,26 @@ import { useState } from 'react'
 import { useStreamList } from '../useStreamList'
 import './ExperimentDashboard.css'
 
-type CombinedNote = {
+type RunNote = {
   id: string
-  kind: 'run' | 'experiment'
-  run_id: string | null
-  run_name: string | null
+  run_name: string
   body: string
   created_at: string
   updated_at: string
+}
+
+type ExperimentNote = {
+  id: string
+  experiment_name: string
+  body: string
+  created_at: string
+  updated_at: string
+}
+
+type CombinedNote = RunNote | ExperimentNote
+
+function isRunNote(note: CombinedNote): note is RunNote {
+  return 'run_name' in note
 }
 
 type RowProps = {
@@ -34,10 +46,8 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
     setEditing(true)
   }
 
-  const label =
-    note.kind === 'run'
-      ? `Run: ${note.run_name ?? note.run_id ?? '(unknown)'}`
-      : 'Experiment note'
+  const label = isRunNote(note) ? `Run: ${note.run_name}` : 'Experiment note'
+  const kind = isRunNote(note) ? 'run' : 'experiment'
 
   if (editing) {
     return (
@@ -71,14 +81,14 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
 
   return (
     <div
-      className={'experiment-notes__item experiment-notes__item--' + note.kind}
+      className={'experiment-notes__item experiment-notes__item--' + kind}
     >
       <div className="experiment-notes__label">{label}</div>
       <div className="experiment-notes__body">{note.body}</div>
       <div className="experiment-notes__meta">
         {new Date(note.updated_at).toLocaleString()}
       </div>
-      {note.kind === 'experiment' && (
+      {!isRunNote(note) && (
         <div className="experiment-notes__actions">
           <button
             type="button"
