@@ -12,7 +12,7 @@ import { JobDashboard } from './components/JobDashboard'
 import { InfraStatusIndicator } from './components/InfraStatusIndicator'
 import { InfraDashboard } from './components/InfraDashboard'
 import { SecretsDashboard } from './components/SecretsDashboard'
-import { useStreamState } from './useStreamState'
+import { useStreamList } from './useStreamList'
 
 type Dashboard = {
   id: string
@@ -33,10 +33,11 @@ function App() {
     selection?.kind === 'run' || selection?.kind === 'job'
       ? selection.run_id
       : null
-  const activeRunJobsMap = useStreamState<Record<string, Job>>(
+  const activeRunJobsMap = useStreamList<Job>(
     activeRunId ? `/api/runs/${activeRunId}/jobs/stream` : null,
+    (j) => j.job_id,
   )
-  const activeRunJobs = activeRunJobsMap ? Object.values(activeRunJobsMap) : null
+  const activeRunJobs = activeRunId ? Object.values(activeRunJobsMap) : null
 
   useEffect(() => {
     const controller = new AbortController()

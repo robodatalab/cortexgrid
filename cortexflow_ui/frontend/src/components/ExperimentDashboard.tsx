@@ -118,6 +118,7 @@ export function ExperimentDashboard({ experimentName }: Props) {
   const encodedName = encodeURIComponent(experimentName)
   const notes = useStreamList<CombinedNote>(
     `/api/experiments/${encodedName}/notes/stream`,
+    (n) => n.id,
   )
   const [draft, setDraft] = useState('')
 

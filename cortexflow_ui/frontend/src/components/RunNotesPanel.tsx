@@ -83,7 +83,10 @@ type Props = {
 }
 
 export function RunNotesPanel({ runName }: Props) {
-  const notes = useStreamList<Note>(`/api/runs/${runName}/notes/stream`)
+  const notes = useStreamList<Note>(
+    `/api/runs/${runName}/notes/stream`,
+    (n) => n.id,
+  )
   const [draft, setDraft] = useState('')
 
   const sorted = Object.values(notes).sort((a, b) =>

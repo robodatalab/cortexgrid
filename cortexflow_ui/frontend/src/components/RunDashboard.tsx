@@ -33,7 +33,10 @@ type Props = {
 }
 
 export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
-  const items = useStreamList<DashboardItem>(`/api/runs/${runName}/stream`)
+  const items = useStreamList<DashboardItem>(
+    `/api/runs/${runName}/stream`,
+    (i) => i.id,
+  )
   const [stopping, setStopping] = useState(false)
 
   const hasStoppableJobs = jobs?.some(isStoppable) ?? false

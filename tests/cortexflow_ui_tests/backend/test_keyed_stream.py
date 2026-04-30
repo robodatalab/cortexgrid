@@ -88,16 +88,16 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
         for p in self._patches:
             self.addCleanup(p.stop)
 
-    async def test_first_subscriber_receives_state_event(self) -> None:
+    async def test_first_subscriber_receives_added_event_per_job(self) -> None:
         ws = FakeWebSocket()
         task = asyncio.create_task(run_jobs_stream.stream.serve(ws, "run-1"))
         try:
             await _wait_for(lambda: bool(ws.sent))
             self.assertTrue(ws.accepted)
-            self.assertEqual(ws.sent[0]["type"], "state")
+            self.assertEqual(ws.sent[0]["type"], "added")
             self.assertEqual(
-                ws.sent[0]["data"],
-                {"j1": {"job_id": "j1", "status": "running", "retry": False}},
+                ws.sent[0]["item"],
+                {"job_id": "j1", "status": "running", "retry": False},
             )
         finally:
             ws.disconnect()
@@ -114,7 +114,7 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("run-2", run_jobs_stream.stream._tasks)
         self.assertNotIn("run-2", run_jobs_stream.stream._clients)
 
-    async def test_second_subscriber_receives_cached_state_immediately(self) -> None:
+    async def test_second_subscriber_receives_cached_added_immediately(self) -> None:
         ws_a = FakeWebSocket()
         task_a = asyncio.create_task(run_jobs_stream.stream.serve(ws_a, "run-3"))
         try:
@@ -124,10 +124,10 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
             task_b = asyncio.create_task(run_jobs_stream.stream.serve(ws_b, "run-3"))
             try:
                 await _wait_for(lambda: bool(ws_b.sent))
-                self.assertEqual(ws_b.sent[0]["type"], "state")
+                self.assertEqual(ws_b.sent[0]["type"], "added")
                 self.assertEqual(
-                    ws_b.sent[0]["data"],
-                    {"j1": {"job_id": "j1", "status": "running", "retry": False}},
+                    ws_b.sent[0]["item"],
+                    {"job_id": "j1", "status": "running", "retry": False},
                 )
             finally:
                 ws_b.disconnect()
