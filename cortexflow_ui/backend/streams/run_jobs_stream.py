@@ -8,6 +8,8 @@ on every poll.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from cortexflow.jobs import list_experiment_run_jobs
 from cortexflow.ray_util import (
     get_ray_job_status,
@@ -16,22 +18,30 @@ from cortexflow.ray_util import (
 from cortexflow_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
 
+RunId = str
+JobId = str
 
-def list_run_jobs(run_id: str) -> list[dict]:
+
+@dataclass
+class Job:
+    job_id: JobId
+    status: str
+    retry: bool
+
+
+def list_run_jobs(run_id: RunId) -> dict[JobId, Job]:
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    return [
-        {
-            "job_id": j.job_id,
-            "status": get_ray_job_status(
-                j.get_ray_job_id(all_ray_submission_ids)
-            ).value,
-            "retry": j.retry,
-        }
+    return {
+        j.job_id: Job(
+            job_id=j.job_id,
+            status=get_ray_job_status(j.get_ray_job_id(all_ray_submission_ids)).value,
+            retry=j.retry,
+        )
         for j in list_experiment_run_jobs(run_id)
-    ]
+    }
 
 
-stream = KeyedStream(
+stream: KeyedStream[RunId, JobId, Job] = KeyedStream(
     name="run_jobs_stream",
     poll_fn=list_run_jobs,
     poll_interval_sec=RUN_JOBS_STREAM_POLL_INTERVAL_SEC,

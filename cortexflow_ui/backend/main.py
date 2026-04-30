@@ -123,9 +123,9 @@ async def run_jobs_stream_endpoint(ws: WebSocket, run_id: str) -> None:
     await run_jobs_stream.stream.serve(ws, run_id)
 
 
-@app.websocket("/api/runs/{run_id}/stream")
-async def run_dashboard_stream_endpoint(ws: WebSocket, run_id: str) -> None:
-    await run_dashboard_stream.stream.serve(ws, run_id)
+@app.websocket("/api/runs/{run_name}/stream")
+async def run_dashboard_stream_endpoint(ws: WebSocket, run_name: str) -> None:
+    await run_dashboard_stream.stream.serve(ws, run_name)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")

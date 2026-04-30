@@ -7,14 +7,20 @@ per-item diff events (added/updated/removed) via KeyedDiffStream.
 
 from __future__ import annotations
 
+from cortexflow_ui.backend.models.notes import RunNote, list_run_notes
 from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedDiffStream
-from cortexflow_ui.backend.models.notes import list_run_notes
+
+RunName = str
+RunNoteId = str
 
 
-stream = KeyedDiffStream(
+def poll_run_notes(run_name: RunName) -> dict[RunNoteId, RunNote]:
+    return {n.id: n for n in list_run_notes(run_name)}
+
+
+stream: KeyedDiffStream[RunName, RunNoteId, RunNote] = KeyedDiffStream(
     name="run_notes_stream",
-    list_fn=list_run_notes,
-    id_fn=lambda note: note.id,
+    poll_fn=poll_run_notes,
     poll_interval_sec=NOTES_STREAM_POLL_INTERVAL_SEC,
 )

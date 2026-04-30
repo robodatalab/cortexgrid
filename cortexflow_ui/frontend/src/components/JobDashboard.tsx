@@ -206,9 +206,10 @@ function ReadinessPanel({ readiness }: { readiness: Readiness }) {
 }
 
 export function JobDashboard({ runId, jobId }: Props) {
-    const detail = useStreamState<JobDetail>(
+    const detailMap = useStreamState<Record<string, JobDetail>>(
         `/api/runs/${runId}/jobs/${jobId}/stream`,
     );
+    const detail = detailMap?.[jobId] ?? null;
     const [logsByRayJobId, setLogsByRayJobId] = useState<
         Record<string, string>
     >({});

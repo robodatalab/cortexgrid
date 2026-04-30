@@ -13,7 +13,7 @@ from cortexflow.ray_util import JobStatus
 from cortexflow_ui.backend.streams import experiments_stream as stream_mod
 from cortexflow_ui.backend.streams.job_stream import poll_job, tarball_exists
 from cortexflow_ui.backend.main import app
-from cortexflow_ui.backend.streams.run_jobs_stream import list_run_jobs
+from cortexflow_ui.backend.streams.run_jobs_stream import Job, list_run_jobs
 
 
 class TestSimpleEndpoints(unittest.TestCase):
@@ -61,10 +61,10 @@ class TestListRunJobs(unittest.TestCase):
 
         self.assertEqual(
             result,
-            [
-                {"job_id": "j1", "status": "running", "retry": False},
-                {"job_id": "j2", "status": "finished", "retry": False},
-            ],
+            {
+                "j1": Job(job_id="j1", status="running", retry=False),
+                "j2": Job(job_id="j2", status="finished", retry=False),
+            },
         )
 
     @patch(
@@ -121,11 +121,11 @@ class TestPollJob(unittest.TestCase):
             job_id="job-1",
         )
 
-        data = poll_job(("run-1", "job-1"))
+        data = poll_job(("run-1", "job-1"))["job-1"]
 
-        self.assertEqual(data["job_id"], "job-1")
-        self.assertEqual(data["status"], "running")
-        self.assertEqual(data["history"], [])
+        self.assertEqual(data.job_id, "job-1")
+        self.assertEqual(data.status, "running")
+        self.assertEqual(data.history, [])
 
     @patch(
         "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
@@ -168,12 +168,12 @@ class TestPollJob(unittest.TestCase):
             ],
         )
 
-        history = poll_job(("run-1", "job-1"))["history"]
+        history = poll_job(("run-1", "job-1"))["job-1"].history
 
         self.assertEqual(len(history), 2)
-        self.assertEqual(history[0]["state"], "pending")
-        self.assertEqual(history[1]["state"], "running")
-        self.assertIsNone(history[1]["end"])
+        self.assertEqual(history[0].state, "pending")
+        self.assertEqual(history[1].state, "running")
+        self.assertIsNone(history[1].end)
 
     @patch("cortexflow_ui.backend.streams.job_stream.tarball_exists", return_value=True)
     @patch(
@@ -204,11 +204,11 @@ class TestPollJob(unittest.TestCase):
             job_id="job-1",
         )
 
-        readiness = poll_job(("run-1", "job-1"))["readiness"]
+        readiness = poll_job(("run-1", "job-1"))["job-1"].readiness
 
-        self.assertTrue(readiness["code"])
-        self.assertTrue(readiness["lifecycle"])
-        self.assertIsNone(readiness["lifecycle_error"])
+        self.assertTrue(readiness.code)
+        self.assertTrue(readiness.lifecycle)
+        self.assertIsNone(readiness.lifecycle_error)
 
     @patch(
         "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
@@ -218,12 +218,12 @@ class TestPollJob(unittest.TestCase):
         self,
         _mock_list_artifacts: MagicMock,
     ) -> None:
-        data = poll_job(("run-1", "job-1"))
+        data = poll_job(("run-1", "job-1"))["job-1"]
 
-        self.assertEqual(data["job_id"], "job-1")
-        self.assertFalse(data["readiness"]["lifecycle"])
-        self.assertIn("lifecycle.json", data["readiness"]["lifecycle_error"])
-        self.assertNotIn("history", data)
+        self.assertEqual(data.job_id, "job-1")
+        self.assertFalse(data.readiness.lifecycle)
+        self.assertIn("lifecycle.json", data.readiness.lifecycle_error)
+        self.assertIsNone(data.history)
 
     @patch("cortexflow_ui.backend.streams.job_stream.tarball_exists", return_value=True)
     @patch(
@@ -254,10 +254,10 @@ class TestPollJob(unittest.TestCase):
             job_id="job-1",
         )
 
-        readiness = poll_job(("run-1", "job-1"))["readiness"]
+        readiness = poll_job(("run-1", "job-1"))["job-1"].readiness
 
-        self.assertFalse(readiness["code"])
-        self.assertTrue(readiness["lifecycle"])
+        self.assertFalse(readiness.code)
+        self.assertTrue(readiness.lifecycle)
         mock_tarball.assert_not_called()
 
     @patch(
@@ -291,10 +291,10 @@ class TestPollJob(unittest.TestCase):
             job_id="job-1",
         )
 
-        readiness = poll_job(("run-1", "job-1"))["readiness"]
+        readiness = poll_job(("run-1", "job-1"))["job-1"].readiness
 
-        self.assertFalse(readiness["code"])
-        self.assertTrue(readiness["lifecycle"])
+        self.assertFalse(readiness.code)
+        self.assertTrue(readiness.lifecycle)
         mock_tarball.assert_called_once_with("run-1", "job-1")
 
 

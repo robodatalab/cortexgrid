@@ -22,17 +22,25 @@ from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedDiffStream
 
 
-def _list_combined_notes(experiment_name: str) -> list[ExperimentNote | RunNote]:
-    items: list[ExperimentNote | RunNote] = []
-    for run_id in runs_for_experiment(experiment_name):
-        items.extend(list_run_notes(run_id))
-    items.extend(list_experiment_notes(experiment_name))
+ExperimentName = str
+NoteId = str
+CombinedNote = RunNote | ExperimentNote
+
+
+def poll_experiment_notes(
+    experiment_name: ExperimentName,
+) -> dict[NoteId, CombinedNote]:
+    items: dict[NoteId, CombinedNote] = {}
+    for run_name in runs_for_experiment(experiment_name):
+        for n in list_run_notes(run_name):
+            items[n.id] = n
+    for n in list_experiment_notes(experiment_name):
+        items[n.id] = n
     return items
 
 
-stream = KeyedDiffStream(
+stream: KeyedDiffStream[ExperimentName, NoteId, CombinedNote] = KeyedDiffStream(
     name="experiment_notes_stream",
-    list_fn=_list_combined_notes,
-    id_fn=lambda item: item.id,
+    poll_fn=poll_experiment_notes,
     poll_interval_sec=NOTES_STREAM_POLL_INTERVAL_SEC,
 )

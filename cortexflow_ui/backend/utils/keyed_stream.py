@@ -14,11 +14,16 @@ import abc
 import asyncio
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Hashable
+from typing import Any, Callable, Generic, Hashable, TypeVar
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
+
+
+TopicKey = TypeVar("TopicKey", bound=Hashable)
+ItemId = TypeVar("ItemId", bound=Hashable)
+Payload = TypeVar("Payload")
 
 
 @dataclass
@@ -48,19 +53,21 @@ class RemovedEvent:
 DiffEvent = AddedEvent | UpdatedEvent | RemovedEvent
 
 
-class KeyedStreamBase(abc.ABC):
+class KeyedStreamBase(abc.ABC, Generic[TopicKey, ItemId, Payload]):
     def __init__(
         self,
         name: str,
+        poll_fn: Callable[[TopicKey], dict[ItemId, Payload]],
         poll_interval_sec: float,
     ):
         self.name = name
+        self.poll_fn = poll_fn
         self.poll_interval_sec = poll_interval_sec
-        self._cache: dict[Hashable, Any] = {}
-        self._clients: dict[Hashable, set[WebSocket]] = {}
-        self._tasks: dict[Hashable, asyncio.Task] = {}
+        self._cache: dict[TopicKey, dict[ItemId, Payload]] = {}
+        self._clients: dict[TopicKey, set[WebSocket]] = {}
+        self._tasks: dict[TopicKey, asyncio.Task] = {}
 
-    async def serve(self, ws: WebSocket, key: Hashable) -> None:
+    async def serve(self, ws: WebSocket, key: TopicKey) -> None:
         await ws.accept()
         clients = self._clients.setdefault(key, set())
         clients.add(ws)
@@ -73,7 +80,7 @@ class KeyedStreamBase(abc.ABC):
         await self._wait_until_socket_disconnected(ws, key)
 
     async def _wait_until_socket_disconnected(
-        self, ws: WebSocket, key: Hashable
+        self, ws: WebSocket, key: TopicKey
     ) -> None:
         try:
             while True:
@@ -83,7 +90,7 @@ class KeyedStreamBase(abc.ABC):
         finally:
             await self._unsubscribe(ws, key)
 
-    async def _unsubscribe(self, ws: WebSocket, key: Hashable) -> None:
+    async def _unsubscribe(self, ws: WebSocket, key: TopicKey) -> None:
         clients = self._clients.get(key)
         if clients is None:
             return
@@ -100,7 +107,7 @@ class KeyedStreamBase(abc.ABC):
         self._cache.pop(key, None)
         self._clients.pop(key, None)
 
-    async def _poll_loop(self, key: Hashable) -> None:
+    async def _poll_loop(self, key: TopicKey) -> None:
         log.info("%s poll loop started for key=%s", self.name, key)
         try:
             while True:
@@ -109,9 +116,7 @@ class KeyedStreamBase(abc.ABC):
             log.info("%s poll loop cancelled for key=%s", self.name, key)
             raise
 
-    async def _broadcast(
-        self, key: Hashable, event: StateEvent | DiffEvent
-    ) -> None:
+    async def _broadcast(self, key: TopicKey, event: StateEvent | DiffEvent) -> None:
         payload = asdict(event)
         for ws in list(self._clients.get(key, ())):
             try:
@@ -122,35 +127,37 @@ class KeyedStreamBase(abc.ABC):
                     clients.discard(ws)
 
     @abc.abstractmethod
-    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+    async def _send_initial_state(self, ws: WebSocket, key: TopicKey) -> None:
         pass
 
     @abc.abstractmethod
-    async def _poll_and_dispatch(self, key: Hashable) -> None:
+    async def _poll_and_dispatch(self, key: TopicKey) -> None:
         pass
 
 
-class KeyedStream(KeyedStreamBase):
+class KeyedStream(
+    KeyedStreamBase[TopicKey, ItemId, Payload],
+    Generic[TopicKey, ItemId, Payload],
+):
     def __init__(
         self,
         name: str,
-        poll_fn: Callable[[Any], Any],
+        poll_fn: Callable[[TopicKey], dict[ItemId, Payload]],
         poll_interval_sec: float = 10,
     ):
         super().__init__(
             name=name,
+            poll_fn=poll_fn,
             poll_interval_sec=poll_interval_sec,
         )
 
-        self.poll_fn = poll_fn
-
-    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+    async def _send_initial_state(self, ws: WebSocket, key: TopicKey) -> None:
         try:
             await ws.send_json(asdict(StateEvent(data=self._cache[key])))
         except Exception:
             pass
 
-    async def _poll_and_dispatch(self, key: Hashable) -> None:
+    async def _poll_and_dispatch(self, key: TopicKey) -> None:
         try:
             data = await asyncio.to_thread(self.poll_fn, key)
         except asyncio.CancelledError:
@@ -164,7 +171,10 @@ class KeyedStream(KeyedStreamBase):
         await self._broadcast(key, StateEvent(data=data))
 
 
-class KeyedDiffStream(KeyedStreamBase):
+class KeyedDiffStream(
+    KeyedStreamBase[TopicKey, ItemId, Payload],
+    Generic[TopicKey, ItemId, Payload],
+):
     """Per-key WebSocket stream that emits per-item diff events.
 
     Same reference-counted poll pattern as KeyedStream, but instead of
@@ -177,33 +187,25 @@ class KeyedDiffStream(KeyedStreamBase):
     def __init__(
         self,
         name: str,
-        list_fn: Callable[[Any], list[Any]],
-        id_fn: Callable[[Any], str],
-        version_fn: Callable[[Any], Hashable] = lambda i: i.updated_at,
+        poll_fn: Callable[[TopicKey], dict[ItemId, Payload]],
         poll_interval_sec: float = 30,
     ):
         super().__init__(
             name=name,
+            poll_fn=poll_fn,
             poll_interval_sec=poll_interval_sec,
         )
 
-        def poll(key: Hashable) -> dict:
-            items = list_fn(key)
-            return {id_fn(item): item for item in items}
-
-        self._poll = poll
-        self._version_fn = version_fn
-
-    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+    async def _send_initial_state(self, ws: WebSocket, key: TopicKey) -> None:
         for item in self._cache.get(key, {}).values():
             try:
                 await ws.send_json(asdict(AddedEvent(item=item)))
             except Exception:
                 pass
 
-    async def _poll_and_dispatch(self, key: Hashable) -> None:
+    async def _poll_and_dispatch(self, key: TopicKey) -> None:
         try:
-            data = await asyncio.to_thread(self._poll, key)
+            data = await asyncio.to_thread(self.poll_fn, key)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -213,22 +215,18 @@ class KeyedDiffStream(KeyedStreamBase):
 
         old_data = self._cache.get(key, {})
         self._cache[key] = data
-        events = _diff_dict(old_data, data, self._version_fn)
+        events = _diff_dict(old_data, data)
 
         for event in events:
             await self._broadcast(key, event)
 
 
-def _diff_dict(
-    old_by_id: dict,
-    new_by_id: dict,
-    version_fn: Callable[[Any], Hashable],
-) -> list[DiffEvent]:
+def _diff_dict(old_by_id: dict, new_by_id: dict) -> list[DiffEvent]:
     events: list[DiffEvent] = []
     for id_, item in new_by_id.items():
         if id_ not in old_by_id:
             events.append(AddedEvent(item=item))
-        elif version_fn(old_by_id[id_]) != version_fn(item):
+        elif old_by_id[id_] != item:
             events.append(UpdatedEvent(item=item))
     for id_ in old_by_id:
         if id_ not in new_by_id:

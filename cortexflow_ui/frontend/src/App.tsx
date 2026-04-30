@@ -33,9 +33,10 @@ function App() {
     selection?.kind === 'run' || selection?.kind === 'job'
       ? selection.run_id
       : null
-  const activeRunJobs = useStreamState<Job[]>(
+  const activeRunJobsMap = useStreamState<Record<string, Job>>(
     activeRunId ? `/api/runs/${activeRunId}/jobs/stream` : null,
   )
+  const activeRunJobs = activeRunJobsMap ? Object.values(activeRunJobsMap) : null
 
   useEffect(() => {
     const controller = new AbortController()

@@ -97,7 +97,7 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ws.sent[0]["type"], "state")
             self.assertEqual(
                 ws.sent[0]["data"],
-                [{"job_id": "j1", "status": "running", "retry": False}],
+                {"j1": {"job_id": "j1", "status": "running", "retry": False}},
             )
         finally:
             ws.disconnect()
@@ -127,7 +127,7 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(ws_b.sent[0]["type"], "state")
                 self.assertEqual(
                     ws_b.sent[0]["data"],
-                    [{"job_id": "j1", "status": "running", "retry": False}],
+                    {"j1": {"job_id": "j1", "status": "running", "retry": False}},
                 )
             finally:
                 ws_b.disconnect()

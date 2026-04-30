@@ -1,21 +1,22 @@
 import { useState } from 'react'
 import { Allotment } from 'allotment'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush } from 'recharts'
-import { TitledFrame } from './TitledFrame'
 import { RunNotesPanel } from './RunNotesPanel'
-import { useStreamState } from '../useStreamState'
+import { useStreamList } from '../useStreamList'
 import './RunDashboard.css'
 
-type MetricPoint = { step: number; value: number }
+type MetricPoint = { step: number; value: number; timestamp: number }
 
 export type Job = { job_id: string; status: string; retry: boolean }
 
-type DashboardData = {
-  params: Record<string, string>
-  metrics: Record<string, MetricPoint[]>
-  artifacts: string[]
-  url: string
-}
+type Param = { id: string; run_name: string; name: string; value: string }
+type Metric = { id: string; run_name: string; name: string; history: MetricPoint[] }
+type Url = { id: string; run_name: string; url: string }
+type DashboardItem = Param | Metric | Url
+
+function isParam(i: DashboardItem): i is Param { return 'value' in i }
+function isMetric(i: DashboardItem): i is Metric { return 'history' in i }
+function isUrl(i: DashboardItem): i is Url { return 'url' in i }
 
 const STOPPABLE_STATUSES = new Set(['pending', 'running'])
 
@@ -32,7 +33,7 @@ type Props = {
 }
 
 export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
-  const data = useStreamState<DashboardData>(`/api/runs/${runId}/stream`)
+  const items = useStreamList<DashboardItem>(`/api/runs/${runName}/stream`)
   const [stopping, setStopping] = useState(false)
 
   const hasStoppableJobs = jobs?.some(isStoppable) ?? false
@@ -46,7 +47,10 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
     }
   }
 
-  const metricKeys = data ? Object.keys(data.metrics) : []
+  const allItems = Object.values(items)
+  const params = allItems.filter(isParam)
+  const metrics = allItems.filter(isMetric)
+  const url = allItems.find(isUrl)?.url
 
   return (
     <Allotment>
@@ -65,10 +69,10 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
                   {stopping ? 'Stopping...' : 'Stop all jobs'}
                 </button>
               )}
-              {data && (
+              {url && (
                 <a
                   className="run-dashboard__open-button"
-                  href={data.url}
+                  href={url}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -78,27 +82,27 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
             </div>
           </div>
 
-          {data && Object.keys(data.params).length > 0 && (
+          {params.length > 0 && (
             <div className="run-dashboard__section">
               <div className="run-dashboard__section-title">Parameters</div>
               <table className="run-dashboard__table">
                 <tbody>
-                  {Object.entries(data.params).map(([k, v]) => (
-                    <tr key={k}><td>{k}</td><td>{v}</td></tr>
+                  {params.map((p) => (
+                    <tr key={p.id}><td>{p.name}</td><td>{p.value}</td></tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
 
-          {metricKeys.length > 0 && data && (
+          {metrics.length > 0 && (
             <div className="run-dashboard__section">
               <div className="run-dashboard__section-title">Metrics</div>
-              {metricKeys.map((key) => (
-                <div key={key} className="run-dashboard__chart">
-                  <div className="run-dashboard__chart-title">{key}</div>
+              {metrics.map((m) => (
+                <div key={m.id} className="run-dashboard__chart">
+                  <div className="run-dashboard__chart-title">{m.name}</div>
                   <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={data.metrics[key]}>
+                    <LineChart data={m.history}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="step" />
                       <YAxis />
@@ -109,18 +113,6 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
                   </ResponsiveContainer>
                 </div>
               ))}
-            </div>
-          )}
-
-          {data && data.artifacts.length > 0 && (
-            <div className="run-dashboard__section">
-              <TitledFrame title="Artifacts">
-                <ul className="run-dashboard__artifacts">
-                  {data.artifacts.map((a) => (
-                    <li key={a}>{a}</li>
-                  ))}
-                </ul>
-              </TitledFrame>
             </div>
           )}
         </div>

@@ -9,7 +9,7 @@ detail dict on every poll.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from cortexflow import s3_util
@@ -20,6 +20,38 @@ from cortexflow.ray_util import get_ray_job_status, get_ray_job_url
 from cortexflow_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
 from mlflow.tracking import MlflowClient
+
+RunId = str
+JobId = str
+JobStreamKey = tuple[RunId, JobId]
+
+
+@dataclass
+class Readiness:
+    code: bool
+    lifecycle: bool
+    lifecycle_error: str | None
+
+
+@dataclass
+class HistoryEntry:
+    attempt: int
+    state: str
+    start: str
+    end: str | None
+    ray_job_id: str | None
+    error: str | None
+    ray_url: str | None
+
+
+@dataclass
+class JobDetail:
+    job_id: JobId
+    readiness: Readiness
+    status: str | None = None
+    retry: bool | None = None
+    stop_requested: bool | None = None
+    history: list[HistoryEntry] | None = None
 
 
 def tarball_exists(run_id: str, job_id: str) -> bool:
@@ -34,36 +66,39 @@ def tarball_exists(run_id: str, job_id: str) -> bool:
         return False
 
 
-def poll_job(key: tuple[str, str]) -> dict:
+def poll_job(key: JobStreamKey) -> dict[JobId, JobDetail]:
     run_id, job_id = key
     job_entries = list_run_artifacts(run_id, f"job/{job_id}")
     lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
     manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
     code_ready = manifest_ready and tarball_exists(run_id, job_id)
-    readiness = {
-        "code": code_ready,
-        "lifecycle": lifecycle_ready,
-        "lifecycle_error": None if lifecycle_ready else "lifecycle.json not uploaded",
-    }
+    readiness = Readiness(
+        code=code_ready,
+        lifecycle=lifecycle_ready,
+        lifecycle_error=None if lifecycle_ready else "lifecycle.json not uploaded",
+    )
     if not lifecycle_ready:
-        return {"job_id": job_id, "readiness": readiness}
+        return {job_id: JobDetail(job_id=job_id, readiness=readiness)}
 
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
     ray_job_id = lifecycle.get_ray_job_id()
-    history = [asdict(event) for event in lifecycle.history]
-    for event in history:
-        event["ray_url"] = get_ray_job_url(event["ray_job_id"])
+    history = [
+        HistoryEntry(**asdict(event), ray_url=get_ray_job_url(event.ray_job_id))
+        for event in lifecycle.history
+    ]
     return {
-        "job_id": lifecycle.job_id,
-        "readiness": readiness,
-        "status": get_ray_job_status(ray_job_id).value,
-        "retry": lifecycle.retry,
-        "stop_requested": lifecycle.stop_requested,
-        "history": history,
+        lifecycle.job_id: JobDetail(
+            job_id=lifecycle.job_id,
+            readiness=readiness,
+            status=get_ray_job_status(ray_job_id).value,
+            retry=lifecycle.retry,
+            stop_requested=lifecycle.stop_requested,
+            history=history,
+        )
     }
 
 
-stream = KeyedStream(
+stream: KeyedStream[JobStreamKey, JobId, JobDetail] = KeyedStream(
     name="job_stream",
     poll_fn=poll_job,
     poll_interval_sec=JOB_STREAM_POLL_INTERVAL_SEC,
