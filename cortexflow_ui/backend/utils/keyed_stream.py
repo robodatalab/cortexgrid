@@ -44,9 +44,6 @@ class KeyedStreamBase(abc.ABC):
 
         await self._wait_until_socket_disconnected(ws, key)
 
-    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
-        pass
-
     async def _wait_until_socket_disconnected(
         self, ws: WebSocket, key: Hashable
     ) -> None:
@@ -84,6 +81,20 @@ class KeyedStreamBase(abc.ABC):
             log.info("%s poll loop cancelled for key=%s", self.name, key)
             raise
 
+    async def _broadcast(self, key: Hashable, event: dict) -> None:
+        for ws in list(self._clients.get(key, ())):
+            try:
+                await ws.send_json(event)
+            except Exception:
+                clients = self._clients.get(key)
+                if clients is not None:
+                    clients.discard(ws)
+
+    @abc.abstractmethod
+    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+        pass
+
+    @abc.abstractmethod
     async def _poll_and_dispatch(self, key: Hashable) -> None:
         pass
 
@@ -99,6 +110,7 @@ class KeyedStream(KeyedStreamBase):
             name=name,
             poll_interval_sec=poll_interval_sec,
         )
+
         self.poll_fn = poll_fn
 
     async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
@@ -117,14 +129,13 @@ class KeyedStream(KeyedStreamBase):
             await asyncio.sleep(self.poll_interval_sec)
             return
 
+        old_data = self._cache.get(key, {})
         self._cache[key] = data
-        for ws in list(self._clients.get(key, ())):
-            try:
-                await ws.send_json({"type": "state", "data": data})
-            except Exception:
-                clients = self._clients.get(key)
-                if clients is not None:
-                    clients.discard(ws)
+        events = [{"type": "state", "data": data}]
+        # events = _diff_dict(old_data, data)
+
+        for event in events:
+            await self._broadcast(key, event)
 
 
 class KeyedDiffStream(KeyedStreamBase):
@@ -148,8 +159,12 @@ class KeyedDiffStream(KeyedStreamBase):
             name=name,
             poll_interval_sec=poll_interval_sec,
         )
-        self.list_fn = list_fn
-        self.id_fn = id_fn
+
+        def poll(key: Hashable) -> dict:
+            items = list_fn(key)
+            return {id_fn(item): item for item in items}
+
+        self._poll = poll
 
     async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
         for item in self._cache.get(key, {}).values():
@@ -160,7 +175,7 @@ class KeyedDiffStream(KeyedStreamBase):
 
     async def _poll_and_dispatch(self, key: Hashable) -> None:
         try:
-            items = await asyncio.to_thread(self.list_fn, key)
+            data = await asyncio.to_thread(self._poll, key)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -168,30 +183,22 @@ class KeyedDiffStream(KeyedStreamBase):
             await asyncio.sleep(self.poll_interval_sec)
             return
 
-        await self._broadcast(key, self._diff(key, items))
+        old_data = self._cache.get(key, {})
+        self._cache[key] = data
+        events = _diff_dict(old_data, data)
 
-    def _diff(self, key: Hashable, items: list[dict]) -> list[dict]:
-        new_by_id = {self.id_fn(item): item for item in items}
-        old_by_id = self._cache.get(key, {})
-        events: list[dict] = []
-        for id_, item in new_by_id.items():
-            if id_ not in old_by_id:
-                events.append({"type": "added", "item": item})
-            elif old_by_id[id_]["updated_at"] != item["updated_at"]:
-                events.append({"type": "updated", "item": item})
-        for id_ in old_by_id:
-            if id_ not in new_by_id:
-                events.append({"type": "removed", "id": id_})
-        self._cache[key] = new_by_id
-        return events
+        for event in events:
+            await self._broadcast(key, event)
 
-    async def _broadcast(self, key: Hashable, events: list[dict]) -> None:
-        for ws in list(self._clients.get(key, ())):
-            for event in events:
-                try:
-                    await ws.send_json(event)
-                except Exception:
-                    clients = self._clients.get(key)
-                    if clients is not None:
-                        clients.discard(ws)
-                    break
+
+def _diff_dict(old_by_id: dict, new_by_id: dict) -> list[dict]:
+    events: list[dict] = []
+    for id_, item in new_by_id.items():
+        if id_ not in old_by_id:
+            events.append({"type": "added", "item": item})
+        elif old_by_id[id_]["updated_at"] != item["updated_at"]:
+            events.append({"type": "updated", "item": item})
+    for id_ in old_by_id:
+        if id_ not in new_by_id:
+            events.append({"type": "removed", "id": id_})
+    return events
