@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
 
-from typing import Any
-
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +20,7 @@ from cortexflow.secrets import (
 from cortexflow_ui.backend.models import (
     notes,
 )
+from cortexflow_ui.backend.models.notes import ExperimentNote, RunNote
 from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
 from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
@@ -157,12 +156,15 @@ async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) 
 
 
 @app.post("/api/runs/{run_name}/notes")
-def add_run_note(run_name: str, body: NoteBody) -> dict[str, Any]:
-    return notes.add_run_note(run_name, body.body)
+def add_run_note(run_name: str, body: NoteBody) -> RunNote:
+    note = notes.add_run_note(run_name, body.body)
+    if note is None:
+        raise HTTPException(status_code=500, detail="failed to add run note")
+    return note
 
 
 @app.put("/api/notes/run/{note_id}")
-def update_run_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+def update_run_note(note_id: str, body: NoteBody) -> RunNote:
     note = notes.update_run_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
@@ -177,12 +179,15 @@ def delete_run_note(note_id: str) -> dict[str, str]:
 
 
 @app.post("/api/experiments/{experiment_name}/notes")
-def add_experiment_note(experiment_name: str, body: NoteBody) -> dict[str, Any]:
-    return notes.add_experiment_note(experiment_name, body.body)
+def add_experiment_note(experiment_name: str, body: NoteBody) -> ExperimentNote:
+    note = notes.add_experiment_note(experiment_name, body.body)
+    if note is None:
+        raise HTTPException(status_code=500, detail="failed to add experiment note")
+    return note
 
 
 @app.put("/api/notes/experiment/{note_id}")
-def update_experiment_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+def update_experiment_note(note_id: str, body: NoteBody) -> ExperimentNote:
     note = notes.update_experiment_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
