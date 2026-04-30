@@ -7,8 +7,10 @@ immediately, then live updates from the next poll onwards.
 
 Used by run_jobs_stream / run_dashboard_stream / job_stream.
 """
+
 from __future__ import annotations
 
+import abc
 import asyncio
 import logging
 from typing import Any, Callable, Hashable
@@ -18,15 +20,13 @@ from fastapi import WebSocket, WebSocketDisconnect
 log = logging.getLogger(__name__)
 
 
-class KeyedStream:
+class KeyedStreamBase(abc.ABC):
     def __init__(
         self,
         name: str,
-        poll_fn: Callable[[Any], Any],
-        poll_interval_sec: float = 10,
+        poll_interval_sec: float,
     ):
         self.name = name
-        self.poll_fn = poll_fn
         self.poll_interval_sec = poll_interval_sec
         self._cache: dict[Hashable, Any] = {}
         self._clients: dict[Hashable, set[WebSocket]] = {}
@@ -36,13 +36,20 @@ class KeyedStream:
         await ws.accept()
         clients = self._clients.setdefault(key, set())
         clients.add(ws)
+
         if key not in self._tasks:
             self._tasks[key] = asyncio.create_task(self._poll_loop(key))
         elif key in self._cache:
-            try:
-                await ws.send_json({"type": "state", "data": self._cache[key]})
-            except Exception:
-                pass
+            await self._send_initial_state(ws, key)
+
+        await self._wait_until_socket_disconnected(ws, key)
+
+    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+        pass
+
+    async def _wait_until_socket_disconnected(
+        self, ws: WebSocket, key: Hashable
+    ) -> None:
         try:
             while True:
                 await ws.receive_text()
@@ -72,29 +79,55 @@ class KeyedStream:
         log.info("%s poll loop started for key=%s", self.name, key)
         try:
             while True:
-                try:
-                    data = await asyncio.to_thread(self.poll_fn, key)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    log.exception("%s poll failed for key=%s", self.name, key)
-                    await asyncio.sleep(self.poll_interval_sec)
-                    continue
-                self._cache[key] = data
-                for ws in list(self._clients.get(key, ())):
-                    try:
-                        await ws.send_json({"type": "state", "data": data})
-                    except Exception:
-                        clients = self._clients.get(key)
-                        if clients is not None:
-                            clients.discard(ws)
-                await asyncio.sleep(self.poll_interval_sec)
+                await self._poll_and_dispatch(key)
         except asyncio.CancelledError:
             log.info("%s poll loop cancelled for key=%s", self.name, key)
             raise
 
+    async def _poll_and_dispatch(self, key: Hashable) -> None:
+        pass
 
-class KeyedDiffStream:
+
+class KeyedStream(KeyedStreamBase):
+    def __init__(
+        self,
+        name: str,
+        poll_fn: Callable[[Any], Any],
+        poll_interval_sec: float = 10,
+    ):
+        super().__init__(
+            name=name,
+            poll_interval_sec=poll_interval_sec,
+        )
+        self.poll_fn = poll_fn
+
+    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+        try:
+            await ws.send_json({"type": "state", "data": self._cache[key]})
+        except Exception:
+            pass
+
+    async def _poll_and_dispatch(self, key: Hashable) -> None:
+        try:
+            data = await asyncio.to_thread(self.poll_fn, key)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("%s poll failed for key=%s", self.name, key)
+            await asyncio.sleep(self.poll_interval_sec)
+            return
+
+        self._cache[key] = data
+        for ws in list(self._clients.get(key, ())):
+            try:
+                await ws.send_json({"type": "state", "data": data})
+            except Exception:
+                clients = self._clients.get(key)
+                if clients is not None:
+                    clients.discard(ws)
+
+
+class KeyedDiffStream(KeyedStreamBase):
     """Per-key WebSocket stream that emits per-item diff events.
 
     Same reference-counted poll pattern as KeyedStream, but instead of
@@ -111,68 +144,31 @@ class KeyedDiffStream:
         id_fn: Callable[[dict], str],
         poll_interval_sec: float = 30,
     ):
-        self.name = name
+        super().__init__(
+            name=name,
+            poll_interval_sec=poll_interval_sec,
+        )
         self.list_fn = list_fn
         self.id_fn = id_fn
-        self.poll_interval_sec = poll_interval_sec
-        self._cache: dict[Hashable, dict[str, dict]] = {}
-        self._clients: dict[Hashable, set[WebSocket]] = {}
-        self._tasks: dict[Hashable, asyncio.Task] = {}
 
-    async def serve(self, ws: WebSocket, key: Hashable) -> None:
-        await ws.accept()
-        clients = self._clients.setdefault(key, set())
-        clients.add(ws)
-        if key not in self._tasks:
-            self._tasks[key] = asyncio.create_task(self._poll_loop(key))
-        else:
-            for item in self._cache.get(key, {}).values():
-                try:
-                    await ws.send_json({"type": "added", "item": item})
-                except Exception:
-                    pass
-        try:
-            while True:
-                await ws.receive_text()
-        except WebSocketDisconnect:
-            pass
-        finally:
-            await self._unsubscribe(ws, key)
-
-    async def _unsubscribe(self, ws: WebSocket, key: Hashable) -> None:
-        clients = self._clients.get(key)
-        if clients is None:
-            return
-        clients.discard(ws)
-        if clients:
-            return
-        task = self._tasks.pop(key, None)
-        if task is not None:
-            task.cancel()
+    async def _send_initial_state(self, ws: WebSocket, key: Hashable) -> None:
+        for item in self._cache.get(key, {}).values():
             try:
-                await task
-            except asyncio.CancelledError:
+                await ws.send_json({"type": "added", "item": item})
+            except Exception:
                 pass
-        self._cache.pop(key, None)
-        self._clients.pop(key, None)
 
-    async def _poll_loop(self, key: Hashable) -> None:
-        log.info("%s poll loop started for key=%s", self.name, key)
+    async def _poll_and_dispatch(self, key: Hashable) -> None:
         try:
-            while True:
-                try:
-                    items = await asyncio.to_thread(self.list_fn, key)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    log.exception("%s poll failed for key=%s", self.name, key)
-                    await asyncio.sleep(self.poll_interval_sec)
-                    continue
-                await self._broadcast(key, self._diff(key, items))
-                await asyncio.sleep(self.poll_interval_sec)
+            items = await asyncio.to_thread(self.list_fn, key)
         except asyncio.CancelledError:
-            log.info("%s poll loop cancelled for key=%s", self.name, key)
             raise
+        except Exception:
+            log.exception("%s poll failed for key=%s", self.name, key)
+            await asyncio.sleep(self.poll_interval_sec)
+            return
+
+        await self._broadcast(key, self._diff(key, items))
 
     def _diff(self, key: Hashable, items: list[dict]) -> list[dict]:
         new_by_id = {self.id_fn(item): item for item in items}
