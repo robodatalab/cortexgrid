@@ -8,12 +8,13 @@ so the UI can label each note's origin.
 Run lookups piggyback on `experiments_stream.runs_cache`, which is kept
 fresh by the experiments poll loop, so we don't re-hit MLflow here.
 """
+
 from __future__ import annotations
 
-from cortexflow_ui.backend import experiments_stream
-from cortexflow_ui.backend.config import NOTES_STREAM_POLL_INTERVAL_SEC
+from cortexflow_ui.backend.streams import experiments_stream
+from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.keyed_stream import KeyedDiffStream
-from cortexflow_ui.backend.notes import list_experiment_notes, list_run_notes
+from cortexflow_ui.backend.models.notes import list_experiment_notes, list_run_notes
 
 
 def _runs_for_experiment(experiment_name: str) -> list[tuple[str, str]]:

@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 
 from cortexflow.jobs import JobLifecycle, LifecycleEvent
 from cortexflow.ray_util import JobStatus
-from cortexflow_ui.backend import experiments_stream as stream_mod
-from cortexflow_ui.backend.job_stream import poll_job, tarball_exists
+from cortexflow_ui.backend.streams import experiments_stream as stream_mod
+from cortexflow_ui.backend.streams.job_stream import poll_job, tarball_exists
 from cortexflow_ui.backend.main import app
-from cortexflow_ui.backend.run_jobs_stream import list_run_jobs
+from cortexflow_ui.backend.streams.run_jobs_stream import list_run_jobs
 
 
 class TestSimpleEndpoints(unittest.TestCase):
@@ -291,7 +291,9 @@ class TestPollJob(unittest.TestCase):
 class TestTarballExists(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = Path(tempfile.mkdtemp())
-        manifest = {"code_tarball_uri": "s3://ray-checkpoints/job/job-1/project_code_root.tar.gz"}
+        manifest = {
+            "code_tarball_uri": "s3://ray-checkpoints/job/job-1/project_code_root.tar.gz"
+        }
         self.manifest_path = self.tmpdir / "manifest.json"
         self.manifest_path.write_text(json.dumps(manifest))
 
@@ -358,7 +360,9 @@ class TestExperimentsStream(unittest.TestCase):
         stream_mod.force_refresh.clear()
         with self.client.websocket_connect("/api/experiments/stream") as ws:
             ws.send_json({"type": "force_refresh"})
-            ws.send_json({"type": "ping"})  # follow-up keeps the handler alive long enough to process the prior message
+            ws.send_json(
+                {"type": "ping"}
+            )  # follow-up keeps the handler alive long enough to process the prior message
         self.assertTrue(stream_mod.force_refresh.is_set())
         stream_mod.force_refresh.clear()
 

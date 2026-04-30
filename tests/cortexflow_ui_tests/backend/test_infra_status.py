@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from cortexflow_ui.backend.infra_status import (
+from cortexflow_ui.backend.models.infra_status import (
     _classify,
     _collect_unreachable_nodes,
     get_infra_status,
@@ -32,14 +32,16 @@ def _make_pod(
     waiting_reason=None,
 ):
     if waiting_reason is not None:
-        cs = [SimpleNamespace(
-            ready=False,
-            state=SimpleNamespace(waiting=SimpleNamespace(reason=waiting_reason)),
-        )]
+        cs = [
+            SimpleNamespace(
+                ready=False,
+                state=SimpleNamespace(waiting=SimpleNamespace(reason=waiting_reason)),
+            )
+        ]
     else:
-        cs = [SimpleNamespace(
-            ready=containers_ready, state=SimpleNamespace(waiting=None)
-        )]
+        cs = [
+            SimpleNamespace(ready=containers_ready, state=SimpleNamespace(waiting=None))
+        ]
     return SimpleNamespace(
         metadata=SimpleNamespace(name=name, namespace=namespace),
         spec=SimpleNamespace(node_name=node_name),
@@ -60,15 +62,19 @@ class TestCollectUnreachableNodes(unittest.TestCase):
         self.assertEqual(_collect_unreachable_nodes(v1), {})
 
     def test_unknown_status_records_reason(self):
-        v1 = _v1_with(nodes=[
-            _make_node("n1", ready_status="Unknown", reason="NodeStatusUnknown"),
-        ])
+        v1 = _v1_with(
+            nodes=[
+                _make_node("n1", ready_status="Unknown", reason="NodeStatusUnknown"),
+            ]
+        )
         self.assertEqual(_collect_unreachable_nodes(v1), {"n1": "NodeStatusUnknown"})
 
     def test_false_status_records_reason(self):
-        v1 = _v1_with(nodes=[
-            _make_node("n1", ready_status="False", reason="KubeletNotReady"),
-        ])
+        v1 = _v1_with(
+            nodes=[
+                _make_node("n1", ready_status="False", reason="KubeletNotReady"),
+            ]
+        )
         self.assertEqual(_collect_unreachable_nodes(v1), {"n1": "KubeletNotReady"})
 
     def test_falls_back_to_status_when_reason_empty(self):
@@ -80,13 +86,13 @@ class TestCollectUnreachableNodes(unittest.TestCase):
         self.assertEqual(_collect_unreachable_nodes(v1), {"n1": "Unknown"})
 
     def test_only_unhealthy_nodes_are_recorded(self):
-        v1 = _v1_with(nodes=[
-            _make_node("healthy"),
-            _make_node("dead", ready_status="Unknown", reason="NodeStatusUnknown"),
-        ])
-        self.assertEqual(
-            _collect_unreachable_nodes(v1), {"dead": "NodeStatusUnknown"}
+        v1 = _v1_with(
+            nodes=[
+                _make_node("healthy"),
+                _make_node("dead", ready_status="Unknown", reason="NodeStatusUnknown"),
+            ]
         )
+        self.assertEqual(_collect_unreachable_nodes(v1), {"dead": "NodeStatusUnknown"})
 
 
 class TestClassify(unittest.TestCase):
@@ -99,9 +105,7 @@ class TestClassify(unittest.TestCase):
 
     def test_pod_on_healthy_node_uses_existing_logic(self):
         pod = _make_pod(node_name="alive", phase="Running", containers_ready=True)
-        self.assertEqual(
-            _classify(pod, {"dead": "NodeStatusUnknown"}), (True, "ready")
-        )
+        self.assertEqual(_classify(pod, {"dead": "NodeStatusUnknown"}), (True, "ready"))
 
     def test_default_none_keeps_existing_behavior(self):
         pod = _make_pod(phase="Running", containers_ready=True)

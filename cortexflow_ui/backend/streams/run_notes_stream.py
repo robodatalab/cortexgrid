@@ -4,11 +4,12 @@ Polls run_notes for one run every NOTES_STREAM_POLL_INTERVAL_SEC seconds
 while at least one WebSocket subscriber is watching that run. Emits
 per-item diff events (added/updated/removed) via KeyedDiffStream.
 """
+
 from __future__ import annotations
 
-from cortexflow_ui.backend.config import NOTES_STREAM_POLL_INTERVAL_SEC
+from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.keyed_stream import KeyedDiffStream
-from cortexflow_ui.backend.notes import list_run_notes
+from cortexflow_ui.backend.models.notes import list_run_notes
 
 
 stream = KeyedDiffStream(

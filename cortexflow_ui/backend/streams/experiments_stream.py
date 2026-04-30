@@ -7,6 +7,7 @@ MLflow + Ray every ``POLL_INTERVAL_SEC`` seconds and emits diffs
 ``force_refresh`` event clears the cache and broadcasts ``cleared`` so
 clients reset before the next poll repopulates them.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,7 @@ from cortexflow.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
-from cortexflow_ui.backend.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 
 log = logging.getLogger(__name__)
 
@@ -102,7 +103,10 @@ async def _poll_loop() -> None:
             await _broadcast({"type": "removed", "run_id": run_id})
         log.info(
             "Experiments poll: %d cached, %d added, %d removed, %d clients",
-            len(runs_cache), added_count, len(removed), len(ws_clients),
+            len(runs_cache),
+            added_count,
+            len(removed),
+            len(ws_clients),
         )
         await _wait_for_next_poll()
 

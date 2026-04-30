@@ -19,16 +19,18 @@ from cortexflow.secrets import (
     set_secret,
 )
 
-from cortexflow_ui.backend import (
+from cortexflow_ui.backend.models import (
+    notes,
+)
+from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
+from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
     job_stream,
-    notes,
     run_dashboard_stream,
     run_jobs_stream,
     run_notes_stream,
 )
-from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 log = logging.getLogger("cortexflow_ui_backend")
 
@@ -150,9 +152,7 @@ async def run_notes_stream_endpoint(ws: WebSocket, run_id: str) -> None:
 
 
 @app.websocket("/api/experiments/{experiment_name}/notes/stream")
-async def experiment_notes_stream_endpoint(
-    ws: WebSocket, experiment_name: str
-) -> None:
+async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
     await experiment_notes_stream.stream.serve(ws, experiment_name)
 
 

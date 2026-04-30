@@ -5,6 +5,7 @@ every ``RUN_JOBS_STREAM_POLL_INTERVAL_SEC`` seconds while at least one
 WebSocket subscriber is watching that run. Pushes the full jobs array
 on every poll.
 """
+
 from __future__ import annotations
 
 from cortexflow.jobs import list_experiment_run_jobs
@@ -12,7 +13,7 @@ from cortexflow.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
-from cortexflow_ui.backend.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
+from cortexflow_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.keyed_stream import KeyedStream
 
 
