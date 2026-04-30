@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from cortexflow_ui.backend.streams import experiments_stream
 from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.keyed_stream import KeyedDiffStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedDiffStream
 from cortexflow_ui.backend.models.notes import list_experiment_notes, list_run_notes
 
 

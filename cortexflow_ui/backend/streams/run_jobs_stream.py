@@ -14,7 +14,7 @@ from cortexflow.ray_util import (
     list_ray_jobs_with_submission_id,
 )
 from cortexflow_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.keyed_stream import KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
 
 
 def list_run_jobs(run_id: str) -> list[dict]:

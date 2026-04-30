@@ -18,7 +18,7 @@ from cortexflow.jobs import JobLifecycle
 from cortexflow.mlflow_util import list_run_artifacts
 from cortexflow.ray_util import get_ray_job_status, get_ray_job_url
 from cortexflow_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.keyed_stream import KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
 from mlflow.tracking import MlflowClient
 
 
