@@ -22,23 +22,40 @@ k3s; an EKS cluster may slot in later, in the same VPC.
 - **s3/** -- artifact bucket.
 - **secrets/** -- separate state, IAM only (DGX user, GitHub Actions OIDC role).
 
-## Bootstrap (cold start)
+## Bootstrap
 
-The notes-database provisioner runs `psql` against RDS from your laptop, which
-requires the Tailscale subnet router to be up *and* its advertised route
-approved. So a fresh apply is two phases:
+`make head-aws-apply` is single-pass. The notes-database provisioner has a
+10-minute retry loop that absorbs router boot + Tailscale route propagation,
+so cold-start and incremental applies behave the same.
 
-1. `terraform apply -target=module.network -target=module.head -target=module.tailscale_router -target=module.s3`
-2. In the [Tailscale admin](https://login.tailscale.com/admin/machines), find
-   `robolab-tailscale-router` and approve the advertised subnet route (the VPC
-   CIDR, default `10.0.0.0/16`). One-time, ever.
-3. `terraform apply` -- completes the RDS module including the `notes`
-   database, schema, and `NOTES_DB_URI` secret.
+This relies on two pieces of one-time Tailscale tenant configuration:
 
-Subsequent applies are a single `terraform apply`.
+1. **Auth key** ([Tailscale admin -> Settings -> Keys](https://login.tailscale.com/admin/settings/keys)):
+   Reusable, pre-approved, tagged `tag:robolab`. Put it in `.env` as
+   `TAILSCALE_AUTH_KEY`. The same key is consumed by both the head and the
+   subnet router (cloud-init runs on each).
+
+2. **ACL** ([Tailscale admin -> Access Controls](https://login.tailscale.com/admin/acls)):
+   `tag:robolab` must own itself, and routes advertised by devices with that
+   tag must be auto-approved. Add to your tailnet policy file:
+
+   ```jsonc
+   "tagOwners": {
+     "tag:robolab": ["autogroup:admin"]
+   },
+   "autoApprovers": {
+     "routes": {
+       "10.0.0.0/16": ["tag:robolab"]
+     }
+   }
+   ```
+
+   With this in place, the router's advertised `10.0.0.0/16` is approved the
+   moment it joins the tailnet -- no manual click needed.
 
 ## Dependencies
 
 - `~/.ssh/id_rsa.pub` exists -- baked into EC2 cloud-init for SSH.
 - `psql` on the apply machine -- used by the notes-database provisioner.
-- `TF_VAR_tailscale_auth_key` set in env -- one-shot reusable Tailscale auth key.
+- `TF_VAR_tailscale_auth_key` set in env -- reusable, pre-approved auth key
+  tagged `tag:robolab` (see above).
