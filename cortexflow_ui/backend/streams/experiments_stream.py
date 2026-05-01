@@ -104,5 +104,3 @@ def resolve_run_name(run_id: RunId) -> RunName:
         if r.run_id == run_id:
             return r.run_name
     raise KeyError(f"unknown run_id: {run_id}")
-
-
