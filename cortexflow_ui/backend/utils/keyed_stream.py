@@ -76,27 +76,8 @@ class KeyedStream(Generic[TopicKey, ItemId, Payload]):
         self.poll_interval_sec = poll_interval_sec
         self._clients: dict[TopicKey, set[WebSocket]] = {}
         self._tasks: dict[TopicKey, asyncio.Task] = {}
-        self._persistent: set[TopicKey] = set()
 
-    def start(self, key: TopicKey) -> None:
-        """Start polling for a key independent of subscribers.
-
-        The poll task is kept alive even when the last subscriber leaves.
-        """
-        self._persistent.add(key)
-        if key not in self._tasks:
-            self._tasks[key] = asyncio.create_task(self._poll_loop(key))
-
-    def force_refresh(self, key: TopicKey) -> None:
-        """Clear the cache for a key. Next poll re-emits `added` for everything."""
-        self.cache.clear(key)
-
-    async def serve(
-        self,
-        ws: WebSocket,
-        key: TopicKey,
-        on_message: Callable[[dict], None] | None = None,
-    ) -> None:
+    async def serve(self, ws: WebSocket, key: TopicKey) -> None:
         await ws.accept()
         clients = self._clients.setdefault(key, set())
         clients.add(ws)
@@ -106,19 +87,14 @@ class KeyedStream(Generic[TopicKey, ItemId, Payload]):
         else:
             await self._send_initial_state(ws, key)
 
-        await self._wait_until_socket_disconnected(ws, key, on_message)
+        await self._wait_until_socket_disconnected(ws, key)
 
     async def _wait_until_socket_disconnected(
-        self,
-        ws: WebSocket,
-        key: TopicKey,
-        on_message: Callable[[dict], None] | None,
+        self, ws: WebSocket, key: TopicKey
     ) -> None:
         try:
             while True:
-                msg = await ws.receive_json()
-                if on_message is not None:
-                    on_message(msg)
+                await ws.receive_text()
         except WebSocketDisconnect:
             pass
         finally:
@@ -132,8 +108,6 @@ class KeyedStream(Generic[TopicKey, ItemId, Payload]):
         if clients:
             return
         self._clients.pop(key, None)
-        if key in self._persistent:
-            return
         task = self._tasks.pop(key, None)
         if task is not None:
             task.cancel()

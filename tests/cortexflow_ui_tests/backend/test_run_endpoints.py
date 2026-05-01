@@ -345,20 +345,6 @@ class TestTarballExists(unittest.TestCase):
 
 
 class TestExperimentsStream(unittest.TestCase):
-    def test_force_refresh_clears_cache(self) -> None:
-        run = stream_mod.Run(
-            experiment_name="alpha",
-            run_id="r1",
-            run_name="alpha-run",
-            jobs=[],
-        )
-        stream_mod.cache.set(stream_mod.TOPIC, {"alpha-run": run})
-        self.assertEqual(
-            stream_mod.cache.get(stream_mod.TOPIC), {"alpha-run": run}
-        )
-        stream_mod.stream.force_refresh(stream_mod.TOPIC)
-        self.assertEqual(stream_mod.cache.get(stream_mod.TOPIC), {})
-
     def test_resolvers_read_from_cache(self) -> None:
         run = stream_mod.Run(
             experiment_name="alpha",

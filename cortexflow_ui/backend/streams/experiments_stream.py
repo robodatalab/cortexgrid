@@ -1,19 +1,12 @@
 """Experiments stream.
 
-Polls MLflow + Ray and emits per-run diff events. The poll runs from
-FastAPI lifespan via ``stream.start(TOPIC)`` and stays alive regardless
-of subscribers, so other modules (``notes.py``,
-``experiment_notes_stream``) can read the cache directly via
-``runs_for_experiment`` / ``resolve_run_id`` / ``resolve_run_name``.
+Polls MLflow + Ray and emits per-run diff events.
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
-
-from fastapi import FastAPI
 
 from cortexflow.experiment import list_experiments
 from cortexflow.ray_util import (
@@ -113,10 +106,3 @@ def resolve_run_name(run_id: RunId) -> RunName:
     raise KeyError(f"unknown run_id: {run_id}")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    stream.start(TOPIC)
-    try:
-        yield
-    finally:
-        pass

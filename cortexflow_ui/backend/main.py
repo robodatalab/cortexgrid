@@ -36,7 +36,6 @@ log = logging.getLogger("cortexflow_ui_backend")
 app = FastAPI(
     title="CortexFlow UI",
     version="0.1.0",
-    lifespan=experiments_stream.lifespan,
 )
 
 app.add_middleware(
@@ -103,13 +102,7 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.websocket("/api/experiments/stream")
 async def experiments_stream_endpoint(ws: WebSocket) -> None:
-    def handle(msg: dict) -> None:
-        if msg.get("type") == "force_refresh":
-            experiments_stream.stream.force_refresh(experiments_stream.TOPIC)
-
-    await experiments_stream.stream.serve(
-        ws, experiments_stream.TOPIC, on_message=handle
-    )
+    await experiments_stream.stream.serve(ws, experiments_stream.TOPIC)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")
