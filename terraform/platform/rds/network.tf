@@ -11,7 +11,7 @@ resource "aws_db_subnet_group" "main" {
 
 resource "aws_security_group" "rds" {
   name        = "robolab-rds"
-  description = "Allow Postgres from the k3s head and the Tailscale subnet router"
+  description = "Allow Postgres only from the k3s head"
   vpc_id      = var.vpc_id
 
   ingress {
