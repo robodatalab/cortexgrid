@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_sta
 from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
-    job_stream,
+    job_details_stream,
     run_dashboard_stream,
     run_jobs_stream,
     run_notes_stream,
@@ -103,19 +103,13 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.websocket("/api/experiments/stream")
 async def experiments_stream_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
-    experiments_stream.ws_clients.add(ws)
-    try:
-        for run in list(experiments_stream.runs_cache.values()):
-            await ws.send_json({"type": "added", "run": run})
-        while True:
-            msg = await ws.receive_json()
-            if msg.get("type") == "force_refresh":
-                experiments_stream.force_refresh.set()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        experiments_stream.ws_clients.discard(ws)
+    def handle(msg: dict) -> None:
+        if msg.get("type") == "force_refresh":
+            experiments_stream.stream.force_refresh(experiments_stream.TOPIC)
+
+    await experiments_stream.stream.serve(
+        ws, experiments_stream.TOPIC, on_message=handle
+    )
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")
@@ -129,8 +123,8 @@ async def run_dashboard_stream_endpoint(ws: WebSocket, run_name: str) -> None:
 
 
 @app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")
-async def job_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
-    await job_stream.stream.serve(ws, (run_id, job_id))
+async def job_details_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
+    await job_details_stream.stream.serve(ws, (run_id, job_id))
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")

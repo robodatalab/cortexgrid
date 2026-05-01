@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from cortexflow.jobs import JobLifecycle, LifecycleEvent
 from cortexflow.ray_util import JobStatus
 from cortexflow_ui.backend.streams import experiments_stream as stream_mod
-from cortexflow_ui.backend.streams.job_stream import poll_job, tarball_exists
+from cortexflow_ui.backend.streams.job_details_stream import poll_job, tarball_exists
 from cortexflow_ui.backend.main import app
 from cortexflow_ui.backend.streams.run_jobs_stream import Job, list_run_jobs
 
@@ -94,19 +94,19 @@ class TestListRunJobs(unittest.TestCase):
 
 class TestPollJob(unittest.TestCase):
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_url",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url",
         return_value="http://test:8265/#/jobs/ray-1",
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_status",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_stream.JobLifecycle")
+    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_returns_lifecycle_and_ray_status(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -128,18 +128,18 @@ class TestPollJob(unittest.TestCase):
         self.assertEqual(data.history, [])
 
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_url", return_value=None
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_status",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_stream.JobLifecycle")
+    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_returns_history_entries(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -175,20 +175,20 @@ class TestPollJob(unittest.TestCase):
         self.assertEqual(history[1].state, "running")
         self.assertIsNone(history[1].end)
 
-    @patch("cortexflow_ui.backend.streams.job_stream.tarball_exists", return_value=True)
+    @patch("cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["manifest.json", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_url", return_value=None
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_status",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_stream.JobLifecycle")
+    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_includes_readiness_when_healthy(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -211,7 +211,7 @@ class TestPollJob(unittest.TestCase):
         self.assertIsNone(readiness.lifecycle_error)
 
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=[],
     )
     def test_returns_pending_when_lifecycle_missing(
@@ -225,20 +225,20 @@ class TestPollJob(unittest.TestCase):
         self.assertIn("lifecycle.json", data.readiness.lifecycle_error)
         self.assertIsNone(data.history)
 
-    @patch("cortexflow_ui.backend.streams.job_stream.tarball_exists", return_value=True)
+    @patch("cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_url", return_value=None
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_status",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_stream.JobLifecycle")
+    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_code_not_ready_when_manifest_missing(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -261,21 +261,21 @@ class TestPollJob(unittest.TestCase):
         mock_tarball.assert_not_called()
 
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.tarball_exists", return_value=False
+        "cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=False
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.list_run_artifacts",
+        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["manifest.json", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_url", return_value=None
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_stream.get_ray_job_status",
+        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_stream.JobLifecycle")
+    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_code_not_ready_when_tarball_missing(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -313,15 +313,15 @@ class TestTarballExists(unittest.TestCase):
 
         patchers = [
             patch(
-                "cortexflow_ui.backend.streams.job_stream.MlflowClient",
+                "cortexflow_ui.backend.streams.job_details_stream.MlflowClient",
                 return_value=self.fake_mlflow,
             ),
             patch(
-                "cortexflow_ui.backend.streams.job_stream.get_mlflow_tracking_uri",
+                "cortexflow_ui.backend.streams.job_details_stream.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
             patch(
-                "cortexflow_ui.backend.streams.job_stream.s3_util.get_s3_client",
+                "cortexflow_ui.backend.streams.job_details_stream.s3_util.get_s3_client",
                 return_value=self.fake_s3,
             ),
         ]
@@ -345,36 +345,34 @@ class TestTarballExists(unittest.TestCase):
 
 
 class TestExperimentsStream(unittest.TestCase):
-    def setUp(self) -> None:
-        self._saved_cache = dict(stream_mod.runs_cache)
-        stream_mod.runs_cache.clear()
-        self.client = TestClient(app)
+    def test_force_refresh_clears_cache(self) -> None:
+        run = stream_mod.Run(
+            experiment_name="alpha",
+            run_id="r1",
+            run_name="alpha-run",
+            jobs=[],
+        )
+        stream_mod.cache.set(stream_mod.TOPIC, {"alpha-run": run})
+        self.assertEqual(
+            stream_mod.cache.get(stream_mod.TOPIC), {"alpha-run": run}
+        )
+        stream_mod.stream.force_refresh(stream_mod.TOPIC)
+        self.assertEqual(stream_mod.cache.get(stream_mod.TOPIC), {})
 
-    def tearDown(self) -> None:
-        stream_mod.runs_cache.clear()
-        stream_mod.runs_cache.update(self._saved_cache)
-
-    def test_snapshot_sent_on_connect(self) -> None:
-        stream_mod.runs_cache["r1"] = {
-            "experiment_name": "alpha",
-            "run_id": "r1",
-            "run_name": "alpha-run",
-            "jobs": [],
-        }
-        with self.client.websocket_connect("/api/experiments/stream") as ws:
-            event = ws.receive_json()
-            self.assertEqual(event["type"], "added")
-            self.assertEqual(event["run"]["run_id"], "r1")
-
-    def test_force_refresh_signals_poll_event(self) -> None:
-        stream_mod.force_refresh.clear()
-        with self.client.websocket_connect("/api/experiments/stream") as ws:
-            ws.send_json({"type": "force_refresh"})
-            ws.send_json(
-                {"type": "ping"}
-            )  # follow-up keeps the handler alive long enough to process the prior message
-        self.assertTrue(stream_mod.force_refresh.is_set())
-        stream_mod.force_refresh.clear()
+    def test_resolvers_read_from_cache(self) -> None:
+        run = stream_mod.Run(
+            experiment_name="alpha",
+            run_id="r1",
+            run_name="alpha-run",
+            jobs=[],
+        )
+        stream_mod.cache.set(stream_mod.TOPIC, {"alpha-run": run})
+        try:
+            self.assertEqual(stream_mod.resolve_run_id("alpha-run"), "r1")
+            self.assertEqual(stream_mod.resolve_run_name("r1"), "alpha-run")
+            self.assertEqual(stream_mod.runs_for_experiment("alpha"), ["alpha-run"])
+        finally:
+            stream_mod.cache.clear(stream_mod.TOPIC)
 
 
 if __name__ == "__main__":

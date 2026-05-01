@@ -101,7 +101,7 @@ def poll_job(key: JobStreamKey) -> dict[JobId, JobDetail]:
 cache: KeyedCache[JobStreamKey, JobId, JobDetail] = KeyedCache()
 
 stream: KeyedStream[JobStreamKey, JobId, JobDetail] = KeyedStream(
-    name="job_stream",
+    name="job_details_stream",
     cache=cache,
     poll_fn=poll_job,
     poll_interval_sec=JOB_STREAM_POLL_INTERVAL_SEC,
