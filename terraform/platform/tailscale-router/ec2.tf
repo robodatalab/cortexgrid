@@ -34,6 +34,13 @@ resource "aws_instance" "router" {
     vpc_cidr           = var.vpc_cidr
   })
 
+  # The router is stateless (only forwards packets), so replace it whenever
+  # cloud-init changes -- in particular when the Tailscale auth key rotates.
+  # Without this, terraform ignores user_data after first launch and the
+  # router keeps its old registration; rotating the key would otherwise
+  # require a manual `terraform taint`.
+  user_data_replace_on_change = true
+
   root_block_device {
     volume_size = 8
     volume_type = "gp3"
