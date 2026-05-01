@@ -103,16 +103,19 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
             ws.disconnect()
             await task
 
-    async def test_disconnect_clears_cache_and_task(self) -> None:
+    async def test_disconnect_clears_task_and_clients_but_preserves_cache(self) -> None:
         ws = FakeWebSocket()
         task = asyncio.create_task(run_jobs_stream.stream.serve(ws, "run-2"))
         await _wait_for(lambda: bool(ws.sent))
         ws.disconnect()
         await task
 
-        self.assertNotIn("run-2", run_jobs_stream.stream._cache)
         self.assertNotIn("run-2", run_jobs_stream.stream._tasks)
         self.assertNotIn("run-2", run_jobs_stream.stream._clients)
+        self.assertEqual(
+            run_jobs_stream.stream.cache.get("run-2"),
+            {"j1": run_jobs_stream.Job(job_id="j1", status="running", retry=False)},
+        )
 
     async def test_second_subscriber_receives_cached_added_immediately(self) -> None:
         ws_a = FakeWebSocket()

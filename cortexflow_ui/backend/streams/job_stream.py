@@ -18,7 +18,7 @@ from cortexflow.jobs import JobLifecycle
 from cortexflow.mlflow_util import list_run_artifacts
 from cortexflow.ray_util import get_ray_job_status, get_ray_job_url
 from cortexflow_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, KeyedStream
 from mlflow.tracking import MlflowClient
 
 RunId = str
@@ -98,8 +98,11 @@ def poll_job(key: JobStreamKey) -> dict[JobId, JobDetail]:
     }
 
 
+cache: KeyedCache[JobStreamKey, JobId, JobDetail] = KeyedCache()
+
 stream: KeyedStream[JobStreamKey, JobId, JobDetail] = KeyedStream(
     name="job_stream",
+    cache=cache,
     poll_fn=poll_job,
     poll_interval_sec=JOB_STREAM_POLL_INTERVAL_SEC,
 )

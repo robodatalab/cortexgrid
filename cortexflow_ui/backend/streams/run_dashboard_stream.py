@@ -15,7 +15,7 @@ from cortexflow.infra import get_mlflow_run_url
 from cortexflow.mlflow_util import get_metric_history
 from cortexflow_ui.backend.streams.config import RUN_DASHBOARD_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.streams.experiments_stream import resolve_run_id
-from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, KeyedStream
 from mlflow.tracking import MlflowClient
 
 
@@ -69,8 +69,11 @@ def poll_run_dashboard(run_name: RunName) -> dict[DashboardItemId, DashboardItem
     return items
 
 
+cache: KeyedCache[RunName, DashboardItemId, DashboardItem] = KeyedCache()
+
 stream: KeyedStream[RunName, DashboardItemId, DashboardItem] = KeyedStream(
     name="run_dashboard_stream",
+    cache=cache,
     poll_fn=poll_run_dashboard,
     poll_interval_sec=RUN_DASHBOARD_STREAM_POLL_INTERVAL_SEC,
 )

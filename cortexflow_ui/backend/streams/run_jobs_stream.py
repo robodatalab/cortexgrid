@@ -16,7 +16,7 @@ from cortexflow.ray_util import (
     list_ray_jobs_with_submission_id,
 )
 from cortexflow_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, KeyedStream
 
 RunId = str
 JobId = str
@@ -41,8 +41,11 @@ def list_run_jobs(run_id: RunId) -> dict[JobId, Job]:
     }
 
 
+cache: KeyedCache[RunId, JobId, Job] = KeyedCache()
+
 stream: KeyedStream[RunId, JobId, Job] = KeyedStream(
     name="run_jobs_stream",
+    cache=cache,
     poll_fn=list_run_jobs,
     poll_interval_sec=RUN_JOBS_STREAM_POLL_INTERVAL_SEC,
 )
