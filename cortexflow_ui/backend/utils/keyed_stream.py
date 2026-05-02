@@ -1,11 +1,26 @@
-"""Per-key WebSocket stream with reference-counted polling.
+"""Topic-keyed cache with background polling and per-listener pub/sub.
 
-Each key gets its own poll task. Per poll, computes a diff against the
-previous snapshot in the shared cache and emits one of
-{type: added, item}, {type: updated, item}, {type: removed, id}.
-The first WebSocket subscriber for a key starts the task; the last to
-disconnect cancels it. New subscribers receive an `added` event per
-cached item, then live diffs from the next poll on.
+Refresher owns a cache and a single always-on poll loop. Each topic in
+the loop's sweep has at least one subscribed listener; listeners are
+notified of per-item diff events (added/updated/removed) computed
+against the previous cache snapshot. When a topic's last listener
+unsubscribes, the topic is dropped from the sweep and its cache is
+cleared. `pin(topic)` keeps a topic in the sweep regardless of
+listener count, for caches that need to stay warm for non-WebSocket
+readers.
+
+`serve_websocket` is a thin transport adapter: it subscribes a
+listener that buffers diff events into a queue while the initial
+cache snapshot is replayed on connect, then drains the queue and
+forwards live events until disconnect.
+
+Concurrency model: poll dispatch (`_poll_and_dispatch`) and new
+subscriptions (`subscribe_and_snapshot`) serialize on a single
+`asyncio.Lock`. A poll's cache update + listener broadcast happens
+atomically; a new subscriber's snapshot read + listener insertion
+happens atomically. Together this guarantees a new subscriber sees a
+cache snapshot consistent with the set of dispatch events its
+listener will receive: never half a poll's effects.
 """
 
 from __future__ import annotations
@@ -13,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Generic, Hashable, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Hashable, TypeVar
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -45,6 +60,8 @@ class RemovedEvent:
 
 DiffEvent = AddedEvent | UpdatedEvent | RemovedEvent
 
+Listener = Callable[[DiffEvent], Awaitable[None]]
+
 
 class KeyedCache(Generic[TopicKey, ItemId, Payload]):
     """Shared keyed store. Dumb storage; no diffing, no events."""
@@ -62,102 +79,127 @@ class KeyedCache(Generic[TopicKey, ItemId, Payload]):
         self._data.pop(topic, None)
 
 
-class KeyedStream(Generic[TopicKey, ItemId, Payload]):
+@dataclass
+class Subscription(Generic[TopicKey]):
+    topic: TopicKey
+    listener: Listener
+
+
+class Refresher(Generic[TopicKey, ItemId, Payload]):
+    """Background poller with per-topic listener pub/sub.
+
+    The single poll loop sweeps every topic that has at least one
+    listener (or has been pinned), polling the data source and
+    broadcasting per-item diffs against the cache.
+    """
+
     def __init__(
         self,
         name: str,
         cache: KeyedCache[TopicKey, ItemId, Payload],
         poll_fn: Callable[[TopicKey], dict[ItemId, Payload]],
         poll_interval_sec: float = 30,
-    ):
+    ) -> None:
         self.name = name
         self.cache = cache
         self.poll_fn = poll_fn
         self.poll_interval_sec = poll_interval_sec
-        self._clients: dict[TopicKey, set[WebSocket]] = {}
-        self._tasks: dict[TopicKey, asyncio.Task] = {}
+        self._listeners: dict[TopicKey, list[Listener]] = {}
+        self._dispatch_lock = asyncio.Lock()
+        self._task: asyncio.Task | None = None
 
-    async def serve(self, ws: WebSocket, key: TopicKey) -> None:
-        await ws.accept()
-        clients = self._clients.setdefault(key, set())
-        clients.add(ws)
+    def ensure_started(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._loop())
 
-        if key not in self._tasks:
-            self._tasks[key] = asyncio.create_task(self._poll_loop(key))
-        else:
-            await self._send_initial_state(ws, key)
+    def pin(self, topic: TopicKey) -> None:
+        """Keep `topic` in the sweep regardless of listener count.
 
-        await self._wait_until_socket_disconnected(ws, key)
+        Implemented as a permanent no-op listener so the same
+        listener-count refcount governs both pinned and subscribed
+        topics; no separate pin set.
+        """
 
-    async def _wait_until_socket_disconnected(
-        self, ws: WebSocket, key: TopicKey
-    ) -> None:
-        try:
-            while True:
-                await ws.receive_text()
-        except WebSocketDisconnect:
-            pass
-        finally:
-            await self._unsubscribe(ws, key)
+        async def _noop(_event: DiffEvent) -> None:
+            return None
 
-    async def _unsubscribe(self, ws: WebSocket, key: TopicKey) -> None:
-        clients = self._clients.get(key)
-        if clients is None:
+        self._listeners.setdefault(topic, []).append(_noop)
+
+    def subscribe(
+        self, topic: TopicKey, listener: Listener
+    ) -> Subscription[TopicKey]:
+        self._listeners.setdefault(topic, []).append(listener)
+        return Subscription(topic=topic, listener=listener)
+
+    async def subscribe_and_snapshot(
+        self, topic: TopicKey, listener: Listener
+    ) -> tuple[Subscription[TopicKey], dict[ItemId, Payload]]:
+        """Atomically subscribe and capture a cache snapshot.
+
+        Held under the dispatch lock so that no diff event for `topic`
+        is dispatched between the snapshot view and the listener
+        becoming active. The returned snapshot can be replayed as
+        initial state without dropping or duplicating events relative
+        to what the listener will subsequently receive.
+
+        If this is the first listener for `topic`, schedule an
+        immediate poll so cold subscribers see data within one poll
+        round-trip rather than waiting up to `poll_interval_sec` for
+        the next sweep.
+        """
+        async with self._dispatch_lock:
+            is_first = topic not in self._listeners
+            sub = self.subscribe(topic, listener)
+            snapshot = dict(self.cache.get(topic))
+        if is_first:
+            asyncio.create_task(self._poll_and_dispatch(topic))
+        return sub, snapshot
+
+    def unsubscribe(self, sub: Subscription[TopicKey]) -> None:
+        listeners = self._listeners.get(sub.topic)
+        if listeners is None:
             return
-        clients.discard(ws)
-        if clients:
+        try:
+            listeners.remove(sub.listener)
+        except ValueError:
             return
-        self._clients.pop(key, None)
-        task = self._tasks.pop(key, None)
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        if not listeners:
+            self._listeners.pop(sub.topic, None)
+            self.cache.clear(sub.topic)
 
-    async def _poll_loop(self, key: TopicKey) -> None:
-        log.info("%s poll loop started for key=%s", self.name, key)
+    def snapshot(self, topic: TopicKey) -> dict[ItemId, Payload]:
+        return self.cache.get(topic)
+
+    async def _loop(self) -> None:
+        log.info("%s refresher loop started", self.name)
+        while True:
+            for topic in list(self._listeners):
+                await self._poll_and_dispatch(topic)
+            await asyncio.sleep(self.poll_interval_sec)
+
+    async def _poll_and_dispatch(self, topic: TopicKey) -> None:
         try:
-            while True:
-                await self._poll_and_dispatch(key)
-        except asyncio.CancelledError:
-            log.info("%s poll loop cancelled for key=%s", self.name, key)
-            raise
-
-    async def _send_initial_state(self, ws: WebSocket, key: TopicKey) -> None:
-        for item in self.cache.get(key).values():
-            try:
-                await ws.send_json(asdict(AddedEvent(item=item)))
-            except Exception:
-                pass
-
-    async def _poll_and_dispatch(self, key: TopicKey) -> None:
-        try:
-            new_data = await asyncio.to_thread(self.poll_fn, key)
+            new_data = await asyncio.to_thread(self.poll_fn, topic)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("%s poll failed for key=%s", self.name, key)
-            await asyncio.sleep(self.poll_interval_sec)
+            log.exception("%s poll failed for topic=%s", self.name, topic)
             return
 
-        old_data = self.cache.get(key)
-        self.cache.set(key, new_data)
-        events = _diff_dict(old_data, new_data)
+        async with self._dispatch_lock:
+            old_data = self.cache.get(topic)
+            self.cache.set(topic, new_data)
+            for event in _diff_dict(old_data, new_data):
+                await self._broadcast(topic, event)
 
-        for event in events:
-            await self._broadcast(key, event)
-
-    async def _broadcast(self, key: TopicKey, event: DiffEvent) -> None:
-        payload = asdict(event)
-        for ws in list(self._clients.get(key, ())):
+    async def _broadcast(self, topic: TopicKey, event: DiffEvent) -> None:
+        for listener in list(self._listeners.get(topic, ())):
             try:
-                await ws.send_json(payload)
+                await listener(event)
             except Exception:
-                clients = self._clients.get(key)
-                if clients is not None:
-                    clients.discard(ws)
+                log.exception(
+                    "%s listener failed for topic=%s", self.name, topic
+                )
 
 
 def _diff_dict(old_by_id: dict, new_by_id: dict) -> list[DiffEvent]:
@@ -171,3 +213,68 @@ def _diff_dict(old_by_id: dict, new_by_id: dict) -> list[DiffEvent]:
         if id_ not in new_by_id:
             events.append(RemovedEvent(id=id_))
     return events
+
+
+async def serve_websocket(
+    refresher: Refresher[TopicKey, ItemId, Payload],
+    ws: WebSocket,
+    topic: TopicKey,
+) -> None:
+    """Bridge a single WebSocket to one topic on a Refresher.
+
+    Sends an initial `added` event per cache item (none if cold), then
+    forwards live diff events until the client disconnects. Live
+    events arriving during the initial replay are buffered into a
+    queue and drained in order afterward, so the wire stream is
+    consistent with the snapshot's view.
+    """
+    refresher.ensure_started()
+    await ws.accept()
+
+    queue: asyncio.Queue[DiffEvent] = asyncio.Queue()
+
+    async def _enqueue(event: DiffEvent) -> None:
+        await queue.put(event)
+
+    sub, initial = await refresher.subscribe_and_snapshot(topic, _enqueue)
+    try:
+        for item in initial.values():
+            await ws.send_json(asdict(AddedEvent(item=item)))
+
+        send_task = asyncio.create_task(_drain_queue_to_ws(ws, queue))
+        recv_task = asyncio.create_task(_drain_recv_until_disconnect(ws))
+        try:
+            await asyncio.wait(
+                {send_task, recv_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for t in (send_task, recv_task):
+                if not t.done():
+                    t.cancel()
+            for t in (send_task, recv_task):
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+    finally:
+        refresher.unsubscribe(sub)
+
+
+async def _drain_queue_to_ws(
+    ws: WebSocket, queue: asyncio.Queue[DiffEvent]
+) -> None:
+    while True:
+        event = await queue.get()
+        try:
+            await ws.send_json(asdict(event))
+        except Exception:
+            return
+
+
+async def _drain_recv_until_disconnect(ws: WebSocket) -> None:
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        return

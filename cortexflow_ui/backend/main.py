@@ -30,6 +30,7 @@ from cortexflow_ui.backend.streams import (
     run_jobs_stream,
     run_notes_stream,
 )
+from cortexflow_ui.backend.utils.keyed_stream import serve_websocket
 
 log = logging.getLogger("cortexflow_ui_backend")
 
@@ -63,6 +64,20 @@ class SecretValue(BaseModel):
 
 class NoteBody(BaseModel):
     body: str
+
+
+@app.on_event("startup")
+async def _start_refreshers() -> None:
+    for r in (
+        experiments_stream.refresher,
+        run_jobs_stream.refresher,
+        run_dashboard_stream.refresher,
+        job_details_stream.refresher,
+        run_notes_stream.refresher,
+        experiment_notes_stream.refresher,
+    ):
+        r.ensure_started()
+    experiments_stream.refresher.pin(experiments_stream.TOPIC)
 
 
 @app.get("/health")
@@ -102,22 +117,22 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.websocket("/api/experiments/stream")
 async def experiments_stream_endpoint(ws: WebSocket) -> None:
-    await experiments_stream.stream.serve(ws, experiments_stream.TOPIC)
+    await serve_websocket(experiments_stream.refresher, ws, experiments_stream.TOPIC)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")
 async def run_jobs_stream_endpoint(ws: WebSocket, run_id: str) -> None:
-    await run_jobs_stream.stream.serve(ws, run_id)
+    await serve_websocket(run_jobs_stream.refresher, ws, run_id)
 
 
 @app.websocket("/api/runs/{run_name}/stream")
 async def run_dashboard_stream_endpoint(ws: WebSocket, run_name: str) -> None:
-    await run_dashboard_stream.stream.serve(ws, run_name)
+    await serve_websocket(run_dashboard_stream.refresher, ws, run_name)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")
 async def job_details_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
-    await job_details_stream.stream.serve(ws, (run_id, job_id))
+    await serve_websocket(job_details_stream.refresher, ws, (run_id, job_id))
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")
@@ -134,12 +149,12 @@ def stop_run(run_id: str) -> dict[str, str]:
 
 @app.websocket("/api/runs/{run_name}/notes/stream")
 async def run_notes_stream_endpoint(ws: WebSocket, run_name: str) -> None:
-    await run_notes_stream.stream.serve(ws, run_name)
+    await serve_websocket(run_notes_stream.refresher, ws, run_name)
 
 
 @app.websocket("/api/experiments/{experiment_name}/notes/stream")
 async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
-    await experiment_notes_stream.stream.serve(ws, experiment_name)
+    await serve_websocket(experiment_notes_stream.refresher, ws, experiment_name)
 
 
 @app.post("/api/runs/{run_name}/notes")

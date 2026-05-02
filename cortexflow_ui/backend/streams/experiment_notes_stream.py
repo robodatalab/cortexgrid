@@ -19,7 +19,7 @@ from cortexflow_ui.backend.models.notes import (
 )
 from cortexflow_ui.backend.streams.experiments_stream import runs_for_experiment
 from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 
 ExperimentName = str
@@ -41,7 +41,7 @@ def poll_experiment_notes(
 
 cache: KeyedCache[ExperimentName, NoteId, CombinedNote] = KeyedCache()
 
-stream: KeyedStream[ExperimentName, NoteId, CombinedNote] = KeyedStream(
+refresher: Refresher[ExperimentName, NoteId, CombinedNote] = Refresher(
     name="experiment_notes_stream",
     cache=cache,
     poll_fn=poll_experiment_notes,

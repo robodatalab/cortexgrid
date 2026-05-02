@@ -15,7 +15,7 @@ from cortexflow.ray_util import (
     list_ray_jobs_with_submission_id,
 )
 from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, KeyedStream
+from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ def poll_experiments(_: None) -> dict[RunName, Run]:
 
 cache: KeyedCache[None, RunName, Run] = KeyedCache()
 
-stream: KeyedStream[None, RunName, Run] = KeyedStream(
+refresher: Refresher[None, RunName, Run] = Refresher(
     name="experiments_stream",
     cache=cache,
     poll_fn=poll_experiments,

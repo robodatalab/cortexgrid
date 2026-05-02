@@ -6,7 +6,7 @@ type DiffEvent<T> =
   | { type: 'removed'; id: string }
 
 /**
- * Subscribe to a backend KeyedStream WebSocket. Returns a map of
+ * Subscribe to a backend Refresher WebSocket. Returns a map of
  * items keyed by id (extracted via `getId`), updated by
  * `added`/`updated`/`removed` events. Pass `null` as `path` to disable.
  * Auto-reconnects every 3s on close.
