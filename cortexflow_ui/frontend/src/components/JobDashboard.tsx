@@ -145,7 +145,7 @@ function AttemptTimeline({
                                     </div>
                                     {rayUrl && (
                                         <a
-                                            className="job-dashboard__open-button"
+                                            className="btn job-dashboard__attempt-url"
                                             href={rayUrl}
                                             target="_blank"
                                             rel="noopener noreferrer"

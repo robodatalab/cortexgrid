@@ -62,14 +62,14 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
         <div className="experiment-notes__actions">
           <button
             type="button"
-            className="experiment-notes__button"
+            className="btn"
             onClick={save}
           >
             Save
           </button>
           <button
             type="button"
-            className="experiment-notes__button"
+            className="btn"
             onClick={() => setEditing(false)}
           >
             Cancel
@@ -92,14 +92,14 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
         <div className="experiment-notes__actions">
           <button
             type="button"
-            className="experiment-notes__button"
+            className="btn"
             onClick={startEdit}
           >
             Edit
           </button>
           <button
             type="button"
-            className="experiment-notes__button"
+            className="btn"
             onClick={() => onDelete(note.id)}
           >
             Delete
@@ -175,7 +175,7 @@ export function ExperimentDashboard({ experimentName }: Props) {
           />
           <button
             type="button"
-            className="experiment-notes__button"
+            className="btn"
             onClick={add}
             disabled={!draft.trim()}
           >

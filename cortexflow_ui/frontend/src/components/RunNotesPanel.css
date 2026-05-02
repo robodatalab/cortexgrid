@@ -8,7 +8,7 @@
 }
 
 .run-notes__title {
-  font-size: 14px;
+  font-size: var(--font-lg);
   font-weight: 500;
 }
 
@@ -21,7 +21,7 @@
 }
 
 .run-notes__empty {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: #999;
 }
 
@@ -31,7 +31,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 .run-notes__body {
@@ -40,33 +40,13 @@
 }
 
 .run-notes__meta {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: #999;
 }
 
 .run-notes__actions {
   display: flex;
   gap: 6px;
-}
-
-.run-notes__button {
-  border: 1px solid #000;
-  background: #fff;
-  color: #000;
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.run-notes__button:hover:not(:disabled) {
-  background: #000;
-  color: #fff;
-}
-
-.run-notes__button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .run-notes__compose {
@@ -79,7 +59,7 @@
   width: 100%;
   min-height: 60px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-sm);
   border: 1px solid #ddd;
   padding: 6px;
   box-sizing: border-box;

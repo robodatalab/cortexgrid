@@ -70,7 +70,7 @@ function SecretRow({ row, onChange, onSave, onDelete }: SecretRowProps) {
       />
       <button
         type="button"
-        className="secret-row__save"
+        className="btn btn--icon"
         onClick={onSave}
         disabled={!canSave}
         aria-label="Save"
@@ -79,7 +79,7 @@ function SecretRow({ row, onChange, onSave, onDelete }: SecretRowProps) {
       </button>
       <button
         type="button"
-        className="secret-row__delete"
+        className="btn btn--icon"
         onClick={onDelete}
         aria-label="Delete"
       >
@@ -106,12 +106,12 @@ function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps) {
       <div className="secrets-modal" onClick={(e) => e.stopPropagation()}>
         <p className="secrets-modal__message">{message}</p>
         <div className="secrets-modal__actions">
-          <button type="button" className="secrets-modal__btn" onClick={onCancel}>
+          <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>
           <button
             type="button"
-            className="secrets-modal__btn secrets-modal__btn--danger"
+            className="btn btn--danger"
             onClick={onConfirm}
           >
             Delete
@@ -210,7 +210,7 @@ export function SecretsDashboard() {
     <div className="secrets-dashboard">
       <header className="secrets-dashboard__header">
         <h1>Secrets</h1>
-        <button type="button" className="secrets-dashboard__add" onClick={addRow}>
+        <button type="button" className="btn secrets-dashboard__add" onClick={addRow}>
           + New secret
         </button>
       </header>
