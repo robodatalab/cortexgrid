@@ -51,8 +51,8 @@ a {
   background: #fff;
   color: #000;
   font-family: inherit;
-  font-size: var(--font-xs);
-  padding: 4px 10px;
+  font-size: var(--font-sm);
+  padding: 6px 14px;
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
