@@ -6,13 +6,13 @@
 }
 
 .experiment-dashboard__title {
-  font-size: 18px;
+  font-size: var(--font-lg);
   font-weight: 500;
   margin-bottom: 16px;
 }
 
 .experiment-dashboard__table {
-  font-size: 13px;
+  font-size: var(--font-sm);
   border-collapse: collapse;
 }
 
@@ -28,7 +28,7 @@
 
 .experiment-dashboard__status {
   padding: 24px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: #666;
 }
 
@@ -45,7 +45,7 @@
 }
 
 .experiment-notes__empty {
-  font-size: 12px;
+  font-size: var(--font-xs);
   color: #999;
 }
 
@@ -55,7 +55,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--font-sm);
 }
 
 .experiment-notes__item--run {
@@ -67,7 +67,7 @@
 }
 
 .experiment-notes__label {
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -80,33 +80,13 @@
 }
 
 .experiment-notes__meta {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: #999;
 }
 
 .experiment-notes__actions {
   display: flex;
   gap: 6px;
-}
-
-.experiment-notes__button {
-  border: 1px solid #000;
-  background: #fff;
-  color: #000;
-  font-size: 11px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.experiment-notes__button:hover:not(:disabled) {
-  background: #000;
-  color: #fff;
-}
-
-.experiment-notes__button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .experiment-notes__compose {
@@ -119,7 +99,7 @@
   width: 100%;
   min-height: 60px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-sm);
   border: 1px solid #ddd;
   padding: 6px;
   box-sizing: border-box;

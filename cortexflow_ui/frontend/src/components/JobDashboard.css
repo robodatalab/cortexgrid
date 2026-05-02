@@ -35,27 +35,8 @@
 }
 
 .job-dashboard__title {
-  font-size: 18px;
+  font-size: var(--font-lg);
   font-weight: 500;
-}
-
-.job-dashboard__open-button {
-  display: inline-block;
-  padding: 6px 16px;
-  border: 2px solid #000;
-  background: #fff;
-  color: #000;
-  text-decoration: none;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  margin-left: auto;
-  align-self: flex-start;
-}
-
-.job-dashboard__open-button:hover {
-  background: #000;
-  color: #fff;
 }
 
 .job-dashboard__section {
@@ -63,13 +44,13 @@
 }
 
 .job-dashboard__section-title {
-  font-size: 14px;
+  font-size: var(--font-md);
   font-weight: 500;
   margin-bottom: 8px;
 }
 
 .job-dashboard__table {
-  font-size: 13px;
+  font-size: var(--font-sm);
   border-collapse: collapse;
 }
 
@@ -85,13 +66,13 @@
 
 .job-dashboard__status {
   padding: 24px;
-  font-size: 13px;
+  font-size: var(--font-sm);
   color: #666;
 }
 
 .job-dashboard__error {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--font-xs);
   background: #f0f0f0;
   padding: 12px;
   border-left: 3px solid #cc0000;
@@ -101,7 +82,7 @@
 
 .job-dashboard__logs {
   font-family: monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   background: #1e1e1e;
   color: #d4d4d4;
   padding: 12px;
@@ -112,7 +93,7 @@
 }
 
 .job-dashboard__meta {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-family: monospace;
   margin-bottom: 16px;
   color: #444;
@@ -134,7 +115,7 @@
   padding: 6px 10px;
   border: 1px solid #000;
   min-width: 120px;
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .job-dashboard__event:not(:last-child)::after {
@@ -143,7 +124,7 @@
   right: -16px;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 14px;
+  font-size: var(--font-md);
   color: #000;
 }
 
@@ -151,6 +132,11 @@
   display: flex;
   gap: 20px;
   flex-wrap: wrap;
+}
+
+.job-dashboard__attempt-url {
+  margin-left: auto;
+  align-self: flex-start;
 }
 
 .job-dashboard__event-state {
@@ -166,7 +152,7 @@
 
 .job-dashboard__event-error {
   font-family: monospace;
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: #cc0000;
   margin-top: 4px;
   white-space: pre-wrap;
@@ -206,7 +192,7 @@
 
 .job-dashboard__readiness-error {
   font-family: monospace;
-  font-size: 12px;
+  font-size: var(--font-xs);
   background: #f0f0f0;
   padding: 12px;
   border-left: 3px solid #cc0000;
@@ -219,7 +205,7 @@
   display: inline-block;
   padding: 4px 12px;
   border: 1px solid #000;
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 500;
   text-transform: lowercase;
 }

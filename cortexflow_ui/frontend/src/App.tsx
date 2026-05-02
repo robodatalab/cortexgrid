@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import './App.css'
 import { LayoutPane } from './components/LayoutPane'
 import { ExperimentTree } from './components/ExperimentTree'
-import type { Selection } from './components/ExperimentTree'
+import type { ExperimentRun, Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
 import type { Job } from './components/RunDashboard'
@@ -24,10 +24,75 @@ type LoadState =
   | { status: 'ready'; dashboards: Dashboard[] }
   | { status: 'error'; message: string }
 
+type StreamEvent =
+  | { type: 'added'; item: ExperimentRun }
+  | { type: 'updated'; item: ExperimentRun }
+  | { type: 'removed'; id: string }
+
 function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
   const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
+  const [runsById, setRunsById] = useState<Record<string, ExperimentRun>>({})
+  const wsRef = useRef<WebSocket | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let socket: WebSocket | null = null
+
+    function connect() {
+      if (cancelled) return
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = `${protocol}//${window.location.host}/api/experiments/stream`
+      socket = new WebSocket(url)
+      wsRef.current = socket
+      socket.onmessage = (e) => {
+        const event = JSON.parse(e.data) as StreamEvent
+        if (event.type === 'added' || event.type === 'updated') {
+          setRunsById((prev) => ({ ...prev, [event.item.run_name]: event.item }))
+        } else if (event.type === 'removed') {
+          setRunsById((prev) => {
+            const next = { ...prev }
+            delete next[event.id]
+            return next
+          })
+        }
+      }
+      socket.onclose = () => {
+        wsRef.current = null
+        if (!cancelled) setTimeout(connect, 3000)
+      }
+    }
+
+    connect()
+    return () => {
+      cancelled = true
+      socket?.close()
+      wsRef.current = null
+    }
+  }, [])
+
+  function handleRefresh() {
+    setRunsById({})
+    wsRef.current?.send(JSON.stringify({ type: 'force_refresh' }))
+  }
+
+  const experimentNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const r of Object.values(runsById)) names.add(r.experiment_name)
+    return Array.from(names).sort()
+  }, [runsById])
+
+  const runsByExperiment = useMemo(() => {
+    const map: Record<string, ExperimentRun[]> = {}
+    for (const r of Object.values(runsById)) {
+      ;(map[r.experiment_name] ??= []).push(r)
+    }
+    for (const list of Object.values(map)) {
+      list.sort((a, b) => a.run_name.localeCompare(b.run_name))
+    }
+    return map
+  }, [runsById])
 
   const activeRunId =
     selection?.kind === 'run' || selection?.kind === 'job'
@@ -109,7 +174,13 @@ function App() {
           <Allotment>
             <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
               <LayoutPane>
-                <ExperimentTree onSelect={setSelection} />
+                <ExperimentTree
+                  experimentNames={experimentNames}
+                  runsByExperiment={runsByExperiment}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onRefresh={handleRefresh}
+                />
               </LayoutPane>
             </Allotment.Pane>
             <Allotment.Pane>

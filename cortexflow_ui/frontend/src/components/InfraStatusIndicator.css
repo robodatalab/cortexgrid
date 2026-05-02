@@ -21,7 +21,7 @@
   border:1px solid #000;
   background: #fff;
   color: #000;
-  font-size: 16px;
+  font-size: var(--font-md);
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;

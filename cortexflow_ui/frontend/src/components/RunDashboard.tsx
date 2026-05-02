@@ -65,7 +65,7 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
               {hasStoppableJobs && (
                 <button
                   type="button"
-                  className="run-dashboard__open-button"
+                  className="btn"
                   onClick={handleStop}
                   disabled={stopping}
                 >
@@ -74,7 +74,7 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
               )}
               {url && (
                 <a
-                  className="run-dashboard__open-button"
+                  className="btn"
                   href={url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -107,9 +107,9 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={m.history}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="step" />
-                      <YAxis />
-                      <Tooltip />
+                      <XAxis dataKey="step" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip wrapperStyle={{ fontSize: 11 }} />
                       <Line type="monotone" dataKey="value" stroke="#000" dot={false} />
                       <Brush dataKey="step" height={20} stroke="#999" />
                     </LineChart>

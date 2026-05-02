@@ -41,12 +41,12 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
           onChange={(e) => setDraft(e.target.value)}
         />
         <div className="run-notes__actions">
-          <button type="button" className="run-notes__button" onClick={save}>
+          <button type="button" className="btn" onClick={save}>
             Save
           </button>
           <button
             type="button"
-            className="run-notes__button"
+            className="btn"
             onClick={() => setEditing(false)}
           >
             Cancel
@@ -63,12 +63,12 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
         {new Date(note.updated_at).toLocaleString()}
       </div>
       <div className="run-notes__actions">
-        <button type="button" className="run-notes__button" onClick={startEdit}>
+        <button type="button" className="btn" onClick={startEdit}>
           Edit
         </button>
         <button
           type="button"
-          className="run-notes__button"
+          className="btn"
           onClick={() => onDelete(note.id)}
         >
           Delete
@@ -136,7 +136,7 @@ export function RunNotesPanel({ runName }: Props) {
         />
         <button
           type="button"
-          className="run-notes__button"
+          className="btn"
           onClick={add}
           disabled={!draft.trim()}
         >
