@@ -34,7 +34,7 @@ class MockWebSocket {
 const sample = [
   {
     type: 'added',
-    run: {
+    item: {
       experiment_name: 'exp-a',
       run_id: 'r1',
       run_name: 'run-1',
@@ -43,11 +43,11 @@ const sample = [
   },
   {
     type: 'added',
-    run: { experiment_name: 'exp-a', run_id: 'r2', run_name: 'run-2', jobs: [] },
+    item: { experiment_name: 'exp-a', run_id: 'r2', run_name: 'run-2', jobs: [] },
   },
   {
     type: 'added',
-    run: {
+    item: {
       experiment_name: 'exp-b',
       run_id: 'r3',
       run_name: 'run-3',
@@ -210,7 +210,7 @@ describe('ExperimentTree', () => {
     await waitFor(() => screen.getByText('exp-b'))
 
     act(() => {
-      lastWs().emit({ type: 'removed', run_id: 'r3' })
+      lastWs().emit({ type: 'removed', id: 'run-3' })
     })
 
     await waitFor(() => expect(screen.queryByText('exp-b')).not.toBeInTheDocument())

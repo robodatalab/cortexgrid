@@ -79,11 +79,14 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
 }
 
 type Props = {
-  runId: string
+  runName: string
 }
 
-export function RunNotesPanel({ runId }: Props) {
-  const notes = useStreamList<Note>(`/api/runs/${runId}/notes/stream`)
+export function RunNotesPanel({ runName }: Props) {
+  const notes = useStreamList<Note>(
+    `/api/runs/${runName}/notes/stream`,
+    (n) => n.id,
+  )
   const [draft, setDraft] = useState('')
 
   const sorted = Object.values(notes).sort((a, b) =>
@@ -93,7 +96,7 @@ export function RunNotesPanel({ runId }: Props) {
   async function add() {
     const body = draft.trim()
     if (!body) return
-    await fetch(`/api/runs/${runId}/notes`, {
+    await fetch(`/api/runs/${runName}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),

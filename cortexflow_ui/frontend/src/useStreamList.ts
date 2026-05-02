@@ -6,12 +6,14 @@ type DiffEvent<T> =
   | { type: 'removed'; id: string }
 
 /**
- * Subscribe to a backend KeyedDiffStream WebSocket. Returns a map of
- * items keyed by id, updated by `added`/`updated`/`removed` events.
- * Pass `null` as `path` to disable. Auto-reconnects every 3s on close.
+ * Subscribe to a backend KeyedStream WebSocket. Returns a map of
+ * items keyed by id (extracted via `getId`), updated by
+ * `added`/`updated`/`removed` events. Pass `null` as `path` to disable.
+ * Auto-reconnects every 3s on close.
  */
-export function useStreamList<T extends { id: string }>(
+export function useStreamList<T>(
   path: string | null,
+  getId: (item: T) => string,
 ): Record<string, T> {
   const [items, setItems] = useState<Record<string, T>>({})
 
@@ -29,7 +31,8 @@ export function useStreamList<T extends { id: string }>(
       socket.onmessage = (e) => {
         const event = JSON.parse(e.data) as DiffEvent<T>
         if (event.type === 'added' || event.type === 'updated') {
-          setItems((prev) => ({ ...prev, [event.item.id]: event.item }))
+          const id = getId(event.item)
+          setItems((prev) => ({ ...prev, [id]: event.item }))
         } else if (event.type === 'removed') {
           setItems((prev) => {
             const next = { ...prev }

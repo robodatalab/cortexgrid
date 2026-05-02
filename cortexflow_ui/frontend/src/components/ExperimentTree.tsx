@@ -26,10 +26,9 @@ type Experiment = {
 }
 
 type StreamEvent =
-  | { type: 'added'; run: ExperimentRun }
-  | { type: 'updated'; run: ExperimentRun }
-  | { type: 'removed'; run_id: string }
-  | { type: 'cleared' }
+  | { type: 'added'; item: ExperimentRun }
+  | { type: 'updated'; item: ExperimentRun }
+  | { type: 'removed'; id: string }
 
 function groupByExperiment(items: ExperimentRun[]): Experiment[] {
   const map = new Map<string, Run[]>()
@@ -73,14 +72,12 @@ export function ExperimentTree({ onSelect }: ExperimentTreeProps) {
       wsRef.current = socket
       socket.onmessage = (e) => {
         const event = JSON.parse(e.data) as StreamEvent
-        if (event.type === 'cleared') {
-          setRunsById({})
-        } else if (event.type === 'added' || event.type === 'updated') {
-          setRunsById((prev) => ({ ...prev, [event.run.run_id]: event.run }))
+        if (event.type === 'added' || event.type === 'updated') {
+          setRunsById((prev) => ({ ...prev, [event.item.run_name]: event.item }))
         } else if (event.type === 'removed') {
           setRunsById((prev) => {
             const next = { ...prev }
-            delete next[event.run_id]
+            delete next[event.id]
             return next
           })
         }

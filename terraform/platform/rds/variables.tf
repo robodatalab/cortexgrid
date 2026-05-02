@@ -9,7 +9,17 @@ variable "private_subnet_ids" {
 }
 
 variable "head_security_group_id" {
-  description = "Security group ID of the k3s head — Postgres ingress is restricted to it."
+  description = "Security group ID of the k3s head -- Postgres ingress is allowed from it."
+  type        = string
+}
+
+variable "router_security_group_id" {
+  description = "Security group ID of the Tailscale subnet router -- Postgres ingress is allowed from it so Tailscale clients (laptops, CI) reach RDS via SNAT."
+  type        = string
+}
+
+variable "router_instance_id" {
+  description = "Instance ID of the Tailscale subnet router -- referenced in notes provisioner triggers so terraform doesn't run psql until the router exists."
   type        = string
 }
 

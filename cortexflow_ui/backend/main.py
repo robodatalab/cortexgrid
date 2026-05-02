@@ -1,9 +1,7 @@
 import logging
 from pathlib import Path
 
-from typing import Any
-
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -19,23 +17,25 @@ from cortexflow.secrets import (
     set_secret,
 )
 
-from cortexflow_ui.backend import (
+from cortexflow_ui.backend.models import (
+    notes,
+)
+from cortexflow_ui.backend.models.notes import ExperimentNote, RunNote
+from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
+from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
-    job_stream,
-    notes,
+    job_details_stream,
     run_dashboard_stream,
     run_jobs_stream,
     run_notes_stream,
 )
-from cortexflow_ui.backend.infra_status import InfraStatus, get_infra_status
 
 log = logging.getLogger("cortexflow_ui_backend")
 
 app = FastAPI(
     title="CortexFlow UI",
     version="0.1.0",
-    lifespan=experiments_stream.lifespan,
 )
 
 app.add_middleware(
@@ -102,19 +102,7 @@ def secret_delete(id: str) -> dict[str, str]:
 
 @app.websocket("/api/experiments/stream")
 async def experiments_stream_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
-    experiments_stream.ws_clients.add(ws)
-    try:
-        for run in list(experiments_stream.runs_cache.values()):
-            await ws.send_json({"type": "added", "run": run})
-        while True:
-            msg = await ws.receive_json()
-            if msg.get("type") == "force_refresh":
-                experiments_stream.force_refresh.set()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        experiments_stream.ws_clients.discard(ws)
+    await experiments_stream.stream.serve(ws, experiments_stream.TOPIC)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")
@@ -122,14 +110,14 @@ async def run_jobs_stream_endpoint(ws: WebSocket, run_id: str) -> None:
     await run_jobs_stream.stream.serve(ws, run_id)
 
 
-@app.websocket("/api/runs/{run_id}/stream")
-async def run_dashboard_stream_endpoint(ws: WebSocket, run_id: str) -> None:
-    await run_dashboard_stream.stream.serve(ws, run_id)
+@app.websocket("/api/runs/{run_name}/stream")
+async def run_dashboard_stream_endpoint(ws: WebSocket, run_name: str) -> None:
+    await run_dashboard_stream.stream.serve(ws, run_name)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")
-async def job_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
-    await job_stream.stream.serve(ws, (run_id, job_id))
+async def job_details_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
+    await job_details_stream.stream.serve(ws, (run_id, job_id))
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")
@@ -144,25 +132,26 @@ def stop_run(run_id: str) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.websocket("/api/runs/{run_id}/notes/stream")
-async def run_notes_stream_endpoint(ws: WebSocket, run_id: str) -> None:
-    await run_notes_stream.stream.serve(ws, run_id)
+@app.websocket("/api/runs/{run_name}/notes/stream")
+async def run_notes_stream_endpoint(ws: WebSocket, run_name: str) -> None:
+    await run_notes_stream.stream.serve(ws, run_name)
 
 
 @app.websocket("/api/experiments/{experiment_name}/notes/stream")
-async def experiment_notes_stream_endpoint(
-    ws: WebSocket, experiment_name: str
-) -> None:
+async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
     await experiment_notes_stream.stream.serve(ws, experiment_name)
 
 
-@app.post("/api/runs/{run_id}/notes")
-def add_run_note(run_id: str, body: NoteBody) -> dict[str, Any]:
-    return notes.add_run_note(run_id, body.body)
+@app.post("/api/runs/{run_name}/notes")
+def add_run_note(run_name: str, body: NoteBody) -> RunNote:
+    note = notes.add_run_note(run_name, body.body)
+    if note is None:
+        raise HTTPException(status_code=500, detail="failed to add run note")
+    return note
 
 
 @app.put("/api/notes/run/{note_id}")
-def update_run_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+def update_run_note(note_id: str, body: NoteBody) -> RunNote:
     note = notes.update_run_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
@@ -177,12 +166,15 @@ def delete_run_note(note_id: str) -> dict[str, str]:
 
 
 @app.post("/api/experiments/{experiment_name}/notes")
-def add_experiment_note(experiment_name: str, body: NoteBody) -> dict[str, Any]:
-    return notes.add_experiment_note(experiment_name, body.body)
+def add_experiment_note(experiment_name: str, body: NoteBody) -> ExperimentNote:
+    note = notes.add_experiment_note(experiment_name, body.body)
+    if note is None:
+        raise HTTPException(status_code=500, detail="failed to add experiment note")
+    return note
 
 
 @app.put("/api/notes/experiment/{note_id}")
-def update_experiment_note(note_id: str, body: NoteBody) -> dict[str, Any]:
+def update_experiment_note(note_id: str, body: NoteBody) -> ExperimentNote:
     note = notes.update_experiment_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { TitledFrame } from "./TitledFrame";
-import { useStreamState } from "../useStreamState";
+import { useStreamList } from "../useStreamList";
 import "./JobDashboard.css";
 
 type LifecycleEvent = {
@@ -206,9 +206,11 @@ function ReadinessPanel({ readiness }: { readiness: Readiness }) {
 }
 
 export function JobDashboard({ runId, jobId }: Props) {
-    const detail = useStreamState<JobDetail>(
+    const detailMap = useStreamList<JobDetail>(
         `/api/runs/${runId}/jobs/${jobId}/stream`,
+        (d) => d.job_id,
     );
+    const detail = detailMap[jobId] ?? null;
     const [logsByRayJobId, setLogsByRayJobId] = useState<
         Record<string, string>
     >({});

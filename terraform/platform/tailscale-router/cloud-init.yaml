@@ -1,0 +1,46 @@
+#cloud-config
+
+# Dedicated Tailscale subnet router. Sits in a private subnet and advertises
+# the entire VPC CIDR into the tailnet so any Tailscale-connected device can
+# reach EC2/RDS/etc by their VPC private IPs. The instance has no role beyond
+# routing -- it does not run any workloads.
+#
+# After first boot the advertised route must be approved once in the Tailscale
+# admin console (Machines -> robolab-tailscale-router -> Edit route settings).
+
+users:
+  - default
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+package_update: true
+packages:
+  - curl
+  - ca-certificates
+
+write_files:
+  - path: /etc/sysctl.d/99-tailscale-forward.conf
+    permissions: '0644'
+    content: |
+      net.ipv4.ip_forward=1
+      net.ipv6.conf.all.forwarding=1
+  - path: /usr/local/bin/robolab-tailscale-router-init.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      sysctl -p /etc/sysctl.d/99-tailscale-forward.conf
+
+      curl -fsSL https://tailscale.com/install.sh | sh
+      tailscale up \
+        --auth-key='${tailscale_auth_key}' \
+        --hostname=robolab-tailscale-router \
+        --advertise-routes='${vpc_cidr}' \
+        --ssh
+
+runcmd:
+  - /usr/local/bin/robolab-tailscale-router-init.sh
