@@ -1,6 +1,8 @@
 .experiment-tree {
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .experiment-tree__title {
@@ -11,6 +13,13 @@
   font-size: var(--font-lg);
   font-weight: 500;
   color: #000;
+  flex: 0 0 auto;
+}
+
+.experiment-tree__list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .experiment-tree__refresh {
@@ -34,29 +43,6 @@
   color: #666;
 }
 
-.experiment-tree__back {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  font-family: inherit;
-  font-size: var(--font-md);
-  font-weight: 500;
-  color: #444;
-  cursor: pointer;
-  background: none;
-  border: none;
-  width: 100%;
-  text-align: left;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.experiment-tree__back:hover {
-  background: #f0f0f0;
-  color: #000;
-}
-
 .experiment-tree__row {
   display: flex;
   align-items: center;
@@ -76,8 +62,27 @@
   background: #f0f0f0;
 }
 
-.experiment-tree__row--nested {
-  padding-left: 32px;
+.experiment-tree__row--ancestor {
+  border: 1px dashed #000;
+}
+
+.experiment-tree__row--leaf {
+  background: #dde7f1;
+}
+
+.experiment-tree__row--leaf:hover {
+  background: #cfdbe8;
+}
+
+.experiment-tree__drawer {
+  margin: 4px 8px 8px 24px;
+  padding: 6px 0;
+  border-left: 2px solid #d0d0d0;
+  background: #fafafa;
+}
+
+.experiment-tree__drawer .experiment-tree__row {
+  padding-left: 12px;
 }
 
 .experiment-tree__job-status {
@@ -95,8 +100,4 @@
   color: #fff;
   background: #cc0000;
   font-weight: 500;
-}
-
-.experiment-tree--selected {
-  border: 1px dashed #000;
 }
