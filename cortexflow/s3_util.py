@@ -116,6 +116,17 @@ def upload_dir(local_dir: str, dest_path: str = "") -> list[str]:
     return uploaded
 
 
+def delete_prefix(prefix: str) -> None:
+    """Delete every object under `prefix` in the canonical bucket."""
+    bucket = get_s3_bucket()
+    client = get_s3_client()
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        if keys:
+            client.delete_objects(Bucket=bucket, Delete={"Objects": keys})
+
+
 def download(src_path: str, local_path: str | None = None) -> str:
     """Download a file from the canonical S3/MinIO bucket.
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Trash2 } from 'lucide-react'
+import { ConfirmModal } from './ConfirmModal'
 import './SecretsDashboard.css'
 
 type Secret = { id: string; value: string }
@@ -85,39 +86,6 @@ function SecretRow({ row, onChange, onSave, onDelete }: SecretRowProps) {
       >
         <Trash2 size={16} />
       </button>
-    </div>
-  )
-}
-
-type ConfirmModalProps = {
-  message: string
-  onConfirm: () => void
-  onCancel: () => void
-}
-
-function ConfirmModal({ message, onConfirm, onCancel }: ConfirmModalProps) {
-  return (
-    <div
-      className="secrets-modal__backdrop"
-      role="dialog"
-      aria-modal="true"
-      onClick={onCancel}
-    >
-      <div className="secrets-modal" onClick={(e) => e.stopPropagation()}>
-        <p className="secrets-modal__message">{message}</p>
-        <div className="secrets-modal__actions">
-          <button type="button" className="btn" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={onConfirm}
-          >
-            Delete
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

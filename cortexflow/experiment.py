@@ -4,7 +4,9 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from cortexflow import s3_util
 from cortexflow.infra import get_mlflow_tracking_uri
+from cortexflow.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 
@@ -118,6 +120,48 @@ def _try_create_experiment_and_run(
     run = client.create_run(experiment_id=experiment_id, run_name=run_name)
 
     return (experiment, run.info.run_id)
+
+
+def delete_run(run_id: str) -> None:
+    """Soft-delete a run in MLflow, cancel its Ray attempts, and wipe its
+    S3 job packages so it cannot be relaunched or re-read."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    job_ids = [
+        Path(f.path).name
+        for f in client.list_artifacts(run_id, path="job")
+        if f.is_dir
+    ]
+    all_submissions = list_ray_jobs_with_submission_id()
+    for job_id in job_ids:
+        prefix = f"{run_id}-{job_id}-"
+        for sid in all_submissions:
+            if sid.startswith(prefix):
+                stop_ray_job(sid)
+        s3_util.delete_prefix(f"job/{job_id}/")
+    client.delete_run(run_id)
+
+
+def list_run_ids_in_experiment(name: str) -> list[str]:
+    """Return the run IDs of every active run in the named experiment."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    exp = client.get_experiment_by_name(name)
+    if exp is None:
+        return []
+    return [
+        r.info.run_id
+        for r in client.search_runs(experiment_ids=[exp.experiment_id])
+    ]
+
+
+def delete_experiment(name: str) -> None:
+    """Soft-delete every run in the experiment, then the experiment itself."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    exp = client.get_experiment_by_name(name)
+    if exp is None:
+        return
+    for run in client.search_runs(experiment_ids=[exp.experiment_id]):
+        delete_run(run.info.run_id)
+    client.delete_experiment(exp.experiment_id)
 
 
 def list_experiments() -> list[Experiment]:

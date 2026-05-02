@@ -1,0 +1,253 @@
+"""In-memory fakes for the infrastructure cortexflow talks to.
+
+Tests using these fakes assert on observable post-state of S3, MLflow,
+Ray and Postgres rather than on which helper functions were called.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+from typing import Any
+
+
+@dataclass
+class FakeS3:
+    objects: dict[str, bytes] = field(default_factory=dict)
+    exceptions: SimpleNamespace = field(
+        default_factory=lambda: SimpleNamespace(ClientError=Exception)
+    )
+
+    def head_bucket(self, Bucket: str) -> dict[str, Any]:
+        return {}
+
+    def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        if Key not in self.objects:
+            raise Exception(f"NoSuchKey: {Key}")
+        return {"ContentLength": len(self.objects[Key])}
+
+    def list_objects_v2(
+        self,
+        Bucket: str,
+        Prefix: str = "",
+        ContinuationToken: str | None = None,
+    ) -> dict[str, Any]:
+        keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        return {"Contents": [{"Key": k} for k in keys]} if keys else {}
+
+    def get_paginator(self, op: str) -> "_FakeS3Paginator":
+        return _FakeS3Paginator(self, op)
+
+    def delete_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        self.objects.pop(Key, None)
+        return {}
+
+    def delete_objects(
+        self, Bucket: str, Delete: dict[str, Any]
+    ) -> dict[str, Any]:
+        for entry in Delete.get("Objects", []):
+            self.objects.pop(entry["Key"], None)
+        return {}
+
+
+class _FakeS3Paginator:
+    def __init__(self, s3: FakeS3, op: str) -> None:
+        self.s3 = s3
+        self.op = op
+
+    def paginate(self, Bucket: str, Prefix: str = "") -> list[dict[str, Any]]:
+        page = self.s3.list_objects_v2(Bucket=Bucket, Prefix=Prefix)
+        return [page] if page else [{}]
+
+
+@dataclass
+class FakeMlflowExperiment:
+    experiment_id: str
+    name: str
+    lifecycle_stage: str = "active"
+
+
+@dataclass
+class FakeMlflowRun:
+    run_id: str
+    run_name: str
+    experiment_id: str
+    lifecycle_stage: str = "active"
+
+    @property
+    def info(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            run_id=self.run_id,
+            run_name=self.run_name,
+            experiment_id=self.experiment_id,
+            lifecycle_stage=self.lifecycle_stage,
+        )
+
+
+@dataclass
+class FakeArtifact:
+    path: str
+    is_dir: bool
+
+
+@dataclass
+class FakeMlflowClient:
+    """Tracks soft-delete state via lifecycle_stage like real mlflow does."""
+
+    experiments: list[FakeMlflowExperiment] = field(default_factory=list)
+    runs: list[FakeMlflowRun] = field(default_factory=list)
+    artifacts: dict[str, list[FakeArtifact]] = field(default_factory=dict)
+
+    def __init__(self, *, tracking_uri: str = "", **_: Any) -> None:
+        self.experiments = []
+        self.runs = []
+        self.artifacts = {}
+
+    def seed(
+        self,
+        experiments: list[FakeMlflowExperiment] | None = None,
+        runs: list[FakeMlflowRun] | None = None,
+        artifacts: dict[str, list[FakeArtifact]] | None = None,
+    ) -> "FakeMlflowClient":
+        self.experiments = list(experiments or [])
+        self.runs = list(runs or [])
+        self.artifacts = dict(artifacts or {})
+        return self
+
+    def search_experiments(self, **_: Any) -> list[FakeMlflowExperiment]:
+        return [e for e in self.experiments if e.lifecycle_stage == "active"]
+
+    def search_runs(
+        self, experiment_ids: list[str], **_: Any
+    ) -> list[FakeMlflowRun]:
+        return [
+            r
+            for r in self.runs
+            if r.experiment_id in experiment_ids and r.lifecycle_stage == "active"
+        ]
+
+    def list_artifacts(self, run_id: str, path: str = "") -> list[FakeArtifact]:
+        all_for_run = self.artifacts.get(run_id, [])
+        if not path:
+            return list(all_for_run)
+        return [a for a in all_for_run if a.path.startswith(f"{path}/") or a.path == path]
+
+    def get_run(self, run_id: str) -> FakeMlflowRun:
+        for r in self.runs:
+            if r.run_id == run_id:
+                return r
+        raise KeyError(run_id)
+
+    def get_experiment_by_name(self, name: str) -> FakeMlflowExperiment | None:
+        for e in self.experiments:
+            if e.name == name and e.lifecycle_stage == "active":
+                return e
+        return None
+
+    def delete_run(self, run_id: str) -> None:
+        for r in self.runs:
+            if r.run_id == run_id:
+                r.lifecycle_stage = "deleted"
+                return
+        raise KeyError(run_id)
+
+    def delete_experiment(self, experiment_id: str) -> None:
+        for e in self.experiments:
+            if e.experiment_id == experiment_id:
+                e.lifecycle_stage = "deleted"
+                return
+        raise KeyError(experiment_id)
+
+
+@dataclass
+class FakeRayJob:
+    submission_id: str
+    status: str = "RUNNING"
+
+
+class FakeRay:
+    def __init__(self, jobs: dict[str, str] | None = None) -> None:
+        self.jobs: dict[str, FakeRayJob] = {
+            sid: FakeRayJob(sid, status) for sid, status in (jobs or {}).items()
+        }
+
+    def list_jobs(self) -> list[FakeRayJob]:
+        return list(self.jobs.values())
+
+    def stop_job(self, submission_id: str) -> None:
+        if submission_id in self.jobs:
+            self.jobs[submission_id].status = "STOPPED"
+
+    def get_job_status(self, submission_id: str) -> Any:
+        return SimpleNamespace(value=self.jobs[submission_id].status)
+
+
+@dataclass
+class _NotesRow:
+    table: str
+    columns: dict[str, Any]
+
+
+class FakeNotesDB:
+    """Minimal psycopg-shaped fake for the notes DB.
+
+    Holds two lists of rows keyed by table name. Supports the SQL
+    statements the notes module actually issues; unrecognised statements
+    raise so test failures are loud.
+    """
+
+    def __init__(
+        self,
+        run_notes: list[dict[str, Any]] | None = None,
+        experiment_notes: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.run_notes: list[dict[str, Any]] = list(run_notes or [])
+        self.experiment_notes: list[dict[str, Any]] = list(experiment_notes or [])
+
+    def __call__(self, *_: Any, **__: Any) -> "FakeNotesDB":
+        return self
+
+    def __enter__(self) -> "FakeNotesDB":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        return None
+
+    def cursor(self) -> "_FakeCursor":
+        return _FakeCursor(self)
+
+
+class _FakeCursor:
+    def __init__(self, db: FakeNotesDB) -> None:
+        self.db = db
+        self._result: list[tuple[Any, ...]] = []
+
+    def __enter__(self) -> "_FakeCursor":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
+        norm = " ".join(sql.split())
+        if norm.startswith("DELETE FROM run_notes WHERE run_id ="):
+            (run_id,) = params
+            self.db.run_notes = [
+                r for r in self.db.run_notes if r["run_id"] != run_id
+            ]
+            self._result = []
+            return
+        if norm.startswith("DELETE FROM experiment_notes WHERE experiment_name ="):
+            (name,) = params
+            self.db.experiment_notes = [
+                r for r in self.db.experiment_notes if r["experiment_name"] != name
+            ]
+            self._result = []
+            return
+        raise NotImplementedError(f"FakeNotesDB does not handle: {norm!r}")
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self._result[0] if self._result else None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return list(self._result)

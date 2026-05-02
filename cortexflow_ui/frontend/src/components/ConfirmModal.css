@@ -1,0 +1,29 @@
+.confirm-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-modal {
+  background: #fff;
+  color: #000;
+  border: 1px solid #000;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 480px;
+}
+
+.confirm-modal__message {
+  margin: 0 0 20px 0;
+  font-size: var(--font-md);
+}
+
+.confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
