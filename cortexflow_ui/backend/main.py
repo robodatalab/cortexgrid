@@ -6,7 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import get_mlflow_tracking_uri
+from cortexflow.experiment import (
+    delete_experiment,
+    delete_run,
+    get_mlflow_tracking_uri,
+    list_run_ids_in_experiment,
+)
 from cortexflow.infra import get_ray_job_server_uri
 from cortexflow.jobs import stop_experiment_run_jobs
 from cortexflow.ray_util import get_ray_logs
@@ -20,7 +25,12 @@ from cortexflow.secrets import (
 from cortexflow_ui.backend.models import (
     notes,
 )
-from cortexflow_ui.backend.models.notes import ExperimentNote, RunNote
+from cortexflow_ui.backend.models.notes import (
+    ExperimentNote,
+    RunNote,
+    delete_experiment_notes_for_experiment,
+    delete_run_notes_for_run,
+)
 from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
 from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
@@ -147,6 +157,34 @@ def ray_job_logs(ray_job_id: str) -> dict[str, str]:
 @app.post("/api/runs/{run_id}/stop")
 def stop_run(run_id: str) -> dict[str, str]:
     stop_experiment_run_jobs(run_id)
+    return {"status": "ok"}
+
+
+@app.delete("/api/runs/{run_id}")
+async def run_delete(run_id: str) -> dict[str, str]:
+    delete_run_notes_for_run(run_id)
+    delete_run(run_id)
+    cached = experiments_stream.cache.get(experiments_stream.TOPIC)
+    for run_name, run in list(cached.items()):
+        if run.run_id == run_id:
+            await experiments_stream.refresher.remove(
+                experiments_stream.TOPIC, run_name
+            )
+    return {"status": "ok"}
+
+
+@app.delete("/api/experiments/{experiment_name}")
+async def experiment_delete(experiment_name: str) -> dict[str, str]:
+    for run_id in list_run_ids_in_experiment(experiment_name):
+        delete_run_notes_for_run(run_id)
+    delete_experiment_notes_for_experiment(experiment_name)
+    delete_experiment(experiment_name)
+    cached = experiments_stream.cache.get(experiments_stream.TOPIC)
+    for run_name, run in list(cached.items()):
+        if run.experiment_name == experiment_name:
+            await experiments_stream.refresher.remove(
+                experiments_stream.TOPIC, run_name
+            )
     return {"status": "ok"}
 
 

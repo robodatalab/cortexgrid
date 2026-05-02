@@ -110,6 +110,12 @@ def delete_run_note(note_id: str) -> str | None:
         return resolve_run_name(str(row[0]))
 
 
+def delete_run_notes_for_run(run_id: str) -> None:
+    """Purge every note attached to this run."""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM run_notes WHERE run_id = %s", (run_id,))
+
+
 @dataclass
 class ExperimentNote:
     id: str
@@ -193,3 +199,12 @@ def delete_experiment_note(note_id: str) -> str | None:
         if row is None:
             return None
         return str(row[0])
+
+
+def delete_experiment_notes_for_experiment(experiment_name: str) -> None:
+    """Purge every meta-note attached to this experiment."""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM experiment_notes WHERE experiment_name = %s",
+            (experiment_name,),
+        )
