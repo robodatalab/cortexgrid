@@ -85,6 +85,26 @@
   padding-left: 12px;
 }
 
+.experiment-tree__delete {
+  display: none;
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: #444;
+  align-items: center;
+  justify-content: center;
+}
+
+.experiment-tree__row:hover .experiment-tree__delete {
+  display: inline-flex;
+}
+
+.experiment-tree__delete:hover {
+  color: #000;
+}
+
 .experiment-tree__job-status {
   font-size: var(--font-xs);
   padding: 1px 6px;

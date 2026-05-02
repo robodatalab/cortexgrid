@@ -3,6 +3,7 @@ import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import './App.css'
 import { LayoutPane } from './components/LayoutPane'
+import { ConfirmModal } from './components/ConfirmModal'
 import { ExperimentTree } from './components/ExperimentTree'
 import type { ExperimentRun, Selection } from './components/ExperimentTree'
 import { ExperimentDashboard } from './components/ExperimentDashboard'
@@ -29,11 +30,16 @@ type StreamEvent =
   | { type: 'updated'; item: ExperimentRun }
   | { type: 'removed'; id: string }
 
+type PendingDelete =
+  | { kind: 'experiment'; experiment_name: string }
+  | { kind: 'run'; run_id: string; run_name: string }
+
 function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
   const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
   const [runsById, setRunsById] = useState<Record<string, ExperimentRun>>({})
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -75,6 +81,36 @@ function App() {
   function handleRefresh() {
     setRunsById({})
     wsRef.current?.send(JSON.stringify({ type: 'force_refresh' }))
+  }
+
+  async function handleConfirmDelete() {
+    if (pendingDelete === null) return
+    const target = pendingDelete
+    setPendingDelete(null)
+    const url =
+      target.kind === 'experiment'
+        ? `/api/experiments/${encodeURIComponent(target.experiment_name)}`
+        : `/api/runs/${encodeURIComponent(target.run_id)}`
+    const res = await fetch(url, { method: 'DELETE' })
+    if (!res.ok) {
+      alert(`Delete failed: HTTP ${res.status}\n${await res.text()}`)
+      return
+    }
+    if (target.kind === 'experiment' && selection?.experiment_name === target.experiment_name) {
+      setSelection(null)
+    } else if (
+      target.kind === 'run' &&
+      (selection?.kind === 'run' || selection?.kind === 'job') &&
+      selection.run_id === target.run_id
+    ) {
+      setSelection(null)
+    }
+  }
+
+  function pendingDeleteMessage(target: PendingDelete): string {
+    return target.kind === 'experiment'
+      ? `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
+      : `Delete run "${target.run_name}"? This cannot be undone.`
   }
 
   const experimentNames = useMemo(() => {
@@ -180,6 +216,12 @@ function App() {
                   selection={selection}
                   onSelect={setSelection}
                   onRefresh={handleRefresh}
+                  onDeleteExperiment={(experiment_name) =>
+                    setPendingDelete({ kind: 'experiment', experiment_name })
+                  }
+                  onDeleteRun={(run_id, run_name) =>
+                    setPendingDelete({ kind: 'run', run_id, run_name })
+                  }
                 />
               </LayoutPane>
             </Allotment.Pane>
@@ -204,6 +246,13 @@ function App() {
           </Allotment>
         )}
       </div>
+      {pendingDelete !== null && (
+        <ConfirmModal
+          message={pendingDeleteMessage(pendingDelete)}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </>
   )
 }

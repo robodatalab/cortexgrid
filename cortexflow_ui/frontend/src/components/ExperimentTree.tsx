@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import { FlaskConical, Play, Cog, RefreshCw } from 'lucide-react'
+import { FlaskConical, Play, Cog, RefreshCw, Trash2 } from 'lucide-react'
 import './ExperimentTree.css'
 
 export type ExperimentRun = {
@@ -20,6 +20,8 @@ type ExperimentTreeProps = {
   selection: Selection | null
   onSelect: (selection: Selection) => void
   onRefresh: () => void
+  onDeleteExperiment: (experimentName: string) => void
+  onDeleteRun: (runId: string, runName: string) => void
 }
 
 function rowClass(isAncestor: boolean, isLeaf: boolean): string {
@@ -35,6 +37,8 @@ export function ExperimentTree({
   selection,
   onSelect,
   onRefresh,
+  onDeleteExperiment,
+  onDeleteRun,
 }: ExperimentTreeProps) {
   const selectedExperimentName =
     selection && 'experiment_name' in selection ? selection.experiment_name : null
@@ -72,6 +76,17 @@ export function ExperimentTree({
                 onClick={() => onSelect({ kind: 'experiment', experiment_name: name })}
               >
                 <FlaskConical size={16} /> {name}
+                <button
+                  type="button"
+                  className="experiment-tree__delete"
+                  aria-label={`Delete experiment ${name}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDeleteExperiment(name)
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
               </div>
               {isExpSel && (
                 <div className="experiment-tree__drawer">
@@ -98,6 +113,17 @@ export function ExperimentTree({
                           }
                         >
                           <Play size={16} /> {run.run_name}
+                          <button
+                            type="button"
+                            className="experiment-tree__delete"
+                            aria-label={`Delete run ${run.run_name}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onDeleteRun(run.run_id, run.run_name)
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </div>
                         {isRunSel && (
                           <div className="experiment-tree__drawer">

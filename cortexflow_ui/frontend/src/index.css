@@ -69,13 +69,14 @@ a {
 }
 
 .btn--danger {
-  border-color: #ef4444;
-  color: #ef4444;
+  background: #fca5a5;
+  border-color: #000;
+  color: #000;
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: #ef4444;
-  color: #fff;
+  background: #f87171;
+  color: #000;
 }
 
 .btn--icon {
