@@ -41,6 +41,14 @@ resource "aws_instance" "router" {
   # require a manual `terraform taint`.
   user_data_replace_on_change = true
 
+  # Bring the new router up before destroying the old one so the advertised
+  # subnet route never gaps. Without this, replacement is destroy-then-create
+  # and any in-flight psql from the laptop blackholes for ~30s while the
+  # tailnet has no route to the VPC.
+  lifecycle {
+    create_before_destroy = true
+  }
+
   root_block_device {
     volume_size = 8
     volume_type = "gp3"

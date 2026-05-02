@@ -31,31 +31,29 @@ so cold-start and incremental applies behave the same.
 This relies on two pieces of one-time Tailscale tenant configuration:
 
 1. **Auth key** ([Tailscale admin -> Settings -> Keys](https://login.tailscale.com/admin/settings/keys)):
-   Reusable, pre-approved, tagged `tag:robolab`. Put it in `.env` as
-   `TAILSCALE_AUTH_KEY`. The same key is consumed by both the head and the
-   subnet router (cloud-init runs on each).
+   Reusable, non-Ephemeral. Put it in `.env` as `TAILSCALE_AUTH_KEY`. The same
+   key is consumed by both the head and the subnet router (cloud-init runs on
+   each).
 
 2. **ACL** ([Tailscale admin -> Access Controls](https://login.tailscale.com/admin/acls)):
-   `tag:robolab` must own itself, and routes advertised by devices with that
-   tag must be auto-approved. Add to your tailnet policy file:
+   Routes advertised by admin-owned devices must be auto-approved. Add to your
+   tailnet policy file:
 
    ```jsonc
-   "tagOwners": {
-     "tag:robolab": ["autogroup:admin"]
-   },
    "autoApprovers": {
      "routes": {
-       "10.0.0.0/16": ["tag:robolab"]
+       "10.0.0.0/16": ["autogroup:admin"]
      }
    }
    ```
 
    With this in place, the router's advertised `10.0.0.0/16` is approved the
-   moment it joins the tailnet -- no manual click needed.
+   moment it joins the tailnet -- no manual click needed and no tagging
+   required.
 
 ## Dependencies
 
 - `~/.ssh/id_rsa.pub` exists -- baked into EC2 cloud-init for SSH.
 - `psql` on the apply machine -- used by the notes-database provisioner.
-- `TF_VAR_tailscale_auth_key` set in env -- reusable, pre-approved auth key
-  tagged `tag:robolab` (see above).
+- `TF_VAR_tailscale_auth_key` set in env -- reusable, non-Ephemeral auth key
+  (see above).

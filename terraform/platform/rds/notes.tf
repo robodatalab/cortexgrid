@@ -3,9 +3,10 @@ locals {
 
   # Connection URI for the postgres maintenance database, used by the bootstrap
   # provisioners to create the `notes` database. The master user (`robolab`) is
-  # the db_owner of every database it creates.
+  # the db_owner of every database it creates. `connect_timeout=10` keeps each
+  # retry iteration short so the loop reacts quickly to a flaky tailnet path.
   rds_admin_uri = format(
-    "postgresql://%s:%s@%s:%d/postgres?sslmode=require",
+    "postgresql://%s:%s@%s:%d/postgres?sslmode=require&connect_timeout=10",
     aws_db_instance.main.username,
     random_password.master.result,
     aws_db_instance.main.address,
@@ -13,7 +14,7 @@ locals {
   )
 
   notes_uri = format(
-    "postgresql://%s:%s@%s:%d/%s?sslmode=require",
+    "postgresql://%s:%s@%s:%d/%s?sslmode=require&connect_timeout=10",
     aws_db_instance.main.username,
     random_password.master.result,
     aws_db_instance.main.address,
@@ -31,6 +32,7 @@ locals {
 resource "null_resource" "notes_database" {
   triggers = {
     rds_instance = aws_db_instance.main.id
+    router       = var.router_instance_id
     db_name      = local.notes_db_name
   }
 
@@ -67,6 +69,15 @@ resource "null_resource" "notes_schema" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<-EOT
       set -euo pipefail
+      deadline=$(( $(date +%s) + 600 ))
+      until psql "${local.notes_uri}" -tAc 'SELECT 1' >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+          echo "Timed out waiting for notes DB reachability via Tailscale (10m)" >&2
+          exit 1
+        fi
+        echo "Waiting for notes DB via tailnet..." >&2
+        sleep 10
+      done
       psql "${local.notes_uri}" -v ON_ERROR_STOP=1 -f "${path.module}/notes-schema.sql"
     EOT
   }

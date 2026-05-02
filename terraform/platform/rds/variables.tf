@@ -18,6 +18,11 @@ variable "router_security_group_id" {
   type        = string
 }
 
+variable "router_instance_id" {
+  description = "Instance ID of the Tailscale subnet router -- referenced in notes provisioner triggers so terraform doesn't run psql until the router exists."
+  type        = string
+}
+
 variable "instance_class" {
   description = "RDS instance class. db.t4g.micro is single-vCPU/1GB-RAM, fits dev workloads."
   type        = string
