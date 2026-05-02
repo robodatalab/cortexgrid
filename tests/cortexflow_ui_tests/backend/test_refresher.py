@@ -18,10 +18,14 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 from cortexflow_ui.backend.utils.keyed_stream import (
+    AddedEvent,
     DiffEvent,
     KeyedCache,
     Refresher,
+    RemovedEvent,
+    UpdatedEvent,
     serve_websocket,
+    serve_websocket_multi,
 )
 
 
@@ -259,6 +263,176 @@ class TestServeWebsocketRace(unittest.IsolatedAsyncioTestCase):
 
         ws.disconnect()
         await serve
+
+
+class TestUpsertAndRemove(unittest.IsolatedAsyncioTestCase):
+    async def _refresher_with_listener(
+        self, topic: str
+    ) -> tuple[
+        Refresher[str, str, _Item],
+        list[DiffEvent],
+    ]:
+        cache: KeyedCache[str, str, _Item] = KeyedCache()
+        refresher = Refresher[str, str, _Item](
+            name="t",
+            cache=cache,
+            poll_fn=lambda _: {},
+            poll_interval_sec=999,
+        )
+        received: list[DiffEvent] = []
+
+        async def listener(event: DiffEvent) -> None:
+            received.append(event)
+
+        refresher.subscribe(topic, listener)
+        return refresher, received
+
+    async def test_upsert_new_item_broadcasts_added(self) -> None:
+        r, received = await self._refresher_with_listener("k")
+        await r.update_or_insert("k", "a", _Item(id="a", value="1"))
+        self.assertEqual(r.cache.get("k"), {"a": _Item(id="a", value="1")})
+        self.assertEqual(len(received), 1)
+        self.assertIsInstance(received[0], AddedEvent)
+
+    async def test_upsert_existing_item_broadcasts_updated(self) -> None:
+        r, received = await self._refresher_with_listener("k")
+        await r.update_or_insert("k", "a", _Item(id="a", value="1"))
+        await r.update_or_insert("k", "a", _Item(id="a", value="2"))
+        self.assertEqual(r.cache.get("k"), {"a": _Item(id="a", value="2")})
+        self.assertEqual(len(received), 2)
+        self.assertIsInstance(received[0], AddedEvent)
+        self.assertIsInstance(received[1], UpdatedEvent)
+
+    async def test_upsert_without_listeners_is_noop(self) -> None:
+        cache: KeyedCache[str, str, _Item] = KeyedCache()
+        r = Refresher[str, str, _Item](
+            name="t",
+            cache=cache,
+            poll_fn=lambda _: {},
+            poll_interval_sec=999,
+        )
+        await r.update_or_insert("k", "a", _Item(id="a", value="1"))
+        self.assertEqual(r.cache.get("k"), {})
+
+    async def test_remove_existing_item_broadcasts_removed(self) -> None:
+        r, received = await self._refresher_with_listener("k")
+        await r.update_or_insert("k", "a", _Item(id="a", value="1"))
+        await r.remove("k", "a")
+        self.assertEqual(r.cache.get("k"), {})
+        self.assertEqual(len(received), 2)
+        last = received[1]
+        self.assertIsInstance(last, RemovedEvent)
+        assert isinstance(last, RemovedEvent)
+        self.assertEqual(last.id, "a")
+
+    async def test_remove_missing_item_is_noop(self) -> None:
+        r, received = await self._refresher_with_listener("k")
+        await r.remove("k", "a")
+        self.assertEqual(received, [])
+
+
+class TestServeWebsocketMulti(unittest.IsolatedAsyncioTestCase):
+    async def test_initial_state_replayed_from_all_subscriptions(self) -> None:
+        """A multiplexed subscription replays the cache snapshot of every
+        topic before live events start flowing."""
+        cache_a: KeyedCache[str, str, _Item] = KeyedCache()
+        cache_a.set("topic-a", {"a1": _Item(id="a1", value="A1")})
+        cache_b: KeyedCache[str, str, _Item] = KeyedCache()
+        cache_b.set("topic-b", {"b1": _Item(id="b1", value="B1")})
+
+        ref_a = Refresher[str, str, _Item](
+            name="A",
+            cache=cache_a,
+            poll_fn=lambda _: dict(cache_a.get("topic-a")),
+            poll_interval_sec=999,
+        )
+        ref_b = Refresher[str, str, _Item](
+            name="B",
+            cache=cache_b,
+            poll_fn=lambda _: dict(cache_b.get("topic-b")),
+            poll_interval_sec=999,
+        )
+
+        ws = _PausableFakeWebSocket()
+        serve = asyncio.create_task(
+            serve_websocket_multi(
+                ws, [(ref_a, "topic-a"), (ref_b, "topic-b")]
+            )
+        )
+
+        await _wait_for(lambda: len(ws.sent) >= 2)
+
+        ids = sorted(e["item"]["id"] for e in ws.sent if e["type"] == "added")
+        self.assertEqual(ids, ["a1", "b1"])
+
+        ws.disconnect()
+        await serve
+
+    async def test_live_events_from_any_subscription_are_forwarded(
+        self,
+    ) -> None:
+        """After connect, an update_or_insert on any of the subscribed topics
+        produces an event on the shared WebSocket."""
+        cache_a: KeyedCache[str, str, _Item] = KeyedCache()
+        cache_b: KeyedCache[str, str, _Item] = KeyedCache()
+
+        ref_a = Refresher[str, str, _Item](
+            name="A", cache=cache_a, poll_fn=lambda _: {}, poll_interval_sec=999
+        )
+        ref_b = Refresher[str, str, _Item](
+            name="B", cache=cache_b, poll_fn=lambda _: {}, poll_interval_sec=999
+        )
+
+        ws = _PausableFakeWebSocket()
+        serve = asyncio.create_task(
+            serve_websocket_multi(
+                ws, [(ref_a, "topic-a"), (ref_b, "topic-b")]
+            )
+        )
+        await _wait_for(lambda: ws.accepted)
+        await asyncio.sleep(0.02)
+
+        await ref_a.update_or_insert("topic-a", "a1", _Item(id="a1", value="A1"))
+        await ref_b.update_or_insert("topic-b", "b1", _Item(id="b1", value="B1"))
+
+        await _wait_for(
+            lambda: {e["item"]["id"] for e in ws.sent if e["type"] == "added"}
+            >= {"a1", "b1"}
+        )
+
+        ws.disconnect()
+        await serve
+
+    async def test_disconnect_unsubscribes_from_all_topics(self) -> None:
+        """When the WebSocket closes, every Refresher subscription is
+        released; topics with no remaining listeners drop and clear."""
+        cache_a: KeyedCache[str, str, _Item] = KeyedCache()
+        cache_b: KeyedCache[str, str, _Item] = KeyedCache()
+
+        ref_a = Refresher[str, str, _Item](
+            name="A", cache=cache_a, poll_fn=lambda _: {}, poll_interval_sec=999
+        )
+        ref_b = Refresher[str, str, _Item](
+            name="B", cache=cache_b, poll_fn=lambda _: {}, poll_interval_sec=999
+        )
+
+        ws = _PausableFakeWebSocket()
+        serve = asyncio.create_task(
+            serve_websocket_multi(
+                ws, [(ref_a, "topic-a"), (ref_b, "topic-b")]
+            )
+        )
+        await _wait_for(lambda: ws.accepted)
+        await asyncio.sleep(0.02)
+
+        self.assertIn("topic-a", ref_a._listeners)
+        self.assertIn("topic-b", ref_b._listeners)
+
+        ws.disconnect()
+        await serve
+
+        self.assertNotIn("topic-a", ref_a._listeners)
+        self.assertNotIn("topic-b", ref_b._listeners)
 
 
 if __name__ == "__main__":

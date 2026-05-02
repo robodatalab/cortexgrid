@@ -95,10 +95,19 @@ def update_run_note(note_id: str, body: str) -> RunNote | None:
         )
 
 
-def delete_run_note(note_id: str) -> bool:
+def delete_run_note(note_id: str) -> str | None:
+    """Delete a run note. Returns the parent run_name on success, None
+    if the note didn't exist. The caller uses run_name to invalidate
+    the per-run notes cache."""
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM run_notes WHERE id = %s", (note_id,))
-        return cur.rowcount > 0
+        cur.execute(
+            "DELETE FROM run_notes WHERE id = %s RETURNING run_id",
+            (note_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return resolve_run_name(str(row[0]))
 
 
 @dataclass
@@ -170,7 +179,17 @@ def update_experiment_note(note_id: str, body: str) -> ExperimentNote | None:
         )
 
 
-def delete_experiment_note(note_id: str) -> bool:
+def delete_experiment_note(note_id: str) -> str | None:
+    """Delete an experiment note. Returns the parent experiment_name
+    on success, None if the note didn't exist. The caller uses it to
+    invalidate the per-experiment notes cache."""
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM experiment_notes WHERE id = %s", (note_id,))
-        return cur.rowcount > 0
+        cur.execute(
+            "DELETE FROM experiment_notes WHERE id = %s "
+            "RETURNING experiment_name",
+            (note_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return str(row[0])

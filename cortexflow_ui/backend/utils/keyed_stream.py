@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any, Awaitable, Callable, Generic, Hashable, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Hashable, Sequence, TypeVar
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -155,6 +155,43 @@ class Refresher(Generic[TopicKey, ItemId, Payload]):
             asyncio.create_task(self._poll_and_dispatch(topic))
         return sub, snapshot
 
+    async def update_or_insert(
+        self, topic: TopicKey, item_id: ItemId, item: Payload
+    ) -> None:
+        """Apply a single-item write to `topic`'s cache and broadcast.
+
+        Emits Added if `item_id` is new, Updated otherwise. For use by
+        write handlers that already know the new item state, so the
+        cache reflects the write immediately rather than waiting for
+        the next sweep. No-op if no one is listening on `topic`.
+        """
+        async with self._dispatch_lock:
+            if topic not in self._listeners:
+                return
+            items = dict(self.cache.get(topic))
+            is_new = item_id not in items
+            items[item_id] = item
+            self.cache.set(topic, items)
+            event: DiffEvent = (
+                AddedEvent(item=item) if is_new else UpdatedEvent(item=item)
+            )
+            await self._broadcast(topic, event)
+
+    async def remove(self, topic: TopicKey, item_id: ItemId) -> None:
+        """Apply a single-item delete to `topic`'s cache and broadcast Removed.
+
+        No-op if the item isn't in the cache or no one is listening.
+        """
+        async with self._dispatch_lock:
+            if topic not in self._listeners:
+                return
+            items = dict(self.cache.get(topic))
+            if item_id not in items:
+                return
+            items.pop(item_id)
+            self.cache.set(topic, items)
+            await self._broadcast(topic, RemovedEvent(id=str(item_id)))
+
     def unsubscribe(self, sub: Subscription[TopicKey]) -> None:
         listeners = self._listeners.get(sub.topic)
         if listeners is None:
@@ -222,13 +259,27 @@ async def serve_websocket(
 ) -> None:
     """Bridge a single WebSocket to one topic on a Refresher.
 
-    Sends an initial `added` event per cache item (none if cold), then
-    forwards live diff events until the client disconnects. Live
+    Thin wrapper around `serve_websocket_multi` for the common
+    one-topic case.
+    """
+    await serve_websocket_multi(ws, [(refresher, topic)])
+
+
+async def serve_websocket_multi(
+    ws: WebSocket,
+    subscriptions: Sequence[tuple[Refresher[Any, Any, Any], Any]],
+) -> None:
+    """Bridge a WebSocket to multiple Refresher topics.
+
+    Sends initial `added` events for every cache item across all
+    subscriptions (none if all cold), then forwards live diff events
+    from any subscribed topic until the client disconnects. Live
     events arriving during the initial replay are buffered into a
     queue and drained in order afterward, so the wire stream is
-    consistent with the snapshot's view.
+    consistent with each topic's snapshot view.
     """
-    refresher.ensure_started()
+    for refresher, _ in subscriptions:
+        refresher.ensure_started()
     await ws.accept()
 
     queue: asyncio.Queue[DiffEvent] = asyncio.Queue()
@@ -236,10 +287,19 @@ async def serve_websocket(
     async def _enqueue(event: DiffEvent) -> None:
         await queue.put(event)
 
-    sub, initial = await refresher.subscribe_and_snapshot(topic, _enqueue)
+    subs: list[tuple[Refresher[Any, Any, Any], Subscription[Any]]] = []
     try:
-        for item in initial.values():
-            await ws.send_json(asdict(AddedEvent(item=item)))
+        initials: list[dict[Any, Any]] = []
+        for refresher, topic in subscriptions:
+            sub, snapshot = await refresher.subscribe_and_snapshot(
+                topic, _enqueue
+            )
+            subs.append((refresher, sub))
+            initials.append(snapshot)
+
+        for snapshot in initials:
+            for item in snapshot.values():
+                await ws.send_json(asdict(AddedEvent(item=item)))
 
         send_task = asyncio.create_task(_drain_queue_to_ws(ws, queue))
         recv_task = asyncio.create_task(_drain_recv_until_disconnect(ws))
@@ -258,7 +318,8 @@ async def serve_websocket(
                 except (asyncio.CancelledError, Exception):
                     pass
     finally:
-        refresher.unsubscribe(sub)
+        for refresher, sub in subs:
+            refresher.unsubscribe(sub)
 
 
 async def _drain_queue_to_ws(

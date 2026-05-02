@@ -30,7 +30,10 @@ from cortexflow_ui.backend.streams import (
     run_jobs_stream,
     run_notes_stream,
 )
-from cortexflow_ui.backend.utils.keyed_stream import serve_websocket
+from cortexflow_ui.backend.utils.keyed_stream import (
+    serve_websocket,
+    serve_websocket_multi,
+)
 
 log = logging.getLogger("cortexflow_ui_backend")
 
@@ -154,52 +157,73 @@ async def run_notes_stream_endpoint(ws: WebSocket, run_name: str) -> None:
 
 @app.websocket("/api/experiments/{experiment_name}/notes/stream")
 async def experiment_notes_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
-    await serve_websocket(experiment_notes_stream.refresher, ws, experiment_name)
+    """Combined notes feed for an experiment.
+
+    Multiplexes the experiment_notes_stream for `experiment_name` with
+    the run_notes_stream for each run currently in the experiment.
+    The set of runs is captured at connect time; runs added after the
+    subscription opens are not picked up until the client reconnects.
+    """
+    run_names = experiments_stream.runs_for_experiment(experiment_name)
+    subscriptions = [(experiment_notes_stream.refresher, experiment_name)]
+    for run_name in run_names:
+        subscriptions.append((run_notes_stream.refresher, run_name))
+    await serve_websocket_multi(ws, subscriptions)
 
 
 @app.post("/api/runs/{run_name}/notes")
-def add_run_note(run_name: str, body: NoteBody) -> RunNote:
+async def add_run_note(run_name: str, body: NoteBody) -> RunNote:
     note = notes.add_run_note(run_name, body.body)
     if note is None:
         raise HTTPException(status_code=500, detail="failed to add run note")
+    await run_notes_stream.refresher.update_or_insert(run_name, note.id, note)
     return note
 
 
 @app.put("/api/notes/run/{note_id}")
-def update_run_note(note_id: str, body: NoteBody) -> RunNote:
+async def update_run_note(note_id: str, body: NoteBody) -> RunNote:
     note = notes.update_run_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
+    await run_notes_stream.refresher.update_or_insert(note.run_name, note.id, note)
     return note
 
 
 @app.delete("/api/notes/run/{note_id}")
-def delete_run_note(note_id: str) -> dict[str, str]:
-    if not notes.delete_run_note(note_id):
+async def delete_run_note(note_id: str) -> dict[str, str]:
+    run_name = notes.delete_run_note(note_id)
+    if run_name is None:
         raise HTTPException(status_code=404, detail="note not found")
+    await run_notes_stream.refresher.remove(run_name, note_id)
     return {"status": "ok"}
 
 
 @app.post("/api/experiments/{experiment_name}/notes")
-def add_experiment_note(experiment_name: str, body: NoteBody) -> ExperimentNote:
+async def add_experiment_note(experiment_name: str, body: NoteBody) -> ExperimentNote:
     note = notes.add_experiment_note(experiment_name, body.body)
     if note is None:
         raise HTTPException(status_code=500, detail="failed to add experiment note")
+    await experiment_notes_stream.refresher.update_or_insert(experiment_name, note.id, note)
     return note
 
 
 @app.put("/api/notes/experiment/{note_id}")
-def update_experiment_note(note_id: str, body: NoteBody) -> ExperimentNote:
+async def update_experiment_note(note_id: str, body: NoteBody) -> ExperimentNote:
     note = notes.update_experiment_note(note_id, body.body)
     if note is None:
         raise HTTPException(status_code=404, detail="note not found")
+    await experiment_notes_stream.refresher.update_or_insert(
+        note.experiment_name, note.id, note
+    )
     return note
 
 
 @app.delete("/api/notes/experiment/{note_id}")
-def delete_experiment_note(note_id: str) -> dict[str, str]:
-    if not notes.delete_experiment_note(note_id):
+async def delete_experiment_note(note_id: str) -> dict[str, str]:
+    experiment_name = notes.delete_experiment_note(note_id)
+    if experiment_name is None:
         raise HTTPException(status_code=404, detail="note not found")
+    await experiment_notes_stream.refresher.remove(experiment_name, note_id)
     return {"status": "ok"}
 
 
