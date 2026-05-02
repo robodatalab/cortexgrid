@@ -21,7 +21,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: cortexflow-ui-frontend
-          image: ghcr.io/paksas/cortexflow-ui-frontend:main-f7848c29bd5634ee15dd5deba522f1107836bb3f
+          image: ghcr.io/paksas/cortexflow-ui-frontend:main-f8e33626fe1299e493121df1ba27d9858a60e8f7
           ports:
             - name: http
               containerPort: 80
