@@ -23,6 +23,11 @@ dev: check-dir install-frontend ## Start backend + frontend dev servers (Ctrl+C 
 	( cd frontend && npm run dev ) & \
 	wait
 
+.PHONY: dev-frontend-against
+dev-frontend-against: check-dir install-frontend ## Start frontend dev server against a remote backend (BACKEND=http://host:port required)
+	@if [ -z "$(BACKEND)" ]; then echo "Error: BACKEND=http://host:port required"; exit 1; fi
+	cd frontend && VITE_API_TARGET=$(BACKEND) npm run dev
+
 .PHONY: help
 help:
 	@echo ""
