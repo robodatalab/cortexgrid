@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketState
 from cortexflow.jobs import JobLifecycle
 from cortexflow.ray_util import JobStatus
 from cortexflow_ui.backend.streams import run_jobs_stream, run_notes_stream
+from cortexflow_ui.backend.utils.keyed_stream import serve_websocket
 
 
 class FakeWebSocket(WebSocket):
@@ -63,8 +64,8 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None
         await asyncio.sleep(0.01)
 
 
-class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
-    """Drives run_jobs_stream.stream (KeyedStream) through serve()."""
+class TestRunJobsRefresherServe(unittest.IsolatedAsyncioTestCase):
+    """Drives run_jobs_stream.refresher through serve_websocket()."""
 
     async def asyncSetUp(self) -> None:
         self._patches = [
@@ -82,6 +83,9 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
                     JobLifecycle(experiment_name="alpha", run_id="run-x", job_id="j1"),
                 ],
             ),
+            patch.object(
+                run_jobs_stream.refresher, "poll_interval_sec", 0.05
+            ),
         ]
         for p in self._patches:
             p.start()
@@ -90,7 +94,9 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
 
     async def test_first_subscriber_receives_added_event_per_job(self) -> None:
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_jobs_stream.stream.serve(ws, "run-1"))
+        task = asyncio.create_task(
+            serve_websocket(run_jobs_stream.refresher, ws, "run-1")
+        )
         try:
             await _wait_for(lambda: bool(ws.sent))
             self.assertTrue(ws.accepted)
@@ -103,28 +109,30 @@ class TestKeyedStreamServe(unittest.IsolatedAsyncioTestCase):
             ws.disconnect()
             await task
 
-    async def test_disconnect_clears_task_and_clients_but_preserves_cache(self) -> None:
+    async def test_last_disconnect_drops_topic_and_clears_cache(self) -> None:
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_jobs_stream.stream.serve(ws, "run-2"))
+        task = asyncio.create_task(
+            serve_websocket(run_jobs_stream.refresher, ws, "run-2")
+        )
         await _wait_for(lambda: bool(ws.sent))
         ws.disconnect()
         await task
 
-        self.assertNotIn("run-2", run_jobs_stream.stream._tasks)
-        self.assertNotIn("run-2", run_jobs_stream.stream._clients)
-        self.assertEqual(
-            run_jobs_stream.stream.cache.get("run-2"),
-            {"j1": run_jobs_stream.Job(job_id="j1", status="running", retry=False)},
-        )
+        self.assertNotIn("run-2", run_jobs_stream.refresher._listeners)
+        self.assertEqual(run_jobs_stream.refresher.cache.get("run-2"), {})
 
     async def test_second_subscriber_receives_cached_added_immediately(self) -> None:
         ws_a = FakeWebSocket()
-        task_a = asyncio.create_task(run_jobs_stream.stream.serve(ws_a, "run-3"))
+        task_a = asyncio.create_task(
+            serve_websocket(run_jobs_stream.refresher, ws_a, "run-3")
+        )
         try:
             await _wait_for(lambda: bool(ws_a.sent))
 
             ws_b = FakeWebSocket()
-            task_b = asyncio.create_task(run_jobs_stream.stream.serve(ws_b, "run-3"))
+            task_b = asyncio.create_task(
+                serve_websocket(run_jobs_stream.refresher, ws_b, "run-3")
+            )
             try:
                 await _wait_for(lambda: bool(ws_b.sent))
                 self.assertEqual(ws_b.sent[0]["type"], "added")
@@ -179,10 +187,10 @@ class _FakePgConn:
         del args
 
 
-class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
-    """Drives run_notes_stream.stream (KeyedDiffStream) through serve().
+class TestRunNotesRefresherServe(unittest.IsolatedAsyncioTestCase):
+    """Drives run_notes_stream.refresher through serve_websocket().
 
-    Mocks the psycopg layer under list_run_notes (the actual list_fn) so
+    Mocks the psycopg layer under list_run_notes (the actual poll_fn) so
     the real production function is exercised end-to-end.
     """
 
@@ -215,6 +223,12 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
         resolve_patcher.start()
         self.addCleanup(resolve_patcher.stop)
 
+        interval_patcher = patch.object(
+            run_notes_stream.refresher, "poll_interval_sec", 0.05
+        )
+        interval_patcher.start()
+        self.addCleanup(interval_patcher.stop)
+
     @staticmethod
     def _has(events: list[dict], type_: str, **fields) -> bool:
         return any(
@@ -227,7 +241,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             {"id": "n1", "body": "hi", "created_at": "t0", "updated_at": "t0"}
         )
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_notes_stream.stream.serve(ws, "run-1"))
+        task = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws, "run-1"))
         try:
             await _wait_for(
                 lambda: any(
@@ -240,7 +254,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
 
     async def test_added_event_when_note_appears(self) -> None:
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_notes_stream.stream.serve(ws, "run-2"))
+        task = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws, "run-2"))
         try:
             await asyncio.sleep(0.05)
             self.assertEqual(ws.sent, [])
@@ -262,7 +276,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             {"id": "n3", "body": "hi", "created_at": "t0", "updated_at": "t0"}
         )
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_notes_stream.stream.serve(ws, "run-3"))
+        task = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws, "run-3"))
         try:
             await _wait_for(
                 lambda: any(
@@ -284,7 +298,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             {"id": "n4", "body": "hi", "created_at": "t0", "updated_at": "t0"}
         )
         ws = FakeWebSocket()
-        task = asyncio.create_task(run_notes_stream.stream.serve(ws, "run-4"))
+        task = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws, "run-4"))
         try:
             await _wait_for(
                 lambda: any(
@@ -306,7 +320,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             {"id": "n5", "body": "hi", "created_at": "t0", "updated_at": "t0"}
         )
         ws_a = FakeWebSocket()
-        task_a = asyncio.create_task(run_notes_stream.stream.serve(ws_a, "run-5"))
+        task_a = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws_a, "run-5"))
         try:
             await _wait_for(
                 lambda: any(
@@ -315,7 +329,7 @@ class TestKeyedDiffStreamServe(unittest.IsolatedAsyncioTestCase):
             )
 
             ws_b = FakeWebSocket()
-            task_b = asyncio.create_task(run_notes_stream.stream.serve(ws_b, "run-5"))
+            task_b = asyncio.create_task(serve_websocket(run_notes_stream.refresher, ws_b, "run-5"))
             try:
                 await _wait_for(
                     lambda: any(
