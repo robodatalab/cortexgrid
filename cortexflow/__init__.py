@@ -29,6 +29,8 @@ from typing import Any, Callable
 from cortexflow.checkpoint import checkpoint, resume
 from cortexflow.experiment import (
     Experiment,
+    delete_experiment,
+    delete_run,
     list_experiments,
 )
 from cortexflow.infra import get_ray_job_server_uri
@@ -39,6 +41,12 @@ from cortexflow.jobs import (
     JobLifecycle,
     LifecycleEvent,
     Payload,
+)
+from cortexflow.secrets import (
+    delete_secret,
+    get_secret,
+    list_secrets,
+    set_secret,
 )
 from cortexflow.mlflow_util import (
     log_metric,
@@ -63,7 +71,7 @@ from cortexflow.ray_util import (
     get_ray_job_attempt,
     JobStatus,
 )
-from cortexflow.s3_util import upload, upload_dir, download, get_s3_client
+from cortexflow.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
 
 
 def remote(
@@ -90,6 +98,8 @@ def remote(
 
 __all__ = [
     "Experiment",
+    "delete_experiment",
+    "delete_run",
     # Ray / jobs
     "remote",
     "get_ray_job_status",
@@ -127,4 +137,10 @@ __all__ = [
     "upload_dir",
     "download",
     "get_s3_client",
+    "delete_prefix",
+    # Secrets
+    "get_secret",
+    "set_secret",
+    "list_secrets",
+    "delete_secret",
 ]
