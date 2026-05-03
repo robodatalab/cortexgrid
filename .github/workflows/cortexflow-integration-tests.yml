@@ -1,0 +1,47 @@
+name: cortexflow integration tests
+
+on:
+  repository_dispatch:
+    types: [argocd-synced]
+
+concurrency:
+  group: cortexflow-integration
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          aws-region: eu-west-2
+
+      - name: Fetch Tailscale OAuth from Secrets Manager
+        run: |
+          TS_ID=$(aws secretsmanager get-secret-value --secret-id robolab/infra/TS_OAUTH_CLIENT_ID --query SecretString --output text)
+          TS_SECRET=$(aws secretsmanager get-secret-value --secret-id robolab/infra/TS_OAUTH_SECRET --query SecretString --output text)
+          echo "::add-mask::$TS_ID"
+          echo "::add-mask::$TS_SECRET"
+          echo "TS_OAUTH_CLIENT_ID=$TS_ID" >> $GITHUB_ENV
+          echo "TS_OAUTH_SECRET=$TS_SECRET" >> $GITHUB_ENV
+
+      - uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ env.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ env.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run integration tests
+        run: uv run python -m unittest discover -s tests/integration/cortexflow -v

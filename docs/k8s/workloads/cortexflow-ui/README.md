@@ -1,6 +1,6 @@
 # CortexFlow UI - K8s Spec
 
-How the cortexflow-ui frontend + backend run inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/cortexflow-ui/](../../argo-deployments/cortexflow-ui/). See that folder's README for the higher-level rationale.
+How the cortexflow-ui frontend + backend run inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/cortexflow-ui/](../../../../k8s/argo-deployments/cortexflow-ui/). See that folder's README for the higher-level rationale.
 
 ## Deployment shape
 
@@ -11,7 +11,7 @@ Two `Deployment`s, one `ClusterIP` Service, one `NodePort` Service. The frontend
 
 ## Why two images instead of one
 
-FastAPI can serve the built frontend via `StaticFiles` (the code at [`cortexflow_ui/backend/main.py:217-218`](../../../cortexflow_ui/backend/main.py#L217-L218) does), but we split the concerns: the frontend image rebuilds only on frontend changes, the backend image rebuilds only on Python changes. Different base images (`node`->`nginx` vs `python`), different CI triggers, independent rollouts.
+FastAPI can serve the built frontend via `StaticFiles` (the code at [`cortexflow_ui/backend/main.py:217-218`](../../../../cortexflow_ui/backend/main.py#L217-L218) does), but we split the concerns: the frontend image rebuilds only on frontend changes, the backend image rebuilds only on Python changes. Different base images (`node`->`nginx` vs `python`), different CI triggers, independent rollouts.
 
 ## Files
 

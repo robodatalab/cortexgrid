@@ -7,7 +7,7 @@ ArgoCD needs credentials at runtime to provision K8s Pods — AWS keys, GitHub t
 Cortexflow assumes that:
 
 1. AWS Secrets Manager is the only source of truth and stores and manages all of the configuration of the research platform and the applications and experiments running on it.
-2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-node.py](../../seed/setup-node.py) is responsible for that
+2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-node.py](../../../../k8s/seed/setup-node.py) is responsible for that
 3. Credentials rotate and cannot be cached for any longer that 12 hrs.
 
 All secrets — ArgoCD bootstrap (GHCR pull, repo clone, AWS access) and application-level (consumed by `cortexflow.secrets` at runtime) — live under a single namespace `robolab/infra/*`. Both consumers reach them through `cortexflow.secrets` (ExternalSecrets operator reads via AWS SDK; application code via `cortexflow.secrets.get_secret()`).
@@ -26,8 +26,8 @@ reflector/ replicates a single Secret into every K8s namespace, present and futu
 
 The user will be responsible for adding those required secrets:
 
-1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexflow/secrets.py](../../../cortexflow/secrets.py) or AWS console).
-2. Add an `ExternalSecret` YAML in [external-secrets/](external-secrets/) referencing `key: robolab/infra/<NAME>`.
+1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexflow/secrets.py](../../../../cortexflow/secrets.py) or AWS console).
+2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo-deployments/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
 3. Commit + push. ESO creates the k8s Secret; rotation auto-propagates.
 
 There is no static list — it grows with the platform. A new secret is needed whenever a deployment fails with an auth error (ArgoCD shows it, `kubectl describe` names the missing credential) or when adding a deployment that talks to a new external system.

@@ -136,3 +136,16 @@ resource "aws_iam_role_policy" "github_actions_secrets_read" {
   role   = aws_iam_role.github_actions.id
   policy = data.aws_iam_policy_document.github_actions_secrets_read.json
 }
+
+# Surface the role ARN in SM so Argo Notifications can pass it through the
+# webhook payload to GitHub workflows, which then assume this role via OIDC.
+
+resource "aws_secretsmanager_secret" "github_actions_role_arn" {
+  name                    = "robolab/infra/AWS_ROLE_ARN"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "github_actions_role_arn" {
+  secret_id     = aws_secretsmanager_secret.github_actions_role_arn.id
+  secret_string = aws_iam_role.github_actions.arn
+}

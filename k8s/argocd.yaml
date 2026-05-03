@@ -29,6 +29,29 @@ spec:
           - hosts:
               - argo.robodatalab.com
             secretName: robodatalab-wildcard-tls
+    notifications:
+      enabled: true
+      notifiers:
+        service.webhook.github: |
+          url: https://api.github.com
+          headers:
+          - name: Authorization
+            value: token $github-token
+          - name: Accept
+            value: application/vnd.github+json
+      templates:
+        template.app-synced: |
+          webhook:
+            github:
+              method: POST
+              path: /repos/paksas/robolab-infra/dispatches
+              body: |
+                {"event_type": "argocd-synced", "client_payload": {"app": "{{.app.metadata.name}}", "aws_role_arn": "$aws-role-arn"}}
+      triggers:
+        trigger.on-sync-succeeded: |
+          - description: Application synced successfully
+            send: [app-synced]
+            when: app.status.operationState.phase in ['Succeeded']
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
