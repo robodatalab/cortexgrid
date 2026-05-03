@@ -10,6 +10,6 @@ output "dgx_user_secret_access_key" {
 }
 
 output "github_actions_role_arn" {
-  description = "IAM role ARN for GitHub Actions — set as a repo variable"
+  description = "IAM role ARN for GitHub Actions; surfaced in SM as robolab/infra/AWS_ROLE_ARN"
   value       = aws_iam_role.github_actions.arn
 }

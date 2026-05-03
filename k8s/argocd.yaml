@@ -46,7 +46,7 @@ spec:
               method: POST
               path: /repos/paksas/robolab-infra/dispatches
               body: |
-                {"event_type": "argocd-synced", "client_payload": {"app": "{{.app.metadata.name}}"}}
+                {"event_type": "argocd-synced", "client_payload": {"app": "{{.app.metadata.name}}", "aws_role_arn": "$aws-role-arn"}}
       triggers:
         trigger.on-sync-succeeded: |
           - description: Application synced successfully
