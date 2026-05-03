@@ -1,0 +1,13 @@
+name: integration tests
+
+on:
+  repository_dispatch:
+    types: [argocd-synced]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Show dispatch payload
+        run: echo '${{ toJSON(github.event.client_payload) }}'
