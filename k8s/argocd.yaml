@@ -13,10 +13,11 @@ spec:
     global:
       nodeSelector:
         role: head
+    configs:
+      params:
+        server.insecure: true
+        server.disable.auth: true
     server:
-      extraArgs:
-        - --insecure
-        - --disable-auth
       service:
         type: NodePort
         nodePortHttp: 30080
