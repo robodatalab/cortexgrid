@@ -20,6 +20,9 @@ spec:
       service:
         type: NodePort
         nodePortHttp: 30080
+        annotations:
+          tailscale.com/expose: "true"
+          tailscale.com/hostname: argo
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application

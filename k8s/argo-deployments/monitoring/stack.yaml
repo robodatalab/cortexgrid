@@ -18,6 +18,9 @@ spec:
           service:
             type: NodePort
             nodePort: 30300
+            annotations:
+              tailscale.com/expose: "true"
+              tailscale.com/hostname: grafana
           grafana.ini:
             auth.anonymous:
               enabled: true
@@ -30,6 +33,9 @@ spec:
           service:
             type: NodePort
             nodePort: 30090
+            annotations:
+              tailscale.com/expose: "true"
+              tailscale.com/hostname: prometheus
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false
