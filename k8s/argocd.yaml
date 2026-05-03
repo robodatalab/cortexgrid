@@ -65,15 +65,3 @@ spec:
         duration: 10s
         factor: 2
         maxDuration: 2m
----
-apiVersion: helm.cattle.io/v1
-kind: HelmChartConfig
-metadata:
-  name: traefik
-  namespace: kube-system
-spec:
-  valuesContent: |-
-    service:
-      annotations:
-        tailscale.com/expose: "true"
-        tailscale.com/hostname: gateway
