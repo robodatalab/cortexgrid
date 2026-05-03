@@ -242,3 +242,4 @@ The secrets module provisions a GitHub Actions OIDC integration:
 - [k8s/README.md](k8s/README.md) — GitOps overview + bootstrap FAQ
 - [k8s/argo-deployments/](../k8s/argo-deployments/) — one-pager README per platform component (Ray, MLflow, monitoring, secrets, NVIDIA device plugin, jobs control plane; on-prem-only: MinIO, Postgres)
 - [cortexflow/README.md](cortexflow/README.md) — Python library reference
+- [tests/INTEGRATION.md](tests/INTEGRATION.md) — integration test platform: trigger flow, secrets, how to add a target
