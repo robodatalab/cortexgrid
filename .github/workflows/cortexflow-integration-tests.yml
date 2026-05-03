@@ -1,0 +1,19 @@
+name: cortexflow integration tests
+
+on:
+  repository_dispatch:
+    types: [argocd-synced]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run integration tests
+        run: uv run python -m unittest discover -s tests/integration/cortexflow -v
