@@ -6,7 +6,7 @@ Training pipelines, MLflow, and future workloads all need durable object storage
 
 ## Components
 
-**stack.yaml** — Argo Application pointing at raw manifests at [`k8s/workloads/minio/`](../../workloads/minio/). Deployed into the `minio` namespace. See [workloads/minio/README.md](../../workloads/minio/README.md) for the k8s spec.
+**stack.yaml** — Argo Application pointing at raw manifests at [`k8s/workloads/minio/`](../../../../../k8s/workloads/minio/). Deployed into the `minio` namespace. See [workloads/minio/README.md](../../../workloads/minio/README.md) for the k8s spec.
 
 ## Why raw manifests (not a Helm chart)
 
@@ -14,6 +14,6 @@ Same reasoning as other deployments: one instance, one environment, no templatin
 
 ## Dependencies
 
-- **MLflow** ([../mlflow/](../mlflow/)) — stores artifacts in bucket `mlflow-artifacts` at `minio.minio.svc.cluster.local:9000`.
+- **MLflow** ([../mlflow/](../../../../../k8s/argo-deployments/mlflow/)) — stores artifacts in bucket `mlflow-artifacts` at `minio.minio.svc.cluster.local:9000`.
 - **jobs-control-plane** (future) — will read training data and write checkpoints here via the AWS SDK.
 - **Any pod doing S3 I/O** — same endpoint. Creds `admin` / `adminadmin` hardcoded (tailnet-only; tighten when we move to AWS and swap for real S3 + IAM).

@@ -1,6 +1,6 @@
 # MinIO — K8s Spec
 
-How the MinIO server runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/minio/](../../argo-deployments/minio/).
+How the MinIO server runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/minio/](../../../../k8s/argo-deployments/onprem/minio/).
 
 ## Deployment shape
 
