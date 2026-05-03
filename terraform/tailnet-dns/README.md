@@ -1,12 +1,12 @@
 # tailnet-dns
 
-Route 53 CNAME records that map `<service>.robodatalab.com` to the single tailnet `gateway.<tailnet>.ts.net` hostname (Traefik exposed via the Tailscale operator). Traefik then routes requests to the right backend Service based on the Host header and terminates TLS using the wildcard `*.robodatalab.com` cert managed by cert-manager.
+Route 53 CNAME records that map `<service>.robodatalab.com` to the head node's tailnet hostname (`robolab-head.<tailnet>.ts.net`). The head's k3s exposes Traefik on host ports 80/443 (via klipper-lb), and Traefik routes requests to the right backend Service based on the Host header and terminates TLS using the wildcard `*.robodatalab.com` cert managed by cert-manager.
 
 ## Problem
 
-We want pretty `https://<service>.robodatalab.com` URLs that only work over the tailnet. All traffic enters via one tailnet device (`gateway`); the cluster-internal Traefik handles routing and TLS.
+We want pretty `https://<service>.robodatalab.com` URLs that only work over the tailnet. The head node already runs Tailscale in kernel mode (much faster than the k8s operator's userspace proxies), so all CNAMEs point there.
 
-This stack creates one Route 53 CNAME per service, all pointing at the same `gateway.<tailnet>.ts.net` target. The records are public (anyone can resolve them), but the target is a `*.ts.net` name whose IP is non-routable outside the tailnet, so only tailnet members can connect.
+This stack creates one Route 53 CNAME per service, all pointing at the same `robolab-head.<tailnet>.ts.net` target. The records are public (anyone can resolve them), but the target is a `*.ts.net` name whose IP is non-routable outside the tailnet, so only tailnet members can connect.
 
 ## Dependencies
 
