@@ -18,9 +18,6 @@ spec:
           service:
             type: NodePort
             nodePort: 30300
-            annotations:
-              tailscale.com/expose: "true"
-              tailscale.com/hostname: grafana
           ingress:
             enabled: true
             ingressClassName: traefik
@@ -42,9 +39,6 @@ spec:
           service:
             type: NodePort
             nodePort: 30090
-            annotations:
-              tailscale.com/expose: "true"
-              tailscale.com/hostname: prometheus
           ingress:
             enabled: true
             ingressClassName: traefik

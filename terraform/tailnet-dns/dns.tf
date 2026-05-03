@@ -9,5 +9,5 @@ resource "aws_route53_record" "tailnet" {
   name    = "${each.key}.${var.domain_name}"
   type    = "CNAME"
   ttl     = 300
-  records = ["${each.key}.${var.tailnet}"]
+  records = ["gateway.${var.tailnet}"]
 }

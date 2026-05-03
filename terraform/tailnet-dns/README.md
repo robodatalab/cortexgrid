@@ -1,12 +1,12 @@
 # tailnet-dns
 
-Route 53 CNAME records that map `<service>.robodatalab.com` to the matching `<service>.<tailnet>.ts.net` hostname created by the Tailscale Kubernetes Operator.
+Route 53 CNAME records that map `<service>.robodatalab.com` to the single tailnet `gateway.<tailnet>.ts.net` hostname (Traefik exposed via the Tailscale operator). Traefik then routes requests to the right backend Service based on the Host header and terminates TLS using the wildcard `*.robodatalab.com` cert managed by cert-manager.
 
 ## Problem
 
-The Tailscale operator exposes annotated k8s Services as tailnet devices reachable at `<hostname>.<tailnet>.ts.net`. Those names are ugly and tailnet-specific. We want `cortexflow.robodatalab.com`, `mlflow.robodatalab.com`, etc.
+We want pretty `https://<service>.robodatalab.com` URLs that only work over the tailnet. All traffic enters via one tailnet device (`gateway`); the cluster-internal Traefik handles routing and TLS.
 
-This stack creates one Route 53 CNAME per service. The records are public (anyone can resolve them), but the targets are `*.ts.net` names whose IPs are non-routable outside the tailnet, so only tailnet members can connect.
+This stack creates one Route 53 CNAME per service, all pointing at the same `gateway.<tailnet>.ts.net` target. The records are public (anyone can resolve them), but the target is a `*.ts.net` name whose IP is non-routable outside the tailnet, so only tailnet members can connect.
 
 ## Dependencies
 

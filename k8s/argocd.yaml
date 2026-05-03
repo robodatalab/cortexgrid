@@ -20,9 +20,6 @@ spec:
       service:
         type: NodePort
         nodePortHttp: 30080
-        annotations:
-          tailscale.com/expose: "true"
-          tailscale.com/hostname: argo
       ingress:
         enabled: true
         ingressClassName: traefik
