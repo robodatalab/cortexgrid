@@ -21,6 +21,15 @@ spec:
             annotations:
               tailscale.com/expose: "true"
               tailscale.com/hostname: grafana
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - grafana.robodatalab.com
+            tls:
+              - hosts:
+                  - grafana.robodatalab.com
+                secretName: robodatalab-wildcard-tls
           grafana.ini:
             auth.anonymous:
               enabled: true
@@ -36,6 +45,15 @@ spec:
             annotations:
               tailscale.com/expose: "true"
               tailscale.com/hostname: prometheus
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - prometheus.robodatalab.com
+            tls:
+              - hosts:
+                  - prometheus.robodatalab.com
+                secretName: robodatalab-wildcard-tls
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false

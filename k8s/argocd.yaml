@@ -23,6 +23,14 @@ spec:
         annotations:
           tailscale.com/expose: "true"
           tailscale.com/hostname: argo
+      ingress:
+        enabled: true
+        ingressClassName: traefik
+        hostname: argo.robodatalab.com
+        extraTls:
+          - hosts:
+              - argo.robodatalab.com
+            secretName: robodatalab-wildcard-tls
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -59,3 +67,15 @@ spec:
         duration: 10s
         factor: 2
         maxDuration: 2m
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      annotations:
+        tailscale.com/expose: "true"
+        tailscale.com/hostname: gateway

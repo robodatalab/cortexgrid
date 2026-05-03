@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ray-dashboard
+  namespace: ray
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - ray.robodatalab.com
+      secretName: robodatalab-wildcard-tls
+  rules:
+    - host: ray.robodatalab.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ray-head
+                port:
+                  number: 8265

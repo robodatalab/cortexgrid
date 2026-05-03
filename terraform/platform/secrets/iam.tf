@@ -57,6 +57,35 @@ resource "aws_iam_user_policy" "dgx_argocd_secrets_manage" {
   policy = data.aws_iam_policy_document.dgx_argocd_secrets_manage.json
 }
 
+# ── DGX -> Route 53 (cert-manager ACME DNS-01 challenges) ────────────────────
+# cert-manager writes _acme-challenge TXT records under robodatalab.com to
+# prove ownership to Let's Encrypt before the wildcard cert is issued.
+
+data "aws_route53_zone" "robodatalab" {
+  name = "robodatalab.com"
+}
+
+data "aws_iam_policy_document" "dgx_route53_acme" {
+  statement {
+    actions   = ["route53:GetChange"]
+    resources = ["arn:aws:route53:::change/*"]
+  }
+  statement {
+    actions   = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"]
+    resources = ["arn:aws:route53:::hostedzone/${data.aws_route53_zone.robodatalab.zone_id}"]
+  }
+  statement {
+    actions   = ["route53:ListHostedZonesByName"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_user_policy" "dgx_route53_acme" {
+  name   = "route53-acme"
+  user   = aws_iam_user.dgx.name
+  policy = data.aws_iam_policy_document.dgx_route53_acme.json
+}
+
 # ── GitHub Actions OIDC ──────────────────────────────────────────────────────
 # Allows CI pipelines to assume a role and read secrets — no static keys in GH.
 
