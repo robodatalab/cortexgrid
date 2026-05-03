@@ -90,6 +90,11 @@ class Experiment:
             raise ValueError("Call Experiment.init or Experiment.from_experiment first")
         return _SINGLETON_EXPERIMENT
 
+    @classmethod
+    def close(cls) -> None:
+        """Detach the active experiment so a different one can be init'd in this process."""
+        set_instance(None)
+
 
 def set_instance(instance: Experiment | None) -> None:
     global _SINGLETON_EXPERIMENT
