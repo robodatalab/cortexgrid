@@ -21,11 +21,11 @@ spec:
           image: ghcr.io/paksas/mlflow:main-14b8206bdcb8b580e6ae51a7b495d80f1cd33d46
           resources:
             requests:
-              cpu: "200m"
-              memory: 512Mi
+              cpu: "1"
+              memory: 4Gi
             limits:
               cpu: "1"
-              memory: 2Gi
+              memory: 4Gi
           env:
             - name: MLFLOW_SERVER_ALLOWED_HOSTS
               value: "*"
@@ -58,10 +58,15 @@ spec:
           ports:
             - name: http
               containerPort: 5000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            failureThreshold: 30
+            periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /health
               port: 5000
-            initialDelaySeconds: 15
             periodSeconds: 15
             timeoutSeconds: 5
