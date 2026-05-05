@@ -4,13 +4,13 @@ on:
   push:
     paths:
       - "cortexflow/**"
-      - "tests/cortexflow_tests/**"
+      - "tests/unit/cortexflow/**"
       - "pyproject.toml"
       - ".github/workflows/cortexflow-tests.yml"
   pull_request:
     paths:
       - "cortexflow/**"
-      - "tests/cortexflow_tests/**"
+      - "tests/unit/cortexflow/**"
       - "pyproject.toml"
       - ".github/workflows/cortexflow-tests.yml"
 
@@ -26,4 +26,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
-        run: uv run python -m unittest discover -s tests/cortexflow_tests -v
+        run: uv run python -m unittest discover -s tests/unit/cortexflow -v
