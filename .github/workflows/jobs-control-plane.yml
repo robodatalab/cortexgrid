@@ -4,18 +4,18 @@ on:
   push:
     paths:
       - "cortexflow/**"
-      - "tests/cortexflow_tests/**"
+      - "tests/unit/cortexflow/**"
       - "jobs_control_plane/**"
-      - "tests/jobs_control_plane_tests/**"
+      - "tests/unit/jobs_control_plane/**"
       - "pyproject.toml"
       - ".github/workflows/jobs-control-plane.yml"
       - "k8s/docker/jobs-control-plane/**"
   pull_request:
     paths:
       - "cortexflow/**"
-      - "tests/cortexflow_tests/**"
+      - "tests/unit/cortexflow/**"
       - "jobs_control_plane/**"
-      - "tests/jobs_control_plane_tests/**"
+      - "tests/unit/jobs_control_plane/**"
       - "pyproject.toml"
       - ".github/workflows/**"
       - "k8s/docker/jobs-control-plane/**"
@@ -36,7 +36,7 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
-        run: uv run python -m unittest discover -s tests/cortexflow_tests -v
+        run: uv run python -m unittest discover -s tests/unit/cortexflow -v
 
   test:
     runs-on: ubuntu-latest
@@ -49,7 +49,7 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
-        run: uv run python -m unittest discover -s tests/jobs_control_plane_tests -v
+        run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
 
   build-and-push:
     runs-on: ubuntu-latest
