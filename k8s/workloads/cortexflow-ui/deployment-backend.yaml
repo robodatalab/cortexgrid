@@ -23,6 +23,15 @@ spec:
       containers:
         - name: cortexflow-ui-backend
           image: ghcr.io/paksas/cortexflow-ui-backend:main-d9c2df3d50e79d45c13f8827cc3ad95d0785a571
+          env:
+            # Retry-tolerant MLflow client: outlast a single OOMKill+restart cycle
+            # (~30-60s of MLflow downtime) before surfacing the failure to UI users.
+            # Default 7 retries + factor 2 yields ~4 min of retry budget; we extend
+            # to ~8 min to also cover slow startupProbe under load.
+            - name: MLFLOW_HTTP_REQUEST_MAX_RETRIES
+              value: "10"
+            - name: MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR
+              value: "2.0"
           envFrom:
             # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for boto3's default
             # credential chain (used when cortexflow.secrets reads SM).
