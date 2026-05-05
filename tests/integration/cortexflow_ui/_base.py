@@ -19,4 +19,10 @@ class UITestCase(unittest.TestCase):
         self.addCleanup(self.pw.stop)
         self.browser = self.pw.chromium.launch()
         self.addCleanup(self.browser.close)
-        self.page = self.browser.new_page()
+        self.page = self.new_user()
+
+    def new_user(self) -> Page:
+        """Open an isolated browser context (separate cookies/storage) — simulates a different user."""
+        ctx = self.browser.new_context()
+        self.addCleanup(ctx.close)
+        return ctx.new_page()
