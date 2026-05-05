@@ -9,8 +9,8 @@ import boto3  # type: ignore
 
 _SM_PREFIX = "robolab/infra"
 _SM_REGION = "eu-west-2"
-_DELETE_WAIT_TIMEOUT_S = 15.0
-_DELETE_WAIT_POLL_S = 0.25
+_CONSISTENCY_TIMEOUT_S = 15.0
+_CONSISTENCY_POLL_S = 0.25
 
 
 def get_secret(id: str) -> str:
@@ -33,18 +33,30 @@ def list_secrets() -> list[str]:
                 continue
             name = entry["Name"]
             if name.startswith(prefix):
-                ids.append(name[len(prefix):])
+                ids.append(name[len(prefix) :])
     return ids
 
 
 def set_secret(id: str, value: str) -> None:
     client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    secret_id = f"{_SM_PREFIX}/{id}"
     try:
-        client.describe_secret(SecretId=f"{_SM_PREFIX}/{id}")
+        client.describe_secret(SecretId=secret_id)
     except client.exceptions.ResourceNotFoundException:
-        client.create_secret(Name=f"{_SM_PREFIX}/{id}", SecretString=value)
-        return
-    client.put_secret_value(SecretId=f"{_SM_PREFIX}/{id}", SecretString=value)
+        client.create_secret(Name=secret_id, SecretString=value)
+    else:
+        client.put_secret_value(SecretId=secret_id, SecretString=value)
+    deadline = time.monotonic() + _CONSISTENCY_TIMEOUT_S
+    while time.monotonic() < deadline:
+        try:
+            if client.get_secret_value(SecretId=secret_id)["SecretString"] == value:
+                return
+        except client.exceptions.ResourceNotFoundException:
+            pass
+        time.sleep(_CONSISTENCY_POLL_S)
+    raise TimeoutError(
+        f"Secret {id!r} not readable as set value after {_CONSISTENCY_TIMEOUT_S}s"
+    )
 
 
 def delete_secret(id: str) -> None:
@@ -55,11 +67,11 @@ def delete_secret(id: str) -> None:
         client.delete_secret(SecretId=secret_id, ForceDeleteWithoutRecovery=True)
     except client.exceptions.ResourceNotFoundException:
         return
-    deadline = time.monotonic() + _DELETE_WAIT_TIMEOUT_S
+    deadline = time.monotonic() + _CONSISTENCY_TIMEOUT_S
     while time.monotonic() < deadline:
         try:
             client.describe_secret(SecretId=secret_id)
         except client.exceptions.ResourceNotFoundException:
             return
-        time.sleep(_DELETE_WAIT_POLL_S)
-    raise TimeoutError(f"Secret {id!r} still present after {_DELETE_WAIT_TIMEOUT_S}s")
+        time.sleep(_CONSISTENCY_POLL_S)
+    raise TimeoutError(f"Secret {id!r} still present after {_CONSISTENCY_TIMEOUT_S}s")

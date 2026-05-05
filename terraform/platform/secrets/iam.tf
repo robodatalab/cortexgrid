@@ -137,6 +137,27 @@ resource "aws_iam_role_policy" "github_actions_secrets_read" {
   policy = data.aws_iam_policy_document.github_actions_secrets_read.json
 }
 
+# Integration tests create/update/delete throwaway secrets named robolab/infra/it-*.
+# Scoped tightly so CI cannot touch production secrets.
+
+data "aws_iam_policy_document" "github_actions_it_secrets_manage" {
+  statement {
+    actions = [
+      "secretsmanager:DescribeSecret",
+      "secretsmanager:CreateSecret",
+      "secretsmanager:PutSecretValue",
+      "secretsmanager:DeleteSecret",
+    ]
+    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/infra/it-*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_actions_it_secrets_manage" {
+  name   = "it-secrets-manage"
+  role   = aws_iam_role.github_actions.id
+  policy = data.aws_iam_policy_document.github_actions_it_secrets_manage.json
+}
+
 # Surface the role ARN in SM so Argo Notifications can pass it through the
 # webhook payload to GitHub workflows, which then assume this role via OIDC.
 
