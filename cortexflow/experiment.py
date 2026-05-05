@@ -159,10 +159,12 @@ def list_run_ids_in_experiment(name: str) -> list[str]:
 
 
 def delete_experiment(name: str) -> None:
-    """Soft-delete every run in the experiment, then the experiment itself."""
+    """Soft-delete every run in the experiment, then the experiment itself.
+
+    Idempotent: already-deleted experiments are treated as success."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     exp = client.get_experiment_by_name(name)
-    if exp is None:
+    if exp is None or exp.lifecycle_stage != "active":
         return
     for run in client.search_runs(experiment_ids=[exp.experiment_id]):
         delete_run(run.info.run_id)
