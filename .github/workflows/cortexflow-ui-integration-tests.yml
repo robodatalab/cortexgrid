@@ -1,8 +1,11 @@
 name: cortexflow-ui integration tests
 
 on:
-  repository_dispatch:
-    types: [argocd-synced]
+  workflow_dispatch:
+    inputs:
+      aws_role_arn:
+        description: AWS role to assume (e.g. arn:aws:iam::517906913330:role/robolab-github-actions)
+        required: true
 
 concurrency:
   group: cortexflow-ui-integration
@@ -21,7 +24,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ github.event.client_payload.aws_role_arn }}
+          role-to-assume: ${{ inputs.aws_role_arn }}
           aws-region: eu-west-2
 
       - name: Fetch Tailscale OAuth from Secrets Manager
