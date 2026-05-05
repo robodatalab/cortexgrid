@@ -14,7 +14,7 @@ build/
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
-terraform/**/terraform.tfvars
+terraform/website/terraform.tfvars
 
 # Lambda build artifacts
 lambda/*/node_modules
