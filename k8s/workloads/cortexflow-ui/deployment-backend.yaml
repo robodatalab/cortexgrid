@@ -31,7 +31,7 @@ spec:
             - name: MLFLOW_HTTP_REQUEST_MAX_RETRIES
               value: "10"
             - name: MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR
-              value: "2.0"
+              value: "2"
           envFrom:
             # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for boto3's default
             # credential chain (used when cortexflow.secrets reads SM).
