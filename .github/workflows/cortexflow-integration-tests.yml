@@ -1,8 +1,7 @@
 name: cortexflow integration tests
 
 on:
-  repository_dispatch:
-    types: [argocd-synced]
+  workflow_dispatch:
 
 concurrency:
   group: cortexflow-integration
