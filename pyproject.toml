@@ -1,6 +1,6 @@
 [project]
 name = "cortexflow"
-version = "0.2.33"
+version = "0.2.34"
 description = "Connect your ML code to the RoboLab compute cluster — Ray, MLflow, and S3"
 requires-python = ">=3.11"
 dependencies = [
