@@ -45,15 +45,11 @@ _SECRET_NOTES_DB_URI = "NOTES_DB_URI"
 
 class PostgresCredentials(Operator):
     def setup(self, deps: dict) -> None:
-        if deps["profile"] != "onprem":
-            return
         password = self._get_or_generate_password()
         self._apply_secret(password)
         self._publish_uris(deps["node_ip"], password)
 
     def teardown(self, deps: dict) -> None:
-        if deps["profile"] != "onprem":
-            return
         delete_secret(_SECRET_MLFLOW_BACKEND_STORE_URI)
         delete_secret(_SECRET_NOTES_DB_URI)
 
@@ -67,9 +63,18 @@ class PostgresCredentials(Operator):
 
     def _read_existing_password(self) -> str | None:
         result = subprocess.run(
-            ["kubectl", "-n", _NAMESPACE, "get", "secret", _SECRET_NAME,
-             "-o", "jsonpath={.data.POSTGRES_PASSWORD}"],
-            capture_output=True, text=True,
+            [
+                "kubectl",
+                "-n",
+                _NAMESPACE,
+                "get",
+                "secret",
+                _SECRET_NAME,
+                "-o",
+                "jsonpath={.data.POSTGRES_PASSWORD}",
+            ],
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None

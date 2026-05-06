@@ -64,6 +64,7 @@ def _run_head(
             "env_file": util.ENV_FILE,
             "storage_path": entry["storage_path"],
             "workers": workers,
+            "profile": entry["profile"],
         }
         pipeline.teardown(deps)
     log.info("Head teardown complete.")

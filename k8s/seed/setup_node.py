@@ -36,6 +36,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--type", required=True, choices=["head", "worker"])
     p.add_argument("--ip", required=True)
     p.add_argument(
+        "--profile", required=True, choices=["aws", "onprem"],
+        help="Deployment profile -- gates profile-specific operators (e.g. PostgresCredentials).",
+    )
+    p.add_argument(
         "--storage-path", help="Required for --type=head; rejected for --type=worker"
     )
     p.add_argument("--ssh-user", default=None)
@@ -79,7 +83,7 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
                 f"Only one head is allowed — run teardown-node on the existing head first."
             )
 
-    entry = {"ip": args.ip, "role": args.type}
+    entry = {"ip": args.ip, "role": args.type, "profile": args.profile}
     if args.type == "head":
         entry["storage_path"] = args.storage_path
     if existing is not None and "progress" in existing:
@@ -127,6 +131,7 @@ def _run_head(
             "env_file": util.ENV_FILE,
             "storage_path": args.storage_path,
             "workers": workers,
+            "profile": args.profile,
             "github_token": os.environ["GH_TOKEN"],
             "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
             "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
@@ -159,6 +164,7 @@ def _run_worker(
         deps: dict = {
             "connection": c,
             "node_ip": args.ip,
+            "profile": args.profile,
         }
         if head_ready:
             deps["head_ip"] = head_ip

@@ -6,7 +6,11 @@ teardown_node) is responsible for populating deps.
 """
 
 from k8s.seed import operators
-from k8s.seed.pipeline import Pipeline
+from k8s.seed.pipeline import ConditionalOperator, Pipeline
+
+
+def _on_onprem(deps: dict) -> bool:
+    return deps["profile"] == "onprem"
 
 
 def build() -> Pipeline:
@@ -18,7 +22,7 @@ def build() -> Pipeline:
         operators.LocalPath(),
         operators.EnvSecrets(),
         operators.PlatformConfig(),
-        operators.PostgresCredentials(),
+        ConditionalOperator(operators.PostgresCredentials(), _on_onprem),
         operators.BootstrapSecrets(),
         operators.ControlPlaneDetails(),
         operators.NodeLabel(role="head", strict=True),

@@ -37,10 +37,7 @@ class K3sServer(Operator):
         c = deps["connection"]
         bootstrap_file = deps["bootstrap_file"]
         node_ip = deps["node_ip"]
-        profile = self._detect_profile(c)
-        # Surface the detected profile for downstream operators (PlatformConfig)
-        # so they don't have to re-SSH and parse /sys/class/dmi/id/sys_vendor.
-        deps["profile"] = profile
+        profile = deps["profile"]
         log.info(f"Installing k3s server on {c.host} (profile={profile})...")
         rendered = self._render_bootstrap(bootstrap_file.read_bytes(), profile)
         bootstrap_b64 = base64.b64encode(rendered).decode()
@@ -113,17 +110,6 @@ EOF
             timeout_s=300,
             poll_s=5,
         )
-
-    def _detect_profile(self, c) -> str:
-        """'aws' if the host is an EC2 instance, 'onprem' otherwise.
-
-        Reads /sys/class/dmi/id/sys_vendor — populated by the BIOS/firmware,
-        no network call. EC2 reports 'Amazon EC2'; physical hardware reports
-        the actual vendor (LENOVO, NVIDIA, ...).
-        """
-        result = c.run("cat /sys/class/dmi/id/sys_vendor", hide=True, warn=True)
-        vendor = result.stdout.strip() if result.ok else ""
-        return "aws" if vendor == "Amazon EC2" else "onprem"
 
     def _render_bootstrap(self, content: bytes, profile: str) -> bytes:
         """Drop the bootstrap Application that does not match the detected profile.
