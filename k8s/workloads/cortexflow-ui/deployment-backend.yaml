@@ -22,7 +22,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: cortexflow-ui-backend
-          image: ghcr.io/paksas/cortexflow-ui-backend:main-d9c2df3d50e79d45c13f8827cc3ad95d0785a571
+          image: ghcr.io/paksas/cortexflow-ui-backend:main-5f98c1919efbc4744dbcf857c9e9e6e8b203df0f
           env:
             # Retry-tolerant MLflow client: outlast a single OOMKill+restart cycle
             # (~30-60s of MLflow downtime) before surfacing the failure to UI users.
