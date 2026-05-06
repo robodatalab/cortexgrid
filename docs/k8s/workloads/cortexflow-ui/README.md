@@ -1,6 +1,6 @@
 # CortexFlow UI - K8s Spec
 
-How the cortexflow-ui frontend + backend run inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/cortexflow-ui/](../../../../k8s/argo-deployments/cortexflow-ui/). See that folder's README for the higher-level rationale.
+How the cortexflow-ui frontend + backend run inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/cortexflow-ui/](../../../../k8s/argo-deployments/aws/cortexflow-ui/). See that folder's README for the higher-level rationale.
 
 ## Deployment shape
 

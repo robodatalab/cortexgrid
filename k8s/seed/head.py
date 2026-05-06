@@ -12,6 +12,7 @@ from k8s.seed.pipeline import Pipeline
 def build() -> Pipeline:
     return Pipeline([
         operators.InstallPrereqs(),
+        operators.TailscaleHostname(),
         operators.K3sServer(),
         operators.Kubeconfig(),
         operators.LocalPath(),

@@ -1,6 +1,6 @@
 # Jobs Control Plane — K8s Spec
 
-How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/jobs-control-plane/](../../../../k8s/argo-deployments/jobs-control-plane/).
+How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/jobs-control-plane/](../../../../k8s/argo-deployments/aws/jobs-control-plane/).
 
 ## Deployment shape
 
@@ -17,4 +17,4 @@ How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo 
 
 ## Files
 
-- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../../../k8s/seed/setup-node.py) (seeded by `setup-node.py`, mirrored everywhere by [reflector](../../../../k8s/argo-deployments/secrets/reflector/)).
+- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../../../k8s/seed/setup-node.py) (seeded by `setup-node.py`, mirrored everywhere by [reflector](../../../../k8s/argo-deployments/aws/secrets/reflector/)).

@@ -93,7 +93,7 @@ make head-aws-destroy                     # single terraform destroy of the plat
 
 One namespace, backed by AWS Secrets Manager:
 
-- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key), `PlatformConfig` (profile-specific S3 + mlflow backend coordinates), and `terraform/platform/{rds,s3}` (AWS-managed coordinates). Read at cluster level by [External Secrets Operator](../k8s/argo-deployments/secrets/) (which materializes `aws-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexflow.secrets`](../cortexflow/secrets.py).
+- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key), `PlatformConfig` (profile-specific S3 + mlflow backend coordinates), and `terraform/platform/{rds,s3}` (AWS-managed coordinates). Read at cluster level by [External Secrets Operator](../k8s/argo-deployments/aws/secrets/) (which materializes `aws-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexflow.secrets`](../cortexflow/secrets.py).
 
 ## Website infrastructure
 

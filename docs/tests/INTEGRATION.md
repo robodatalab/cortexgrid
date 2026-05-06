@@ -19,7 +19,7 @@ Argo CD sync success on a subscribed Application
 - **Subscribed Applications** carry the annotation `notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""`:
   - cortexflow-ui, mlflow, ray, jobs-control-plane (cortexflow's cluster-side stack)
   - external-secrets, reflector (secrets plumbing)
-- **Notifications secret** ([k8s/argo-deployments/secrets/external-secrets/argocd-notifications.yaml](../../k8s/argo-deployments/secrets/external-secrets/argocd-notifications.yaml)) is materialized by ESO from SM. Two keys:
+- **Notifications secret** ([k8s/argo-deployments/aws/secrets/external-secrets/argocd-notifications.yaml](../../k8s/argo-deployments/aws/secrets/external-secrets/argocd-notifications.yaml)) is materialized by ESO from SM. Two keys:
   - `github-token` <- `robolab/infra/GH_TOKEN` (used in the webhook Authorization header)
   - `aws-role-arn` <- `robolab/infra/AWS_ROLE_ARN` (substituted into the dispatch payload)
 

@@ -12,6 +12,7 @@ from k8s.seed.operators.node_label import NodeLabel
 from k8s.seed.operators.platform_config import PlatformConfig
 from k8s.seed.operators.postgres_credentials import PostgresCredentials
 from k8s.seed.operators.prereqs import InstallPrereqs
+from k8s.seed.operators.tailscale_hostname import TailscaleHostname
 from k8s.seed.operators.worker_labels import WorkerLabels
 
 
@@ -28,5 +29,6 @@ __all__ = [
     "NodeLabel",
     "PlatformConfig",
     "PostgresCredentials",
+    "TailscaleHostname",
     "WorkerLabels",
 ]

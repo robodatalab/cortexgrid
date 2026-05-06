@@ -15,8 +15,8 @@ FastAPI can serve a built SPA, but splitting them keeps CI triggers narrow: a Ty
 ## Dependencies
 
 - **Custom images** — [`../../docker/cortexflow-ui/backend/`](../../../../k8s/docker/cortexflow-ui/backend/) (`ghcr.io/paksas/cortexflow-ui-backend`) and [`../../docker/cortexflow-ui/frontend/`](../../../../k8s/docker/cortexflow-ui/frontend/) (`ghcr.io/paksas/cortexflow-ui-frontend`).
-- **MLflow** ([../mlflow/](../../../../k8s/argo-deployments/mlflow/)) — source of experiments, runs, metrics, and artifacts. Accessed at `http://mlflow.mlflow.svc.cluster.local:5000`.
-- **Ray** ([../ray/](../../../../k8s/argo-deployments/ray/)) — source of job status and logs. Accessed at `http://ray-head.ray.svc.cluster.local:8265`.
+- **MLflow** ([../mlflow/](../../../../k8s/argo-deployments/aws/mlflow/)) — source of experiments, runs, metrics, and artifacts. Accessed at `http://mlflow.mlflow.svc.cluster.local:5000`.
+- **Ray** ([../ray/](../../../../k8s/argo-deployments/aws/ray/)) — source of job status and logs. Accessed at `http://ray-head.ray.svc.cluster.local:8265`.
 - **MinIO** ([../minio/](../../../../k8s/argo-deployments/onprem/minio/)) — artifact bucket read-through. Accessed at `http://minio.minio.svc.cluster.local:9000`.
-- **Reflector** ([../secrets/](../../../../k8s/argo-deployments/secrets/)) - mirrors `aws-creds` (real AWS keys, used by cortexflow.secrets to reach AWS Secrets Manager) and `ghcr-pull` (to pull the private images) into this namespace.
-- **External Secrets Operator** ([../secrets/](../../../../k8s/argo-deployments/secrets/)) - materializes `aws-creds` from `robolab/infra/AWS_*`. Service URLs and bucket names are read by the backend via cortexflow library calls into SM, not pre-rendered into env.
+- **Reflector** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) - mirrors `aws-creds` (real AWS keys, used by cortexflow.secrets to reach AWS Secrets Manager) and `ghcr-pull` (to pull the private images) into this namespace.
+- **External Secrets Operator** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) - materializes `aws-creds` from `robolab/infra/AWS_*`. Service URLs and bucket names are read by the backend via cortexflow library calls into SM, not pre-rendered into env.

@@ -1,6 +1,6 @@
 # MLflow — K8s Spec
 
-How the MLflow tracking server runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/mlflow/](../../../../k8s/argo-deployments/mlflow/). See that folder's README for the higher-level rationale.
+How the MLflow tracking server runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/mlflow/](../../../../k8s/argo-deployments/aws/mlflow/). See that folder's README for the higher-level rationale.
 
 ## Deployment shape
 

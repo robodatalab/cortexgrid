@@ -13,5 +13,5 @@ The chart's default `affinity` requires NFD (Node Feature Discovery) labels like
 ## Dependencies
 
 - **k3s configured with NVIDIA container runtime** — k3s auto-detects `nvidia-container-runtime` at install time if the host has `nvidia-container-toolkit`. No extra config needed on DGX (it was there for docker-compose). Verify with `kubectl get runtimeclass nvidia`.
-- **Ray** ([../ray/](../../../../k8s/argo-deployments/ray/)) — requests `nvidia.com/gpu` in its Deployment, which wouldn't schedule without this plugin.
+- **Ray** ([../ray/](../../../../k8s/argo-deployments/aws/ray/)) — requests `nvidia.com/gpu` in its Deployment, which wouldn't schedule without this plugin.
 - **Future GPU workloads** — any pod doing CUDA work adds `resources.limits.nvidia.com/gpu: N` to get scheduled onto GPU resources.
