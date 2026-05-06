@@ -16,6 +16,7 @@ def _args(**overrides) -> argparse.Namespace:
         "ip": "10.0.0.1",
         "storage_path": "/mnt/hdd",
         "ssh_user": "ptrochim",
+        "profile": "onprem",
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -29,7 +30,14 @@ class TestValidateAndUpdate(unittest.TestCase):
         result = setup_node.validate_and_update(cfg, _args(type="head"))
         self.assertEqual(
             result["nodes"],
-            [{"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd"}],
+            [
+                {
+                    "ip": "10.0.0.1",
+                    "role": "head",
+                    "profile": "onprem",
+                    "storage_path": "/mnt/hdd",
+                }
+            ],
         )
 
     def test_adds_worker_entry_without_storage_path(self) -> None:
@@ -39,7 +47,10 @@ class TestValidateAndUpdate(unittest.TestCase):
         result = setup_node.validate_and_update(
             cfg, _args(type="worker", ip="10.0.0.2", storage_path=None)
         )
-        self.assertEqual(result["nodes"][-1], {"ip": "10.0.0.2", "role": "worker"})
+        self.assertEqual(
+            result["nodes"][-1],
+            {"ip": "10.0.0.2", "role": "worker", "profile": "onprem"},
+        )
 
     def test_idempotent_reseed_same_ip_same_role_same_storage(self) -> None:
         cfg = {
@@ -48,7 +59,14 @@ class TestValidateAndUpdate(unittest.TestCase):
         result = setup_node.validate_and_update(cfg, _args(type="head"))
         self.assertEqual(
             result["nodes"],
-            [{"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd"}],
+            [
+                {
+                    "ip": "10.0.0.1",
+                    "role": "head",
+                    "profile": "onprem",
+                    "storage_path": "/mnt/hdd",
+                }
+            ],
         )
 
     def test_reseed_preserves_existing_progress(self) -> None:
@@ -123,6 +141,7 @@ class TestParseArgs(unittest.TestCase):
                     [
                         "--type=worker",
                         "--ip=10.0.0.1",
+                        "--profile=onprem",
                         "--storage-path=/mnt/hdd",
                     ]
                 )
@@ -135,6 +154,7 @@ class TestParseArgs(unittest.TestCase):
                 [
                     "--type=worker",
                     "--ip=10.0.0.1",
+                    "--profile=onprem",
                 ]
             )
         self.assertEqual(args.ssh_user, "configured_user")
@@ -147,6 +167,7 @@ class TestParseArgs(unittest.TestCase):
                 [
                     "--type=worker",
                     "--ip=10.0.0.1",
+                    "--profile=onprem",
                     "--ssh-user=explicit",
                 ]
             )
@@ -159,6 +180,7 @@ class TestParseArgs(unittest.TestCase):
                     [
                         "--type=worker",
                         "--ip=10.0.0.1",
+                        "--profile=onprem",
                     ]
                 )
         self.assertEqual(args.ssh_user, "laptop_user")
