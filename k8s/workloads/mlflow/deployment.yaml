@@ -31,6 +31,15 @@ spec:
               value: "*"
             - name: MLFLOW_SERVER_CORS_ALLOWED_ORIGINS
               value: "*"
+            # mlflow's S3ArtifactRepository reads MLFLOW_S3_ENDPOINT_URL, not
+            # the boto3 standard AWS_S3_ENDPOINT_URL. Alias the same s3-creds
+            # value so both profiles work: regional AWS S3 URL on AWS, the
+            # in-cluster MinIO Service URL on on-prem.
+            - name: MLFLOW_S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: AWS_S3_ENDPOINT_URL
           envFrom:
             # S3-purposed AWS_ACCESS_KEY_ID/SECRET, AWS_S3_ENDPOINT_URL, S3_BUCKET_NAME.
             # On AWS these target real S3; on on-prem they target in-cluster MinIO.
