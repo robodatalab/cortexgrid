@@ -13,7 +13,7 @@ def schedule_and_wait(
     retry: bool = False,
     **kwargs: Any,
 ) -> None:
-    """Submit fn as a Ray job; wait until it FINISHES. With retry=True, intermediate FAILED is ignored."""
+    """Submit fn as a Ray job; wait until it FINISHES. With retry=True, intermediate FAILED is ignored. STOPPED is always terminal."""
     job_id = cortexflow.remote(fn, *args, retry=retry, **kwargs)
     run_id = cortexflow.Experiment.get_instance().run_id
     deadline = time.monotonic() + timeout
@@ -27,7 +27,9 @@ def schedule_and_wait(
             status = cortexflow.get_ray_job_status(ray_job_id)
             if status == cortexflow.JobStatus.FINISHED:
                 return
-            if status in (cortexflow.JobStatus.FAILED, cortexflow.JobStatus.STOPPED) and not retry:
+            if status == cortexflow.JobStatus.STOPPED:
+                raise AssertionError(f"job {job_id} ended in {status}")
+            if status == cortexflow.JobStatus.FAILED and not retry:
                 raise AssertionError(f"job {job_id} ended in {status}")
         time.sleep(5)
     raise AssertionError(f"job {job_id} did not finish within {timeout}s")
