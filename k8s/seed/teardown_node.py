@@ -46,9 +46,11 @@ def _run_head(
 ) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
     pipeline = head.build()
-    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
-        total=len(pipeline.operators), desc=f"Head teardown {args.ip}"
-    ) as bar:
+    with (
+        util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c,
+        tqdm(total=len(pipeline.operators), desc=f"Head teardown {args.ip}") as bar,
+    ):
+
         def on_step_done(name: str) -> None:
             util.checkpoint_step_done(args.ip, name, "teardown")
             bar.set_postfix_str(name)
@@ -75,9 +77,11 @@ def _run_worker(
     # Mode is irrelevant for teardown — JoinCluster.teardown runs both cleanups.
     # We still need to pick *some* valid mode to construct the pipeline.
     pipeline = worker.build(mode="direct")
-    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
-        total=len(pipeline.operators), desc=f"Worker teardown {args.ip}"
-    ) as bar:
+    with (
+        util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c,
+        tqdm(total=len(pipeline.operators), desc=f"Worker teardown {args.ip}") as bar,
+    ):
+
         def on_step_done(name: str) -> None:
             util.checkpoint_step_done(args.ip, name, "teardown")
             bar.set_postfix_str(name)
@@ -103,8 +107,12 @@ def main() -> None:
         )
 
     load_dotenv(util.ENV_FILE)
-    ssh_pw = lambda: getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
-    sudo_pw = lambda: getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
+
+    def ssh_pw():
+        return getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
+
+    def sudo_pw():
+        return getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
     if entry["role"] == "head":
         _run_head(args, entry, cfg, ssh_pw, sudo_pw)
