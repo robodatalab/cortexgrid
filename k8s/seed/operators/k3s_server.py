@@ -126,17 +126,19 @@ EOF
         return "aws" if vendor == "Amazon EC2" else "onprem"
 
     def _render_bootstrap(self, content: bytes, profile: str) -> bytes:
-        """Drop the `onprem/**` exclude on on-prem so postgres + minio Apps sync.
+        """Drop the bootstrap Application that does not match the detected profile.
 
-        The shipped argocd.yaml has `exclude: 'onprem/**'` for the AWS path.
-        On-prem deployments need those Apps included.
+        The shipped argocd.yaml declares both `argo-bootstrap-aws` and
+        `argo-bootstrap-onprem`. Exactly one is staged into the cluster --
+        whichever matches sys_vendor.
         """
-        if profile == "aws":
-            return content
-        docs = list(yaml.safe_load_all(content))
-        for doc in docs:
-            if not doc or doc.get("kind") != "Application":
+        keep = f"argo-bootstrap-{profile}"
+        kept = []
+        for d in yaml.safe_load_all(content):
+            if not d or d.get("kind") != "Application":
+                kept.append(d)
                 continue
-            if doc.get("metadata", {}).get("name") == "argo-bootstrap":
-                doc["spec"]["source"]["directory"].pop("exclude", None)
-        return yaml.safe_dump_all(docs).encode()
+            name = d.get("metadata", {}).get("name", "")
+            if not name.startswith("argo-bootstrap-") or name == keep:
+                kept.append(d)
+        return yaml.safe_dump_all(kept).encode()
