@@ -1,46 +1,37 @@
 from __future__ import annotations
 
 import unittest
-import uuid
 
 import cortexflow
 from parameterized import parameterized  # type: ignore
 
-from tests.integration.cortexflow._ray_run import schedule_and_wait
+from tests.integration.cortexflow._ray_run import (
+    RUN_MODES,
+    get_logger,
+    run,
+    experiment_name,
+)
+
+log = get_logger(__name__)
 
 
-def _train_loop_crash_first_run() -> None:
+def _run_crash_first_run() -> None:
     ckpt = cortexflow.resume()
-    start_epoch = (ckpt.epoch + 1) if ckpt else 0
-    for epoch in range(start_epoch, 5):
-        if epoch == 3 and start_epoch == 0:
-            raise RuntimeError("simulated crash on first run")
-        with cortexflow.checkpoint() as new_ckpt:
-            new_ckpt.epoch = epoch
-    cortexflow.log_metric("final_epoch", 4.0)
-    cortexflow.log_metric("started_at_epoch", float(start_epoch))
+    log.info("Checkpoint %s", "deosn't yet exist" if ckpt is None else "loaded")
 
+    if ckpt is None:
+        log.info("Simulating a crash...")
+        raise RuntimeError("simulated crash on first run")
+    else:
+        log.info("Checkpointed value (should == 1): %d", ckpt.epoch)
 
-def _experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
+    log.info("Proceeding on a non-crash path")
 
+    with cortexflow.checkpoint() as new_ckpt:
+        log.info("Creating a checkpoint")
+        new_ckpt.epoch = 1
 
-def _run_main_crash_then_resume(fn, *args, **kwargs):
-    try:
-        fn(*args, **kwargs)
-    except RuntimeError:
-        pass
-    fn(*args, **kwargs)
-
-
-def _run_ray_with_retry(fn, *args, **kwargs):
-    schedule_and_wait(fn, *args, retry=True, **kwargs)
-
-
-_RUNNERS = [
-    ("main_process", _run_main_crash_then_resume),
-    ("via_ray_job", _run_ray_with_retry),
-]
+    cortexflow.log_metric("experiment_finished", 2)
 
 
 class TestCheckpoint(unittest.TestCase):
@@ -48,13 +39,13 @@ class TestCheckpoint(unittest.TestCase):
         cortexflow.Experiment.close()
         self.addCleanup(cortexflow.Experiment.close)
 
-    @parameterized.expand(_RUNNERS)
-    def test_resumes_after_crash(self, _mode, run) -> None:
-        name = _experiment_name()
+    @parameterized.expand(RUN_MODES)
+    def test_resumes_after_crash(self, mode) -> None:
+        name = experiment_name()
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
-        run(_train_loop_crash_first_run)
-        started = cortexflow.get_metric_history(exp.run_id, "started_at_epoch")
-        final = cortexflow.get_metric_history(exp.run_id, "final_epoch")
-        self.assertEqual([p["value"] for p in started], [3.0])
-        self.assertEqual([p["value"] for p in final], [4.0])
+        run(mode=mode, log=log, fn=_run_crash_first_run, retry=True)
+        experiment_finished_value = cortexflow.get_metric_history(
+            exp.run_id, "experiment_finished"
+        )
+        self.assertEqual([p["value"] for p in experiment_finished_value], [2])
