@@ -6,11 +6,14 @@ import uuid
 import cortexflow
 from parameterized import parameterized  # type: ignore
 
-from tests.integration.cortexflow._ray_run import schedule_and_wait
+from tests.integration.cortexflow._ray_run import (
+    RUN_MODES,
+    get_logger,
+    run,
+    experiment_name,
+)
 
-
-def _run_main(fn, *args, **kwargs):
-    fn(*args, **kwargs)
+log = get_logger(__name__)
 
 
 def _get_known_secret() -> None:
@@ -27,33 +30,23 @@ def _set_get_delete_roundtrip(key: str) -> None:
         raise RuntimeError("delete left the secret in place")
 
 
-def _experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
-
-
-_RUNNERS = [
-    ("main_process", _run_main),
-    ("via_ray_job", schedule_and_wait),
-]
-
-
 class TestSecrets(unittest.TestCase):
     def setUp(self) -> None:
         cortexflow.Experiment.close()
         self.addCleanup(cortexflow.Experiment.close)
 
-    @parameterized.expand(_RUNNERS)
-    def test_get_known_secret(self, _mode, run) -> None:
-        name = _experiment_name()
+    @parameterized.expand(RUN_MODES)
+    def test_get_known_secret(self, mode) -> None:
+        name = experiment_name()
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
-        run(_get_known_secret)
+        run(mode=mode, log=log, fn=_get_known_secret)
 
-    @parameterized.expand(_RUNNERS)
-    def test_set_get_delete_roundtrip(self, _mode, run) -> None:
+    @parameterized.expand(RUN_MODES)
+    def test_set_get_delete_roundtrip(self, mode) -> None:
         key = f"it-{uuid.uuid4().hex[:8]}-roundtrip"
         self.addCleanup(cortexflow.delete_secret, key)
-        name = _experiment_name()
+        name = experiment_name()
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
-        run(_set_get_delete_roundtrip, key)
+        run(mode=mode, log=log, fn=_set_get_delete_roundtrip, key=key)
