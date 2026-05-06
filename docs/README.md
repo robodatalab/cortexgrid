@@ -175,7 +175,7 @@ this on the laptop or in pods - cortexflow always reads from SM.
 
 - `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`) to SM.
 - AWS profile: terraform writes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI` ([rds](../terraform/platform/rds/)), `S3_BUCKET_NAME`, `AWS_S3_ENDPOINT_URL` ([s3](../terraform/platform/s3/)). `PlatformConfig` mirrors the real-AWS keys into `S3_ACCESS_KEY_ID/SECRET`.
-- On-prem profile: in-cluster `minio` and `postgres` Apps each run a PostSync `publish-config` Job that writes their own values to SM ([minio](../k8s/workloads/minio/publish-config.yaml), [postgres](../k8s/workloads/postgres/publish-config.yaml)). `PlatformConfig` is a no-op on on-prem.
+- On-prem profile: the [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) seed operator generates the postgres master password and publishes the composed `MLFLOW_BACKEND_STORE_URI` + `NOTES_DB_URI` to SM (mirrors how terraform composes these on AWS); minio's [PostSync `publish-config` Job](../k8s/workloads/minio/publish-config.yaml) writes the S3-purposed keys. `PlatformConfig` is a no-op on on-prem.
 - ESO syncs `robolab/infra/*` into k8s Secrets (`aws-creds`, `s3-creds`, `mlflow-config`); Reflector mirrors them into every workload namespace.
 
 #### Profile-aware values in SM
@@ -188,8 +188,8 @@ Workload manifests reference Secret *names*, not specific backends. The Secret *
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | [`PlatformConfig`](../k8s/seed/operators/platform_config.py) mirrors real AWS keys | minio [`publish-config`](../k8s/workloads/minio/publish-config.yaml) Job writes MinIO admin creds (`admin`/`adminadmin`) |
 | `S3_BUCKET_NAME` | `terraform/platform/s3` (`robolab-data`) | minio [`publish-config`](../k8s/workloads/minio/publish-config.yaml) Job writes `mlflow-artifacts` |
 | `AWS_S3_ENDPOINT_URL` | `terraform/platform/s3` (regional AWS S3 URL) | minio [`publish-config`](../k8s/workloads/minio/publish-config.yaml) Job writes in-cluster MinIO Service URL |
-| `MLFLOW_BACKEND_STORE_URI` | `terraform/platform/rds` (composed from RDS attrs) | postgres [`publish-config`](../k8s/workloads/postgres/publish-config.yaml) Job writes in-cluster Postgres URI |
-| `NOTES_DB_URI` | `terraform/platform/rds` (composed from RDS attrs) | postgres [`publish-config`](../k8s/workloads/postgres/publish-config.yaml) Job writes in-cluster Postgres URI |
+| `MLFLOW_BACKEND_STORE_URI` | `terraform/platform/rds` (composed from RDS attrs) | [`PostgresCredentials`](../k8s/seed/operators/postgres_credentials.py) seed operator composes from generated password + head tailscale IP |
+| `NOTES_DB_URI` | `terraform/platform/rds` (composed from RDS attrs) | [`PostgresCredentials`](../k8s/seed/operators/postgres_credentials.py) seed operator composes from generated password + head tailscale IP |
 
 Two cluster Secrets, two purposes:
 

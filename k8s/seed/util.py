@@ -36,6 +36,7 @@ SECRET_RAY_JOB_SERVER_URI = "RAY_JOB_SERVER_URI"
 # not the port.
 _MLFLOW_NODEPORT = 30500
 _RAY_DASHBOARD_NODEPORT = 30265
+_POSTGRES_NODEPORT = 30432
 
 
 def mlflow_tracking_uri_for(tailscale_ip: str) -> str:
@@ -44,6 +45,10 @@ def mlflow_tracking_uri_for(tailscale_ip: str) -> str:
 
 def ray_job_server_uri_for(tailscale_ip: str) -> str:
     return f"http://{tailscale_ip}:{_RAY_DASHBOARD_NODEPORT}"
+
+
+def postgres_uri_for(tailscale_ip: str, db: str, user: str, password: str) -> str:
+    return f"postgresql://{user}:{password}@{tailscale_ip}:{_POSTGRES_NODEPORT}/{db}"
 
 JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.py"
 JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"

@@ -17,6 +17,7 @@ def build() -> Pipeline:
         operators.LocalPath(),
         operators.EnvSecrets(),
         operators.PlatformConfig(),
+        operators.PostgresCredentials(),
         operators.BootstrapSecrets(),
         operators.ControlPlaneDetails(),
         operators.NodeLabel(role="head", strict=True),

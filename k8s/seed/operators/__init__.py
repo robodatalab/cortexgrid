@@ -10,6 +10,7 @@ from k8s.seed.operators.kubeconfig import Kubeconfig
 from k8s.seed.operators.local_path import LocalPath
 from k8s.seed.operators.node_label import NodeLabel
 from k8s.seed.operators.platform_config import PlatformConfig
+from k8s.seed.operators.postgres_credentials import PostgresCredentials
 from k8s.seed.operators.prereqs import InstallPrereqs
 from k8s.seed.operators.worker_labels import WorkerLabels
 
@@ -26,5 +27,6 @@ __all__ = [
     "LocalPath",
     "NodeLabel",
     "PlatformConfig",
+    "PostgresCredentials",
     "WorkerLabels",
 ]
