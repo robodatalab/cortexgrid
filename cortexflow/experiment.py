@@ -6,6 +6,7 @@ from pathlib import Path
 
 from cortexflow import s3_util
 from cortexflow.infra import get_mlflow_tracking_uri
+from cortexflow.jobs import stop_experiment_run_jobs
 from cortexflow.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
@@ -129,7 +130,11 @@ def _try_create_experiment_and_run(
 
 def delete_run(run_id: str) -> None:
     """Soft-delete a run in MLflow, cancel its Ray attempts, and wipe its
-    S3 job packages so it cannot be relaunched or re-read."""
+    S3 job packages so it cannot be relaunched or re-read.
+
+    stop_experiment_run_jobs runs first so the control plane stops spawning
+    fresh Ray attempts for retry=True jobs before we tear the run down."""
+    stop_experiment_run_jobs(run_id)
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     job_ids = [
         Path(f.path).name

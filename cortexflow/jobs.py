@@ -15,7 +15,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow import s3_util
-from cortexflow.experiment import get_mlflow_tracking_uri
+from cortexflow.infra import get_mlflow_tracking_uri
 from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
 from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
