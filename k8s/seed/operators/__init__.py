@@ -8,6 +8,7 @@ from k8s.seed.operators.join_cluster import JoinCluster
 from k8s.seed.operators.k3s_server import K3sServer
 from k8s.seed.operators.kubeconfig import Kubeconfig
 from k8s.seed.operators.local_path import LocalPath
+from k8s.seed.operators.minio_credentials import MinioCredentials
 from k8s.seed.operators.node_label import NodeLabel
 from k8s.seed.operators.platform_config import PlatformConfig
 from k8s.seed.operators.postgres_credentials import PostgresCredentials
@@ -26,6 +27,7 @@ __all__ = [
     "K3sServer",
     "Kubeconfig",
     "LocalPath",
+    "MinioCredentials",
     "NodeLabel",
     "PlatformConfig",
     "PostgresCredentials",
