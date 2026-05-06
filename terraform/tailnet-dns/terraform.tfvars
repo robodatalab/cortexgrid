@@ -5,7 +5,6 @@ hostnames = [
   "argo",
   "cortexflow",
   "grafana",
-  "loki",
   "mlflow",
   "prometheus",
   "ray",
