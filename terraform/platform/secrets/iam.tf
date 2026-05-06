@@ -129,6 +129,11 @@ data "aws_iam_policy_document" "github_actions_secrets_read" {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/*"]
   }
+
+  statement {
+    actions   = ["secretsmanager:ListSecrets"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_actions_secrets_read" {
