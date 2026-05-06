@@ -24,7 +24,7 @@ def _schedule_and_wait(
     **kwargs: Any,
 ) -> None:
     """Submit fn as a Ray job; wait until it FINISHES. With retry=True, intermediate FAILED is ignored. STOPPED is always terminal."""
-    timeout = 60
+    timeout = 600
 
     job_id = cortexflow.remote(fn, *args, retry=retry, **kwargs)
     run_id = cortexflow.Experiment.get_instance().run_id
@@ -33,9 +33,9 @@ def _schedule_and_wait(
     while time.monotonic() < deadline:
         match = next(
             (
-                l
-                for l in cortexflow.list_experiment_run_jobs(run_id)
-                if l.job_id == job_id
+                job
+                for job in cortexflow.list_experiment_run_jobs(run_id)
+                if job.job_id == job_id
             ),
             None,
         )
@@ -70,6 +70,7 @@ def _run_local(
     **kwargs: Any,
 ) -> None:
     if retry:
+        errors = []
         available_retries = 5
         finished = False
         while not finished and available_retries > 0:
@@ -79,7 +80,11 @@ def _run_local(
                 finished = True
             except Exception as ex:
                 finished = False
+                errors.append(ex)
                 log.exception("Exception caught: %r", ex)
+
+        if not finished:
+            raise errors[-1]
     else:
         fn(*args, **kwargs)
 

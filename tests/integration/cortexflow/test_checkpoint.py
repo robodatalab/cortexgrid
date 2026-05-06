@@ -16,20 +16,25 @@ log = get_logger(__name__)
 
 
 def _run_crash_first_run() -> None:
-    ckpt = cortexflow.resume()
-    log.info("Checkpoint %s", "deosn't yet exist" if ckpt is None else "loaded")
+    old_ckpt = cortexflow.resume()
+    log.info("Checkpoint %s", "doesn't yet exist" if old_ckpt is None else "loaded")
 
-    if ckpt is None:
-        log.info("Simulating a crash...")
-        raise RuntimeError("simulated crash on first run")
-    else:
-        log.info("Checkpointed value (should == 1): %d", ckpt.epoch)
-
-    log.info("Proceeding on a non-crash path")
+    is_this_first_run = old_ckpt is None
 
     with cortexflow.checkpoint() as new_ckpt:
         log.info("Creating a checkpoint")
         new_ckpt.epoch = 1
+
+    if is_this_first_run:
+        log.info("Simulating a crash...")
+        raise RuntimeError("simulated crash on first run")
+    else:
+        log.info(
+            "Checkpointed value (should == 1): %d",
+            old_ckpt.epoch if old_ckpt is not None else -1,
+        )
+
+    log.info("Proceeding on a non-crash path")
 
     cortexflow.log_metric("experiment_finished", 2)
 
