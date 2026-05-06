@@ -37,10 +37,7 @@ class K3sServer(Operator):
         c = deps["connection"]
         bootstrap_file = deps["bootstrap_file"]
         node_ip = deps["node_ip"]
-        profile = self._detect_profile(c)
-        # Surface the detected profile for downstream operators (PlatformConfig)
-        # so they don't have to re-SSH and parse /sys/class/dmi/id/sys_vendor.
-        deps["profile"] = profile
+        profile = deps["profile"]
         log.info(f"Installing k3s server on {c.host} (profile={profile})...")
         rendered = self._render_bootstrap(bootstrap_file.read_bytes(), profile)
         bootstrap_b64 = base64.b64encode(rendered).decode()
@@ -114,29 +111,20 @@ EOF
             poll_s=5,
         )
 
-    def _detect_profile(self, c) -> str:
-        """'aws' if the host is an EC2 instance, 'onprem' otherwise.
-
-        Reads /sys/class/dmi/id/sys_vendor — populated by the BIOS/firmware,
-        no network call. EC2 reports 'Amazon EC2'; physical hardware reports
-        the actual vendor (LENOVO, NVIDIA, ...).
-        """
-        result = c.run("cat /sys/class/dmi/id/sys_vendor", hide=True, warn=True)
-        vendor = result.stdout.strip() if result.ok else ""
-        return "aws" if vendor == "Amazon EC2" else "onprem"
-
     def _render_bootstrap(self, content: bytes, profile: str) -> bytes:
-        """Drop the `onprem/**` exclude on on-prem so postgres + minio Apps sync.
+        """Drop the bootstrap Application that does not match the detected profile.
 
-        The shipped argocd.yaml has `exclude: 'onprem/**'` for the AWS path.
-        On-prem deployments need those Apps included.
+        The shipped argocd.yaml declares both `argo-bootstrap-aws` and
+        `argo-bootstrap-onprem`. Exactly one is staged into the cluster --
+        whichever matches sys_vendor.
         """
-        if profile == "aws":
-            return content
-        docs = list(yaml.safe_load_all(content))
-        for doc in docs:
-            if not doc or doc.get("kind") != "Application":
+        keep = f"argo-bootstrap-{profile}"
+        kept = []
+        for d in yaml.safe_load_all(content):
+            if not d or d.get("kind") != "Application":
+                kept.append(d)
                 continue
-            if doc.get("metadata", {}).get("name") == "argo-bootstrap":
-                doc["spec"]["source"]["directory"].pop("exclude", None)
-        return yaml.safe_dump_all(docs).encode()
+            name = d.get("metadata", {}).get("name", "")
+            if not name.startswith("argo-bootstrap-") or name == keep:
+                kept.append(d)
+        return yaml.safe_dump_all(kept).encode()

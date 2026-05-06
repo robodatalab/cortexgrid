@@ -53,22 +53,23 @@ spec:
             send: [app-synced]
             when: app.status.operationState.phase in ['Succeeded']
 ---
+# Both bootstrap Applications are declared here so the deployment list per
+# profile is visible at a glance. K3sServer detects sys_vendor at install time
+# and deletes the Application that does not match the profile before applying
+# this manifest -- exactly one of the two is ever staged into the cluster.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: argo-bootstrap
+  name: argo-bootstrap-aws
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://github.com/paksas/robolab-infra.git
     targetRevision: main
-    path: k8s/argo-deployments
+    path: k8s/argo-deployments/aws
     directory:
       recurse: true
-      # AWS profile: skip on-prem-only Apps (postgres, minio — replaced by RDS, S3).
-      # K3sServer rewrites this to an empty string when sys_vendor != "Amazon EC2".
-      exclude: 'onprem/**'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -82,6 +83,33 @@ spec:
     # resources that depend on those pods (ClusterSecretStore validation
     # webhook) fail their first apply. Without this block, ArgoCD's default
     # backoff stretches recovery to 3+ minutes; with it, ~30-60s.
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-bootstrap-onprem
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/paksas/robolab-infra.git
+    targetRevision: main
+    path: k8s/argo-deployments/onprem
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     retry:
       limit: 10
       backoff:

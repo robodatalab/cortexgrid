@@ -4,13 +4,15 @@
 SSH_USER_FLAG = $(if $(SSH_USER),--ssh-user=$(SSH_USER))
 
 head-setup:
-	@[ -n "$(IP)" ]           || { echo "IP is required (e.g. make setup-head IP=100.110.47.89 STORAGE_PATH=...)"; exit 1; }
+	@[ -n "$(IP)" ]           || { echo "IP is required (e.g. make head-setup IP=100.110.47.89 STORAGE_PATH=... PROFILE=onprem)"; exit 1; }
 	@[ -n "$(STORAGE_PATH)" ] || { echo "STORAGE_PATH is required (path to the HDD mount used for PVCs)"; exit 1; }
-	uv run python -m k8s.seed.setup_node --type=head --ip=$(IP) --storage-path=$(STORAGE_PATH) $(SSH_USER_FLAG)
+	@[ -n "$(PROFILE)" ]      || { echo "PROFILE is required (aws|onprem)"; exit 1; }
+	uv run python -m k8s.seed.setup_node --type=head --ip=$(IP) --storage-path=$(STORAGE_PATH) --profile=$(PROFILE) $(SSH_USER_FLAG)
 
 worker-setup:
-	@[ -n "$(IP)" ] || { echo "IP is required (e.g. make setup-worker IP=100.80.27.32)"; exit 1; }
-	uv run python -m k8s.seed.setup_node --type=worker --ip=$(IP) $(SSH_USER_FLAG)
+	@[ -n "$(IP)" ]      || { echo "IP is required (e.g. make worker-setup IP=100.80.27.32 PROFILE=onprem)"; exit 1; }
+	@[ -n "$(PROFILE)" ] || { echo "PROFILE is required (aws|onprem)"; exit 1; }
+	uv run python -m k8s.seed.setup_node --type=worker --ip=$(IP) --profile=$(PROFILE) $(SSH_USER_FLAG)
 
 node-teardown:
 	@[ -n "$(IP)" ] || { echo "IP is required (e.g. make teardown-node IP=100.80.27.32)"; exit 1; }

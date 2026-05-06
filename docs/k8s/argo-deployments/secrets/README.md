@@ -27,7 +27,7 @@ reflector/ replicates a single Secret into every K8s namespace, present and futu
 The user will be responsible for adding those required secrets:
 
 1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexflow/secrets.py](../../../../cortexflow/secrets.py) or AWS console).
-2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo-deployments/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
+2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo-deployments/aws/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
 3. Commit + push. ESO creates the k8s Secret; rotation auto-propagates.
 
 There is no static list — it grows with the platform. A new secret is needed whenever a deployment fails with an auth error (ArgoCD shows it, `kubectl describe` names the missing credential) or when adding a deployment that talks to a new external system.

@@ -10,6 +10,6 @@ Training runs submitted through MLflow need to be picked up and scheduled on Ray
 
 ## Dependencies
 
-- **MLflow** ([../mlflow/](../../../../k8s/argo-deployments/mlflow/)) — polled for submitted runs. URL set via `MLFLOW_TRACKING_URI`.
-- **Ray** ([../ray/](../../../../k8s/argo-deployments/ray/)) — target scheduler. Connection via `RAY_ADDRESS` (Ray client port on the head service).
-- **Reflector** ([../secrets/](../../../../k8s/argo-deployments/secrets/)) — mirrors the cluster-wide `aws-creds` (seeded by `setup-node.py` in `external-secrets`) and `ghcr-pull` Secrets into this namespace. The Deployment consumes `aws-creds` via `envFrom` and references `ghcr-pull` in `imagePullSecrets`.
+- **MLflow** ([../mlflow/](../../../../k8s/argo-deployments/aws/mlflow/)) — polled for submitted runs. URL set via `MLFLOW_TRACKING_URI`.
+- **Ray** ([../ray/](../../../../k8s/argo-deployments/aws/ray/)) — target scheduler. Connection via `RAY_ADDRESS` (Ray client port on the head service).
+- **Reflector** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) — mirrors the cluster-wide `aws-creds` (seeded by `setup-node.py` in `external-secrets`) and `ghcr-pull` Secrets into this namespace. The Deployment consumes `aws-creds` via `envFrom` and references `ghcr-pull` in `imagePullSecrets`.

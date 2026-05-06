@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--type", required=True, choices=["head", "worker"])
     p.add_argument("--ip", required=True)
     p.add_argument(
+        "--profile",
+        required=True,
+        choices=["aws", "onprem"],
+        help="Deployment profile -- gates profile-specific operators (e.g. PostgresCredentials).",
+    )
+    p.add_argument(
         "--storage-path", help="Required for --type=head; rejected for --type=worker"
     )
     p.add_argument("--ssh-user", default=None)
@@ -79,7 +85,7 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
                 f"Only one head is allowed — run teardown-node on the existing head first."
             )
 
-    entry = {"ip": args.ip, "role": args.type}
+    entry = {"ip": args.ip, "role": args.type, "profile": args.profile}
     if args.type == "head":
         entry["storage_path"] = args.storage_path
     if existing is not None and "progress" in existing:
@@ -111,9 +117,11 @@ def _run_head(
 ) -> None:
     workers = [n for n in cfg.get("nodes", []) if n["role"] == "worker"]
     pipeline = head.build()
-    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
-        total=len(pipeline.operators), desc=f"Head setup {args.ip}"
-    ) as bar:
+    with (
+        util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c,
+        tqdm(total=len(pipeline.operators), desc=f"Head setup {args.ip}") as bar,
+    ):
+
         def on_step_done(name: str) -> None:
             util.checkpoint_step_done(args.ip, name, "setup")
             bar.set_postfix_str(name)
@@ -127,6 +135,7 @@ def _run_head(
             "env_file": util.ENV_FILE,
             "storage_path": args.storage_path,
             "workers": workers,
+            "profile": args.profile,
             "github_token": os.environ["GH_TOKEN"],
             "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
             "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
@@ -147,9 +156,11 @@ def _run_worker(
     mode: Literal["direct", "deferred"] = "direct" if head_ready else "deferred"
 
     pipeline = worker.build(mode=mode)
-    with util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c, tqdm(
-        total=len(pipeline.operators), desc=f"Worker setup {args.ip}"
-    ) as bar:
+    with (
+        util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c,
+        tqdm(total=len(pipeline.operators), desc=f"Worker setup {args.ip}") as bar,
+    ):
+
         def on_step_done(name: str) -> None:
             util.checkpoint_step_done(args.ip, name, "setup")
             bar.set_postfix_str(name)
@@ -159,6 +170,7 @@ def _run_worker(
         deps: dict = {
             "connection": c,
             "node_ip": args.ip,
+            "profile": args.profile,
         }
         if head_ready:
             deps["head_ip"] = head_ip
@@ -184,8 +196,12 @@ def main() -> None:
     util.save_config(cfg)
 
     load_dotenv(util.ENV_FILE)
-    ssh_pw = lambda: getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
-    sudo_pw = lambda: getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
+
+    def ssh_pw():
+        return getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
+
+    def sudo_pw():
+        return getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
     if args.type == "head":
         _run_head(args, cfg, ssh_pw, sudo_pw)
@@ -195,6 +211,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
     )
     main()

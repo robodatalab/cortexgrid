@@ -1,0 +1,79 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.2.0
+    helm:
+      values: |
+        grafana:
+          adminPassword: admin
+          service:
+            type: NodePort
+            nodePort: 30300
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - grafana.robodatalab.com
+            tls:
+              - hosts:
+                  - grafana.robodatalab.com
+                secretName: robodatalab-wildcard-tls
+          grafana.ini:
+            auth.anonymous:
+              enabled: true
+              org_role: Viewer
+            security:
+              allow_embedding: true
+          nodeSelector:
+            role: head
+        prometheus:
+          service:
+            type: NodePort
+            nodePort: 30090
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - prometheus.robodatalab.com
+            tls:
+              - hosts:
+                  - prometheus.robodatalab.com
+                secretName: robodatalab-wildcard-tls
+          prometheusSpec:
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            retention: 30d
+            nodeSelector:
+              role: head
+        alertmanager:
+          alertmanagerSpec:
+            nodeSelector:
+              role: head
+        prometheusOperator:
+          nodeSelector:
+            role: head
+        kube-state-metrics:
+          nodeSelector:
+            role: head
+        prometheus-node-exporter:
+          nodeSelector:
+            role: head
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
