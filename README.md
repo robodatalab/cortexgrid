@@ -11,6 +11,8 @@
 [![ray-head](https://github.com/paksas/robolab-infra/actions/workflows/ray-head.yml/badge.svg)](https://github.com/paksas/robolab-infra/actions/workflows/ray-head.yml)
 [![version-bump](https://github.com/paksas/robolab-infra/actions/workflows/version-bump.yml/badge.svg)](https://github.com/paksas/robolab-infra/actions/workflows/version-bump.yml)
 
+> **Run any Python function on your own GPUs — no Dockerfile, no decorator, no commit.**
+
 Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Cloud resources run on AWS (`eu-west-2`, except the marketing site which stays in `us-east-1` because CloudFront requires `us-east-1` ACM) and are provisioned with Terraform. ML compute runs on a DGX Spark worker that joins the cluster over Tailscale.
 
 ## Features
@@ -97,17 +99,12 @@ ray.get(future)
 
 **5. What it actually costs to use.** The mechanism by which each platform ships your code (tarball / image / runtime env / git diff) maps to four user-visible costs:
 
-*Money.* Cortexflow and ClearML are $0 software — you pay only for the hardware you own or rent yourself. Modal is per-second metered for compute and GPU; there is no way to substitute your own hardware for a discount. Anyscale charges a management margin on top of your underlying AWS/GCP bill.
-
-*Bringing your own hardware.* Cortexflow and ClearML treat this as the default — your DGX runs the same workloads with no special path. Anyscale connects to your cloud accounts but true on-prem support is limited. Modal does not support it at all; you are on Modal's fleet.
-
-*Time from submit to running.* Cortexflow is bounded by the 5s control-plane poll plus Ray container start (~10s warm). Modal is 1-2s with memory snapshots, 5-30s typical cold; the *first* image build can take minutes. Anyscale is sub-second on a warm cluster but minutes if a cluster has to spin up. ClearML is the agent poll (~5-10s) plus environment recreation from the captured pip freeze (seconds to minutes depending on cache).
-
-*Developer steps for the very first job.*
-- **Cortexflow**: write a function, call `cortexflow.remote(fn)`. No Dockerfile, no decorator, no git commit.
-- **Modal**: write a function, decorate `@app.function(image=...)`, declare the image inline (pip deps in Python), run `modal run`.
-- **Anyscale**: configure a compute cluster + runtime env, decorate `@ray.remote`, `ray.init("anyscale://...")`.
-- **ClearML**: write a script, add `Task.init()` + `task.execute_remotely()`, *commit and push* so the agent can clone the repo, install `clearml-agent` on the worker.
+| | Money | BYO hardware | Time from submit to running | Steps for the very first job |
+|---|---|---|---|---|
+| **Cortexflow** | $0 software; you pay your own hardware | default | ~10s warm (5s control-plane poll + Ray container start) | write fn → `cortexflow.remote(fn)`. No Dockerfile, no decorator, no commit. |
+| **Modal** | per-second metered for compute + GPU; no way to use your own hardware for a discount | not supported (Modal's fleet only) | 1-2s with memory snapshots, 5-30s cold; first image build can take minutes | decorate `@app.function(image=...)`, declare the image inline (pip deps in Python), `modal run` |
+| **Anyscale** | AWS/GCP bill + Anyscale management margin | cloud accounts only; true on-prem limited | sub-second on a warm cluster; minutes if a cluster must spin up | configure compute cluster + runtime env, `@ray.remote`, `ray.init("anyscale://...")` |
+| **ClearML** | $0 software; you pay your own hardware | default | agent poll (~5-10s) + env recreation from pip freeze (seconds to minutes) | `Task.init()` + `task.execute_remotely()`; *commit and push* so the agent can clone the repo; install `clearml-agent` on the worker |
 
 The asymmetry: Modal asks you to *describe* the environment (in Python). ClearML asks you to *commit* it (to git). Cortexflow uses whatever's in your working directory at submit time — no description, no commit.
 
