@@ -19,7 +19,7 @@ spec:
         role: head
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-10-15T17-29-55Z
+          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
           args:
             - server
             - /data
