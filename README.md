@@ -27,18 +27,88 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 
 ## Comparison to other platforms
 
-Where cortexflow's surface overlaps with hosted/open-source alternatives:
+Where cortexflow's surface overlaps with hosted/open-source alternatives. The "Submission" column is the dimension that actually distinguishes them — callable-level (submit a function) vs script-level (lift-and-shift the whole script) vs DAG/class-based.
 
-| Platform | Compute | Retries | Checkpoint | Experiment tracking | Exp. UI | On-prem | OSS |
-|---|---|---|---|---|---|---|---|
-| **Cortexflow** | Ray + jobs-control-plane | `retry=` flag | `checkpoint() / resume()` | MLflow | `cortexflow-ui` | yes | yes |
-| **ClearML** | agents + queues | yes | yes (artifacts) | yes | yes | yes (self-host) | yes |
-| **Determined AI** | yes | auto | yes (built-in, first-class) | yes | yes | yes (Helm) | yes |
-| **Metaflow / Outerbounds** | yes | yes | yes (built-in) | yes | yes | yes | yes (Metaflow) |
-| **Anyscale** | managed Ray | Ray-native | via Ray Train | integrates MLflow / W&B | lineage UI | no (cloud) | no |
-| **dstack** | yes | yes | manual | no | partial | yes | yes |
-| **Modal** | yes | yes | manual (`modal.Volume`) | no | jobs only | no | no |
+| Platform | Compute | Submission | Retries | Checkpoint | Tracking | Exp. UI | On-prem | OSS |
+|---|---|---|---|---|---|---|---|---|
+| **Cortexflow** | Ray + jobs-control-plane | callable | `retry=` flag | auto via MLflow | MLflow | `cortexflow-ui` | yes | yes |
+| **ClearML** | agents + queues | script (`execute_remotely`) | yes | manual (artifacts) | yes | yes | yes (self-host) | yes |
+| **Determined AI** | yes | `Trial` class | auto | first-class | yes | yes | yes (Helm) | yes |
+| **Metaflow / Outerbounds** | yes | `@step` DAG | yes | first-class | yes | yes | yes | yes (Metaflow) |
+| **Anyscale** | managed Ray | callable (Ray-native) | Ray-native | via Ray Train | MLflow / W&B | lineage UI | no (cloud) | no |
+| **dstack** | yes | task config | yes | manual | no | partial | yes | yes |
+| **Modal** | yes | callable (`spawn`) | yes | manual (`modal.Volume`) | no | jobs only | no | no |
 
-**Largest overlap: ClearML** — its agent-and-queue architecture maps almost 1:1 onto `cortexflow.remote` + `jobs-control-plane`, plus it bundles experiment tracking, web UI, and a self-hosted server. Determined is a close second but its `Trial` API constrains job shape to training loops. Anyscale would feel native (already on Ray) but kills on-prem and isn't OSS. Modal has the slickest DX but covers only the compute half.
+**Bottom line:** no platform is a 1:1 drop-in. **ClearML** has the broadest *infrastructure* overlap (queues + agents + tracking + UI + on-prem) but submits scripts, not callables — you'd restructure how work is dispatched. **Anyscale** is the closest *API* match (cortexflow's callable submission is just Ray) but kills on-prem and isn't OSS. **Modal** has the slickest DX but covers only the compute half.
+
+### Code differences
+
+The same toy job — log a metric locally, submit a remote callable that logs another metric to the same experiment — looks different on each platform. The full rewrites of [`cortexflow_examples/jobs/main.py`](cortexflow_examples/jobs/main.py) for each are below.
+
+**1. Defining the remote callable.** Cortexflow and ClearML need no decoration; Modal binds the function to an `App` + `Image`; Anyscale uses Ray's `@ray.remote`.
+
+```python
+# Cortexflow
+def job_fn():
+    cortexflow.log_metric("job_metric", 42.0)
+
+# Modal
+@app.function(secrets=[modal.Secret.from_name("mlflow")])
+def job_fn(run_id: str): ...
+
+# Anyscale (Ray)
+@ray.remote(num_gpus=0)
+def job_fn(tracking_uri: str, run_id: str): ...
+
+# ClearML — no decorator; the script is the unit.
+# Task.running_locally() splits the local half from the agent half.
+```
+
+**2. Submitting the job.**
+
+| Platform | Submit | Returns |
+|---|---|---|
+| Cortexflow | `cortexflow.remote(job_fn)` | string job ID |
+| Modal | `job_fn.spawn(run_id)` | `FunctionCall` |
+| Anyscale | `job_fn.remote(uri, run_id)` | `ObjectRef` |
+| ClearML | `task.execute_remotely(queue_name="dgx")` | (enqueues, then exits the local process) |
+
+**3. Waiting for completion.** Cortexflow polls Ray via the MLflow lifecycle. Modal and Anyscale block on the handle. ClearML is implicit — the agent runs to completion after the local process has already exited.
+
+```python
+# Cortexflow — poll
+while True:
+    lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
+    status = cortexflow.get_ray_job_status(lifecycle.get_ray_job_id())
+    if status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
+        break
+    time.sleep(5)
+
+# Modal
+call.get(timeout=600)
+
+# Anyscale
+ray.get(future)
+
+# ClearML — nothing; local side has already exited at execute_remotely()
+```
+
+**4. Experiment tracking.** Cortexflow and ClearML have it built in: both halves of the job log to the same run/task automatically. Modal and Anyscale don't — you bring your own MLflow server and explicitly pass `run_id` (and `tracking_uri`) into the remote callable.
+
+**5. What it actually costs to use.** The mechanism by which each platform ships your code (tarball / image / runtime env / git diff) maps to four user-visible costs:
+
+*Money.* Cortexflow and ClearML are $0 software — you pay only for the hardware you own or rent yourself. Modal is per-second metered for compute and GPU; there is no way to substitute your own hardware for a discount. Anyscale charges a management margin on top of your underlying AWS/GCP bill.
+
+*Bringing your own hardware.* Cortexflow and ClearML treat this as the default — your DGX runs the same workloads with no special path. Anyscale connects to your cloud accounts but true on-prem support is limited. Modal does not support it at all; you are on Modal's fleet.
+
+*Time from submit to running.* Cortexflow is bounded by the 5s control-plane poll plus Ray container start (~10s warm). Modal is 1-2s with memory snapshots, 5-30s typical cold; the *first* image build can take minutes. Anyscale is sub-second on a warm cluster but minutes if a cluster has to spin up. ClearML is the agent poll (~5-10s) plus environment recreation from the captured pip freeze (seconds to minutes depending on cache).
+
+*Developer steps for the very first job.*
+- **Cortexflow**: write a function, call `cortexflow.remote(fn)`. No Dockerfile, no decorator, no git commit.
+- **Modal**: write a function, decorate `@app.function(image=...)`, declare the image inline (pip deps in Python), run `modal run`.
+- **Anyscale**: configure a compute cluster + runtime env, decorate `@ray.remote`, `ray.init("anyscale://...")`.
+- **ClearML**: write a script, add `Task.init()` + `task.execute_remotely()`, *commit and push* so the agent can clone the repo, install `clearml-agent` on the worker.
+
+The asymmetry: Modal asks you to *describe* the environment (in Python). ClearML asks you to *commit* it (to git). Cortexflow uses whatever's in your working directory at submit time — no description, no commit.
 
 Full documentation: [docs/README.md](docs/README.md).
