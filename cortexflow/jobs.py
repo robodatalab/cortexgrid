@@ -15,6 +15,7 @@ import tempfile
 from typing import Any, Callable
 
 from cortexflow import s3_util
+from cortexflow._bundle import filter_pip_freeze, stage_bundle
 from cortexflow.infra import get_mlflow_tracking_uri
 from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
 from cortexflow.secrets import get_secret
@@ -148,6 +149,7 @@ class Payload(BaseModel):
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     project_code_root: str
+    external_deps: list[str] = []
     num_gpus: int = 0
     num_cpus: int = 1
 
@@ -173,6 +175,7 @@ class Payload(BaseModel):
                 text=True,
                 check=True,
             ).stdout
+            pip_requirements = filter_pip_freeze(pip_requirements, set(self.external_deps))
             pip_requirements = _strip_ray(pip_requirements)
             pip_requirements = _inject_github_token(pip_requirements)
             (project_dest / "requirements.txt").write_text(
@@ -238,41 +241,34 @@ def schedule_remote_job(
     """Submit a function to the control plane. Returns a job ID."""
     name_gen = Haikunator()
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
-    project_code_path = _find_pyproject().parent
-    log.info("Submitting job %s (project=%s)", job_id, project_code_path)
-    payload = Payload(
-        experiment_name=experiment_name,
-        run_id=run_id,
-        job_id=job_id,
-        fn=fn,
-        args=args,
-        kwargs=kwargs,
-        project_code_root=str(project_code_path),
-        num_gpus=num_gpus,
-        num_cpus=num_cpus,
-    )
-    payload.save_to_mlflow()
-
-    lifecycle = JobLifecycle(
-        experiment_name=experiment_name,
-        run_id=run_id,
-        job_id=job_id,
-        retry=retry,
-        num_gpus=num_gpus,
-        num_cpus=num_cpus,
-    )
-    lifecycle.save_to_mlflow()
-
+    with stage_bundle(fn) as bundle:
+        log.info(
+            "Submitting job %s (ship_root=%s, %d deps)",
+            job_id, bundle.ship_root, len(bundle.external_deps),
+        )
+        payload = Payload(
+            experiment_name=experiment_name,
+            run_id=run_id,
+            job_id=job_id,
+            fn=fn,
+            args=args,
+            kwargs=kwargs,
+            project_code_root=str(bundle.staging_dir),
+            external_deps=bundle.external_deps,
+            num_gpus=num_gpus,
+            num_cpus=num_cpus,
+        )
+        payload.save_to_mlflow()
+        lifecycle = JobLifecycle(
+            experiment_name=experiment_name,
+            run_id=run_id,
+            job_id=job_id,
+            retry=retry,
+            num_gpus=num_gpus,
+            num_cpus=num_cpus,
+        )
+        lifecycle.save_to_mlflow()
     return job_id
-
-
-def _find_pyproject() -> Path:
-    """Walk up from cwd() to find pyproject.toml."""
-    for parent in [Path.cwd(), *Path.cwd().parents]:
-        candidate = parent / "pyproject.toml"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError("No pyproject.toml found in any parent directory")
 
 
 def _strip_ray(pip_requirements: str) -> str:

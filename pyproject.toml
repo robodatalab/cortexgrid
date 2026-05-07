@@ -19,6 +19,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "pydotenv>=0.0.7",
     "pydantic>=2.13.3",
+    "requests>=2.31",
 ]
 
 [build-system]
