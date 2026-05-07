@@ -35,14 +35,14 @@ class TestExperiment(unittest.TestCase):
         self.addCleanup(cortexflow.Experiment.close)
 
     def test_init_creates_experiment_visible_in_listings(self) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
         self.assertIn(name, [e.experiment_name for e in cortexflow.list_experiments()])
 
     @parameterized.expand(RUN_MODES)
     def test_log_params(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_log_params_dict)
@@ -50,7 +50,7 @@ class TestExperiment(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_log_metrics_dict(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_log_metrics_dict)
@@ -61,7 +61,7 @@ class TestExperiment(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_log_metric_history(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_log_metric_history)

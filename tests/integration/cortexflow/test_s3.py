@@ -48,7 +48,7 @@ class TestS3(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_upload_download_roundtrip(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_prefix, name)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
@@ -56,7 +56,7 @@ class TestS3(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_upload_dir(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_prefix, name)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)

@@ -37,7 +37,7 @@ class TestSecrets(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_get_known_secret(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_get_known_secret)
@@ -46,7 +46,7 @@ class TestSecrets(unittest.TestCase):
     def test_set_get_delete_roundtrip(self, mode) -> None:
         key = f"it-{uuid.uuid4().hex[:8]}-roundtrip"
         self.addCleanup(cortexflow.delete_secret, key)
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_set_get_delete_roundtrip, key=key)

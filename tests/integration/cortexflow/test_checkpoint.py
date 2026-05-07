@@ -46,7 +46,7 @@ class TestCheckpoint(unittest.TestCase):
 
     @parameterized.expand(RUN_MODES)
     def test_resumes_after_crash(self, mode) -> None:
-        name = experiment_name()
+        name = experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run(mode=mode, log=log, fn=_run_crash_first_run, retry=True)
