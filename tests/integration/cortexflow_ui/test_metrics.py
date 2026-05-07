@@ -8,13 +8,13 @@ from playwright.sync_api import expect
 from tests.integration.cortexflow_ui._base import UI_URL, UITestCase
 
 
-def _experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
+def _experiment_name(test: UITestCase) -> str:
+    return f"it-{test._testMethodName}-{uuid.uuid4().hex[:8]}"
 
 
 class TestMetricsView(UITestCase):
     def test_each_logged_metric_renders_its_own_chart(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
@@ -33,7 +33,7 @@ class TestMetricsView(UITestCase):
         expect(titles.get_by_text("lr", exact=True)).to_be_visible(timeout=15_000)
 
     def test_metric_logged_after_dashboard_open_appears_live(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
@@ -50,7 +50,7 @@ class TestMetricsView(UITestCase):
         expect(titles.get_by_text("loss", exact=True)).to_be_visible(timeout=15_000)
 
     def test_metric_logged_by_one_user_appears_for_another_viewer(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()

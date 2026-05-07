@@ -8,8 +8,8 @@ from playwright.sync_api import Page, expect
 from tests.integration.cortexflow_ui._base import UI_URL, UITestCase
 
 
-def _experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
+def _experiment_name(test: UITestCase) -> str:
+    return f"it-{test._testMethodName}-{uuid.uuid4().hex[:8]}"
 
 
 def _open_run(page: Page, experiment: str, run: str) -> None:
@@ -26,7 +26,7 @@ def _open_experiment(page: Page, experiment: str) -> None:
 
 class TestRunNotes(UITestCase):
     def test_run_note_add_edit_delete_cycle(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
@@ -53,7 +53,7 @@ class TestRunNotes(UITestCase):
 
 class TestExperimentNotes(UITestCase):
     def test_experiment_note_add_edit_delete_cycle(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         cortexflow.Experiment.init(name)
         _open_experiment(self.page, name)
@@ -78,7 +78,7 @@ class TestExperimentNotes(UITestCase):
 
 class TestNotesCrossContext(UITestCase):
     def test_run_note_appears_and_disappears_in_experiment_dashboard(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
@@ -101,7 +101,7 @@ class TestNotesCrossContext(UITestCase):
 
 class TestNotesMultiUser(UITestCase):
     def test_note_added_by_one_user_appears_for_another_viewer(self) -> None:
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()

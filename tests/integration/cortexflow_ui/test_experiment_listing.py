@@ -8,8 +8,8 @@ from playwright.sync_api import expect
 from tests.integration.cortexflow_ui._base import UI_URL, UITestCase
 
 
-def _experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
+def _experiment_name(test: UITestCase) -> str:
+    return f"it-{test._testMethodName}-{uuid.uuid4().hex[:8]}"
 
 
 def _noop_job() -> None:
@@ -19,7 +19,7 @@ def _noop_job() -> None:
 class TestExperimentListing(UITestCase):
     def test_experiment_appears_then_disappears_after_delete(self) -> None:
         self.page.goto(UI_URL)
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         tree = self.page.locator(".experiment-tree__list")
 
@@ -33,8 +33,8 @@ class TestExperimentListing(UITestCase):
         expect(tree.get_by_text(name)).not_to_be_visible(timeout=30_000)
 
     def test_independent_creates_and_deletes_visible_to_both_users(self) -> None:
-        exp1 = _experiment_name()
-        exp2 = _experiment_name()
+        exp1 = _experiment_name(self)
+        exp2 = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, exp1)
         self.addCleanup(cortexflow.delete_experiment, exp2)
 
@@ -62,7 +62,7 @@ class TestExperimentListing(UITestCase):
 
     def test_run_and_job_appear_then_disappear_after_delete(self) -> None:
         self.page.goto(UI_URL)
-        name = _experiment_name()
+        name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         tree = self.page.locator(".experiment-tree__list")
 

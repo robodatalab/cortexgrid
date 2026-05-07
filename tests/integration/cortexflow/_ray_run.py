@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import unittest
 from typing import Any, Callable, Literal, get_args
 import uuid
 
@@ -9,12 +10,16 @@ import cortexflow
 
 
 def get_logger(name: str) -> logging.Logger:
-    logging.basicConfig(level=logging.INFO, force=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     return logging.getLogger(name)
 
 
-def experiment_name() -> str:
-    return f"it-{uuid.uuid4().hex[:8]}"
+def experiment_name(test: unittest.TestCase) -> str:
+    return f"it-{test._testMethodName}-{uuid.uuid4().hex[:8]}"
 
 
 def _schedule_and_wait(
