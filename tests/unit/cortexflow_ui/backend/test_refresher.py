@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import unittest
 from dataclasses import dataclass
 from typing import Any, Callable, MutableMapping
@@ -433,6 +434,43 @@ class TestServeWebsocketMulti(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("topic-a", ref_a._listeners)
         self.assertNotIn("topic-b", ref_b._listeners)
+
+
+class TestStalePollRace(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_poll_does_not_remove_concurrent_upsert(self) -> None:
+        """A poll_fn return predating a concurrent update_or_insert must
+        not be applied as authoritative: dispatching its diff would emit
+        a spurious Removed for the just-upserted item."""
+        cache: KeyedCache[str, str, _Item] = KeyedCache()
+        proceed = threading.Event()
+
+        def poll_fn(_: str) -> dict[str, _Item]:
+            proceed.wait()
+            return {}
+
+        refresher = Refresher[str, str, _Item](
+            name="t", cache=cache, poll_fn=poll_fn, poll_interval_sec=999
+        )
+        received: list[DiffEvent] = []
+
+        async def listener(event: DiffEvent) -> None:
+            received.append(event)
+
+        refresher.subscribe("k", listener)
+
+        poll_task = asyncio.create_task(refresher._poll_and_dispatch("k"))
+        await asyncio.sleep(0.02)
+
+        await refresher.update_or_insert("k", "a", _Item(id="a", value="1"))
+        proceed.set()
+        await poll_task
+
+        kinds = [type(e).__name__ for e in received]
+        self.assertNotIn(
+            "RemovedEvent",
+            kinds,
+            f"stale poll must not remove the concurrent upsert; got {kinds}",
+        )
 
 
 if __name__ == "__main__":

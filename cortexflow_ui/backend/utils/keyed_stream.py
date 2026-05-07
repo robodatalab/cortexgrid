@@ -215,6 +215,8 @@ class Refresher(Generic[TopicKey, ItemId, Payload]):
             await asyncio.sleep(self.poll_interval_sec)
 
     async def _poll_and_dispatch(self, topic: TopicKey) -> None:
+        async with self._dispatch_lock:
+            pre_snapshot = dict(self.cache.get(topic))
         try:
             new_data = await asyncio.to_thread(self.poll_fn, topic)
         except asyncio.CancelledError:
@@ -222,11 +224,11 @@ class Refresher(Generic[TopicKey, ItemId, Payload]):
         except Exception:
             log.exception("%s poll failed for topic=%s", self.name, topic)
             return
-
         async with self._dispatch_lock:
-            old_data = self.cache.get(topic)
+            if self.cache.get(topic) != pre_snapshot:
+                return
             self.cache.set(topic, new_data)
-            for event in _diff_dict(old_data, new_data):
+            for event in _diff_dict(pre_snapshot, new_data):
                 await self._broadcast(topic, event)
 
     async def _broadcast(self, topic: TopicKey, event: DiffEvent) -> None:
