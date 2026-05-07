@@ -25,25 +25,20 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 - **GitOps cluster bootstrap** — `make head-setup` / `make worker-setup` install k3s and seed Argo CD; the rest syncs from `k8s/`.
 - **Experiment UI** — `cortexflow-ui` browses experiments, runs, and job logs (in development).
 
-## Cortexflow vs. Modal
+## Comparison to other platforms
 
-Modal replaces the compute-submission half of cortexflow cleanly. It does not replace experiment tracking, the experiment UI, or the on-prem deployment target.
+Where cortexflow's surface overlaps with hosted/open-source alternatives:
 
-| Capability | Cortexflow | Modal |
-|---|---|---|
-| Async job submission | `cortexflow.remote(fn, ...)` → job ID | `fn.spawn()` → `FunctionCall` |
-| Wait for result | `_ray_run` polls Ray | `FunctionCall.from_id(id).get(timeout=)` |
-| Code shipping | tarball → S3 per submit | `modal.Image` built once, cached |
-| Retries | `retry=True` flag | `retries=modal.Retries(...)` decorator |
-| Secrets | AWS Secrets Manager / K8s | `modal.Secret` |
-| Autoscaling | Ray + `jobs-control-plane` | built-in autoscaler |
-| Experiment tracking | MLflow integration | none |
-| Training-state checkpoint | `cortexflow.checkpoint() / resume()` | none — `modal.Volume` is manual |
-| Experiment UI | `cortexflow-ui` | dashboard for jobs only |
-| On-prem deployment | DGX Spark + ThinkStation + MinIO | cloud-only |
-| GPU hardware | whatever you own | H100 / A100 / L40S / L4 / A10G / T4 |
-| Long jobs | unlimited (Ray) | 24h function timeout |
+| Platform | Compute | Retries | Checkpoint | Experiment tracking | Exp. UI | On-prem | OSS |
+|---|---|---|---|---|---|---|---|
+| **Cortexflow** | Ray + jobs-control-plane | `retry=` flag | `checkpoint() / resume()` | MLflow | `cortexflow-ui` | yes | yes |
+| **ClearML** | agents + queues | yes | yes (artifacts) | yes | yes | yes (self-host) | yes |
+| **Determined AI** | yes | auto | yes (built-in, first-class) | yes | yes | yes (Helm) | yes |
+| **Metaflow / Outerbounds** | yes | yes | yes (built-in) | yes | yes | yes | yes (Metaflow) |
+| **Anyscale** | managed Ray | Ray-native | via Ray Train | integrates MLflow / W&B | lineage UI | no (cloud) | no |
+| **dstack** | yes | yes | manual | no | partial | yes | yes |
+| **Modal** | yes | yes | manual (`modal.Volume`) | no | jobs only | no | no |
 
-Switching to Modal would replace `cortexflow.remote` + `jobs-control-plane` + Ray + Argo + k3s. It would not replace MLflow, `cortexflow-ui`, or the on-prem story.
+**Largest overlap: ClearML** — its agent-and-queue architecture maps almost 1:1 onto `cortexflow.remote` + `jobs-control-plane`, plus it bundles experiment tracking, web UI, and a self-hosted server. Determined is a close second but its `Trial` API constrains job shape to training loops. Anyscale would feel native (already on Ray) but kills on-prem and isn't OSS. Modal has the slickest DX but covers only the compute half.
 
 Full documentation: [docs/README.md](docs/README.md).
