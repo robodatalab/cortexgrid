@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tarfile
 import tempfile
@@ -100,12 +99,6 @@ class TestRemote(unittest.TestCase):
         clear_instance()
         self.fake_mlflow = FakeMLflow()
         self.fake_s3 = FakeS3()
-        self.project_dir = Path(tempfile.mkdtemp())
-        (self.project_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
-        (self.project_dir / "src").mkdir()
-        (self.project_dir / "src" / "main.py").write_text("print('hello')")
-        self.original_cwd = os.getcwd()
-        os.chdir(self.project_dir)
 
         patchers = [
             patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
@@ -117,7 +110,11 @@ class TestRemote(unittest.TestCase):
             patch(
                 "cortexflow.jobs.subprocess.run",
                 return_value=MagicMock(
-                    stdout="numpy==1.26\ntorch==2.5\ncortexflow @ git+https://github.com/paksas/robolab-infra.git@abc123\n"
+                    stdout=(
+                        "numpy==1.26\n"
+                        "torch==2.5\n"
+                        "mlflow @ git+https://github.com/paksas/mlflow-fork.git@abc123\n"
+                    )
                 ),
             ),
             patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
@@ -125,8 +122,6 @@ class TestRemote(unittest.TestCase):
         for p in patchers:
             p.start()
             self.addCleanup(p.stop)
-        self.addCleanup(os.chdir, self.original_cwd)
-        self.addCleanup(shutil.rmtree, str(self.project_dir), True)
 
     def tearDown(self) -> None:
         clear_instance()
@@ -156,9 +151,19 @@ class TestRemote(unittest.TestCase):
         job_id = cortexflow.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
-        self.assertTrue(project_root.is_dir())
-        self.assertTrue((project_root / "pyproject.toml").exists())
-        self.assertTrue((project_root / "src" / "main.py").exists())
+        self.assertTrue(
+            (project_root / "tests" / "unit" / "cortexflow" / "test_jobs.py").is_file()
+        )
+        self.assertTrue((project_root / "tests" / "__init__.py").is_file())
+        self.assertTrue((project_root / "tests" / "unit" / "__init__.py").is_file())
+        self.assertTrue(
+            (project_root / "tests" / "unit" / "cortexflow" / "__init__.py").is_file()
+        )
+        self.assertTrue((project_root / "cortexflow" / "__init__.py").is_file())
+        self.assertTrue((project_root / "cortexflow" / "experiment.py").is_file())
+        self.assertTrue((project_root / "cortexflow" / "jobs.py").is_file())
+        self.assertTrue((project_root / "cortexflow" / "ray_util.py").is_file())
+        self.assertFalse((project_root / ".venv").exists())
 
     def test_remote_writes_requirements_txt(self) -> None:
         set_instance(_make_experiment())
@@ -168,8 +173,10 @@ class TestRemote(unittest.TestCase):
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         requirements = project_root / "requirements.txt"
         self.assertTrue(requirements.exists())
-        self.assertIn("numpy==1.26", requirements.read_text())
+        # torch is reached transitively (cortexflow.checkpoint imports it).
         self.assertIn("torch==2.5", requirements.read_text())
+        # numpy is NOT used by the bundle, so the filter drops it.
+        self.assertNotIn("numpy==1.26", requirements.read_text())
 
     def test_remote_injects_github_token_into_git_urls(self) -> None:
         set_instance(_make_experiment())
@@ -179,23 +186,10 @@ class TestRemote(unittest.TestCase):
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         content = (project_root / "requirements.txt").read_text()
         self.assertIn(
-            "git+https://x-access-token:ghp_faketoken@github.com/paksas/robolab-infra.git",
+            "git+https://x-access-token:ghp_faketoken@github.com/paksas/mlflow-fork.git",
             content,
         )
-        self.assertNotIn("git+https://github.com/paksas/robolab-infra.git", content)
-
-    def test_remote_excludes_venv_and_git(self) -> None:
-        (self.project_dir / ".venv").mkdir()
-        (self.project_dir / ".venv" / "lib.py").write_text("x")
-        (self.project_dir / ".git").mkdir()
-        (self.project_dir / ".git" / "config").write_text("x")
-        set_instance(_make_experiment())
-
-        job_id = cortexflow.remote(lambda: None)
-
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
-        self.assertFalse((project_root / ".venv").exists())
-        self.assertFalse((project_root / ".git").exists())
+        self.assertNotIn("git+https://github.com/paksas/mlflow-fork.git", content)
 
     def test_initial_lifecycle_is_pending(self) -> None:
         set_instance(_make_experiment())
