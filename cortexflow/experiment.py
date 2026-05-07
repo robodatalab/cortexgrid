@@ -28,7 +28,9 @@ class Experiment:
     def init(cls, name: str | None = None) -> "Experiment":
         """Create a new MLflow experiment+run. Once per process."""
         logging.basicConfig(
-            level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+            level=logging.INFO,
+            format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
         )
 
         if _SINGLETON_EXPERIMENT is not None:
@@ -54,7 +56,9 @@ class Experiment:
     def from_experiment(cls, experiment_name: str, run_id: str) -> "Experiment":
         """Bind to an existing MLflow experiment+run. Once per process."""
         logging.basicConfig(
-            level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+            level=logging.INFO,
+            format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
         )
 
         if _SINGLETON_EXPERIMENT is not None:

@@ -9,7 +9,11 @@ import cortexflow
 
 
 def get_logger(name: str) -> logging.Logger:
-    logging.basicConfig(level=logging.INFO, force=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     return logging.getLogger(name)
 
 
