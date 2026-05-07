@@ -13,6 +13,19 @@ Argo CD sync success on a subscribed Application
   -> Workflow assumes robolab-github-actions role (ARN from payload), joins tailnet, runs tests
 ```
 
+### Manual trigger
+
+The workflows have no `workflow_dispatch` trigger -- they only listen for `repository_dispatch`. To kick a run without waiting for an Argo sync (e.g. to validate a fresh cluster), POST the same payload Argo would have sent:
+
+```sh
+ROLE_ARN=$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('AWS_ROLE_ARN'))")
+gh api repos/paksas/robolab-infra/dispatches --input - <<EOF
+{"event_type": "argocd-synced", "client_payload": {"app": "manual", "aws_role_arn": "$ROLE_ARN"}}
+EOF
+```
+
+Both `cortexflow integration tests` and `cortexflow-ui integration tests` will start within ~10s. Watch with `gh run list --limit 3` or `gh run watch`.
+
 ## What's wired
 
 - **Notifications controller** is enabled in the argocd Helm chart via [k8s/argocd.yaml](../../k8s/argocd.yaml). The webhook notifier, template, and `on-sync-succeeded` trigger are all in the `valuesContent` block.
