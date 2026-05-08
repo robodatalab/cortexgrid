@@ -22,21 +22,6 @@
   min-height: 0;
 }
 
-.experiment-tree__refresh {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  padding: 4px;
-  cursor: pointer;
-  color: #444;
-}
-
-.experiment-tree__refresh:hover {
-  color: #000;
-}
-
 .experiment-tree__status {
   padding: 8px 16px;
   font-size: var(--font-md);

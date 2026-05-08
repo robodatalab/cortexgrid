@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import './App.css'
@@ -40,7 +40,6 @@ function App() {
   const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
   const [runsById, setRunsById] = useState<Record<string, ExperimentRun>>({})
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -51,7 +50,6 @@ function App() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const url = `${protocol}//${window.location.host}/api/experiments/stream`
       socket = new WebSocket(url)
-      wsRef.current = socket
       socket.onmessage = (e) => {
         const event = JSON.parse(e.data) as StreamEvent
         if (event.type === 'added' || event.type === 'updated') {
@@ -65,7 +63,6 @@ function App() {
         }
       }
       socket.onclose = () => {
-        wsRef.current = null
         if (!cancelled) setTimeout(connect, 3000)
       }
     }
@@ -74,14 +71,8 @@ function App() {
     return () => {
       cancelled = true
       socket?.close()
-      wsRef.current = null
     }
   }, [])
-
-  function handleRefresh() {
-    setRunsById({})
-    wsRef.current?.send(JSON.stringify({ type: 'force_refresh' }))
-  }
 
   async function handleConfirmDelete() {
     if (pendingDelete === null) return
@@ -215,7 +206,6 @@ function App() {
                   runsByExperiment={runsByExperiment}
                   selection={selection}
                   onSelect={setSelection}
-                  onRefresh={handleRefresh}
                   onDeleteExperiment={(experiment_name) =>
                     setPendingDelete({ kind: 'experiment', experiment_name })
                   }
