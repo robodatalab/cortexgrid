@@ -8,6 +8,15 @@ module "head" {
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
   tailscale_auth_key = var.tailscale_auth_key
+
+  # Two members on AWS: the original "primary" carries argocd, mlflow,
+  # prometheus, etc.; the "loki" peer is dedicated to the Loki single-binary
+  # so log ingestion does not contend with platform services. The k8s
+  # scheduler distributes role=head workloads across both members.
+  nodes = {
+    primary = { instance_type = "t3.xlarge", ebs_size_gb = 100 }
+    loki    = { instance_type = "t3.xlarge", ebs_size_gb = 100 }
+  }
 }
 
 module "tailscale_router" {

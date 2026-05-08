@@ -1,0 +1,64 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://helm.vector.dev
+    chart: vector
+    targetRevision: 0.36.0
+    helm:
+      values: |
+        # DaemonSet on every node (no nodeSelector). Each Vector pod tails
+        # its node's /var/log/pods (tmpfs) and forwards to the in-cluster
+        # Loki gateway. The on-disk buffer is the documented "fallback when
+        # connectivity drops" -- bounded to 128 MiB per node, on the OS
+        # root volume; only fills if Loki is unreachable for an extended
+        # period.
+        role: Agent
+        customConfig:
+          data_dir: /vector-data-dir
+          api:
+            enabled: true
+            address: 127.0.0.1:8686
+          sources:
+            k8s_logs:
+              type: kubernetes_logs
+          sinks:
+            loki:
+              type: loki
+              inputs:
+                - k8s_logs
+              endpoint: http://loki-gateway.loki.svc.cluster.local
+              encoding:
+                codec: text
+              labels:
+                namespace: '{{`{{ kubernetes.pod_namespace }}`}}'
+                pod: '{{`{{ kubernetes.pod_name }}`}}'
+                container: '{{`{{ kubernetes.container_name }}`}}'
+                node: '{{`{{ kubernetes.pod_node_name }}`}}'
+              buffer:
+                type: disk
+                max_size: 134217728
+                when_full: block
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vector
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

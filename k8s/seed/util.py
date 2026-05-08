@@ -267,6 +267,17 @@ def install_prereqs(c: Connection) -> None:
             apt-get update
             apt-get install -y nvidia-container-toolkit
         fi
+        # Container logs live in RAM, not on the OS disk: a vector/alloy
+        # DaemonSet ships them to Loki within seconds, so the disk is only
+        # touched as a WAL fallback when Loki is unreachable. This is a
+        # hard requirement on workers (no large disk) and a sanity measure
+        # on heads. Must run before k3s starts so kubelet creates pod
+        # subdirs on the tmpfs, not under it.
+        mkdir -p /var/log/pods
+        if ! grep -q '^tmpfs /var/log/pods ' /etc/fstab; then
+            echo 'tmpfs /var/log/pods tmpfs size=512M,mode=755 0 0' >> /etc/fstab
+        fi
+        mountpoint -q /var/log/pods || mount /var/log/pods
     """),
     )
 

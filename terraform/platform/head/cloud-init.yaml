@@ -21,7 +21,15 @@ write_files:
       set -euo pipefail
 
       curl -fsSL https://tailscale.com/install.sh | sh
-      tailscale up --auth-key='${tailscale_auth_key}' --hostname=robolab-head
+      tailscale up --auth-key='${tailscale_auth_key}' --hostname=${hostname}
+
+      # Container logs go to RAM, not the OS disk. Vector/Alloy ships them
+      # to Loki within seconds; the OS disk is only ever touched as a WAL
+      # fallback when Loki is unreachable.
+      mkdir -p /var/log/pods
+      grep -q '^tmpfs /var/log/pods ' /etc/fstab || \
+        echo 'tmpfs /var/log/pods tmpfs size=512M,mode=755 0 0' >> /etc/fstab
+      mountpoint -q /var/log/pods || mount /var/log/pods
 
       VOLUME_ID="${storage_volume_id}"
       SYMLINK="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${VOLUME_ID//-/}"

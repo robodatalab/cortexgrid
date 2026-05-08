@@ -8,16 +8,18 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
-variable "instance_type" {
-  description = "EC2 instance type for the k3s head. amd64 because most workload images are not yet multi-arch (only ray is). Sized for argocd + mlflow + cortexflow-ui + jobs-control-plane + prometheus stack sharing the box; t3.large saturated under reconciliation spikes."
-  type        = string
-  default     = "t3.xlarge"
-}
-
-variable "ebs_size_gb" {
-  description = "Size of the gp3 EBS volume mounted at the head's storage_path. Online-resizable."
-  type        = number
-  default     = 100
+variable "nodes" {
+  description = "Members of the head deployment set. Map key is a stable name used in tags and the Tailscale hostname suffix; value sizes the EC2 and its attached EBS. amd64 because most workload images are not yet multi-arch (only ray is). t3.xlarge sized for argocd + mlflow + cortexflow-ui + jobs-control-plane + prometheus sharing the box; t3.large saturated under reconciliation spikes."
+  type = map(object({
+    instance_type = string
+    ebs_size_gb   = number
+  }))
+  default = {
+    primary = {
+      instance_type = "t3.xlarge"
+      ebs_size_gb   = 100
+    }
+  }
 }
 
 variable "tailscale_auth_key" {
