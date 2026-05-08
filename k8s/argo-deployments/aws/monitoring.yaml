@@ -35,6 +35,15 @@ spec:
               allow_embedding: true
           nodeSelector:
             role: head
+          # Loki is provisioned by ui/cortexflow/loki.yaml. Grafana reaches
+          # it via the in-cluster gateway Service; logs become browsable in
+          # Explore once the loki App is Healthy.
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              access: proxy
+              url: http://loki-gateway.loki.svc.cluster.local
+              isDefault: false
         prometheus:
           service:
             type: NodePort
