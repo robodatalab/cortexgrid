@@ -41,6 +41,8 @@ def parse_imports(source_file: Path) -> list[str]:
 
 _DEP_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+")
 
+_CORTEXFLOW_DIR = Path(__file__).parent.resolve()
+
 
 def _canonicalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -70,9 +72,9 @@ def infer_module_path(file: Path) -> tuple[str, Path]:
 
 
 def collect_workspace(
-    start: Path, workspace_root: Path
+    starts: list[Path], workspace_root: Path
 ) -> tuple[set[Path], set[str]]:
-    """BFS from `start` through imports. Returns (files_to_ship, external).
+    """BFS from each path in `starts` through imports. Returns (files_to_ship, external).
 
     files_to_ship: workspace .py files reached transitively, plus each file's
     __init__.py chain back to its sys.path root.
@@ -81,7 +83,7 @@ def collect_workspace(
     """
     visited: set[Path] = set()
     external: set[str] = set()
-    queue: list[Path] = [start.resolve()]
+    queue: list[Path] = [s.resolve() for s in starts]
     while queue:
         file = queue.pop(0)
         if file in visited:
@@ -172,7 +174,10 @@ def bundle_for_function(
     fn_file = Path(inspect.getfile(fn)).resolve()
     pyproject = find_pyproject_for(fn_file)
     workspace_root = pyproject.parent
-    files, external = collect_workspace(fn_file, workspace_root)
+    seeds = [fn_file]
+    if _CORTEXFLOW_DIR.is_relative_to(workspace_root):
+        seeds.extend(_CORTEXFLOW_DIR.rglob("*.py"))
+    files, external = collect_workspace(seeds, workspace_root)
     ship_root = find_ship_root(files)
     return ship_root, files, external
 
