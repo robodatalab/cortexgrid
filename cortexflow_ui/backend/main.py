@@ -82,7 +82,8 @@ class NoteBody(BaseModel):
 @app.on_event("startup")
 async def _start_refreshers() -> None:
     for r in (
-        experiments_stream.refresher,
+        experiments_stream.experiments_meta_refresher,
+        experiments_stream.runs_refresher,
         run_jobs_stream.refresher,
         run_dashboard_stream.refresher,
         job_details_stream.refresher,
@@ -90,7 +91,7 @@ async def _start_refreshers() -> None:
         experiment_notes_stream.refresher,
     ):
         r.ensure_started()
-    experiments_stream.refresher.pin(experiments_stream.TOPIC)
+    experiments_stream.experiments_meta_refresher.pin(experiments_stream.META_TOPIC)
 
 
 @app.get("/health")
@@ -128,9 +129,20 @@ def secret_delete(id: str) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.websocket("/api/experiments/stream")
-async def experiments_stream_endpoint(ws: WebSocket) -> None:
-    await serve_websocket(experiments_stream.refresher, ws, experiments_stream.TOPIC)
+@app.websocket("/api/experiments/meta/stream")
+async def experiments_meta_stream_endpoint(ws: WebSocket) -> None:
+    await serve_websocket(
+        experiments_stream.experiments_meta_refresher,
+        ws,
+        experiments_stream.META_TOPIC,
+    )
+
+
+@app.websocket("/api/experiments/{experiment_name}/runs/stream")
+async def runs_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
+    await serve_websocket(
+        experiments_stream.runs_refresher, ws, experiment_name
+    )
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")
@@ -164,12 +176,12 @@ def stop_run(run_id: str) -> dict[str, str]:
 async def run_delete(run_id: str) -> dict[str, str]:
     delete_run_notes_for_run(run_id)
     delete_run(run_id)
-    cached = experiments_stream.cache.get(experiments_stream.TOPIC)
-    for run_name, run in list(cached.items()):
-        if run.run_id == run_id:
-            await experiments_stream.refresher.remove(
-                experiments_stream.TOPIC, run_name
-            )
+    for exp_name, runs in list(experiments_stream.runs_cache._data.items()):
+        for run_name, run in list(runs.items()):
+            if run.run_id == run_id:
+                await experiments_stream.runs_refresher.remove(
+                    exp_name, run_name
+                )
     return {"status": "ok"}
 
 
@@ -179,12 +191,13 @@ async def experiment_delete(experiment_name: str) -> dict[str, str]:
         delete_run_notes_for_run(run_id)
     delete_experiment_notes_for_experiment(experiment_name)
     delete_experiment(experiment_name)
-    cached = experiments_stream.cache.get(experiments_stream.TOPIC)
-    for run_name, run in list(cached.items()):
-        if run.experiment_name == experiment_name:
-            await experiments_stream.refresher.remove(
-                experiments_stream.TOPIC, run_name
-            )
+    for run_name in list(
+        experiments_stream.runs_cache.get(experiment_name).keys()
+    ):
+        await experiments_stream.runs_refresher.remove(experiment_name, run_name)
+    await experiments_stream.experiments_meta_refresher.remove(
+        experiments_stream.META_TOPIC, experiment_name
+    )
     return {"status": "ok"}
 
 

@@ -60,14 +60,19 @@ def _patched_infra(
 
 
 def _seed_cache(runs: list[Run]) -> None:
-    experiments_stream.cache.set(
-        experiments_stream.TOPIC, {r.run_name: r for r in runs}
-    )
+    by_exp: dict[str, dict[str, Run]] = {}
+    for r in runs:
+        by_exp.setdefault(r.experiment_name, {})[r.run_name] = r
+    for exp_name, items in by_exp.items():
+        experiments_stream.runs_cache.set(exp_name, items)
+        experiments_stream.runs_refresher.pin(exp_name)
 
 
 def _reset_stream() -> None:
-    experiments_stream.refresher._listeners.clear()
-    experiments_stream.cache.clear(experiments_stream.TOPIC)
+    experiments_stream.runs_refresher._listeners.clear()
+    experiments_stream.experiments_meta_refresher._listeners.clear()
+    experiments_stream.runs_cache._data.clear()
+    experiments_stream.experiments_meta_cache._data.clear()
 
 
 def _make_run(experiment: str, run_id: str, run_name: str) -> Run:
@@ -85,7 +90,9 @@ class TestDeleteRunEndpoint(unittest.TestCase):
         self.client = TestClient(app)
         set_instance(None)
         _reset_stream()
-        experiments_stream.refresher.pin(experiments_stream.TOPIC)
+        experiments_stream.experiments_meta_refresher.pin(
+            experiments_stream.META_TOPIC
+        )
         self.addCleanup(_reset_stream)
         self.addCleanup(set_instance, None)
 
@@ -137,8 +144,9 @@ class TestDeleteRunEndpoint(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertNotIn("run-1", [e.run_id for e in list_experiments()])
 
-        cache = experiments_stream.cache.get(experiments_stream.TOPIC)
-        self.assertNotIn("alpha-run", cache)
+        self.assertNotIn(
+            "alpha-run", experiments_stream.runs_cache.get("alpha")
+        )
         self.assertEqual(
             [k for k in s3.objects if k.startswith("job/j1/")], []
         )
@@ -162,8 +170,9 @@ class TestDeleteRunEndpoint(unittest.TestCase):
 
             self.assertIn("run-2", [e.run_id for e in list_experiments()])
 
-        cache = experiments_stream.cache.get(experiments_stream.TOPIC)
-        self.assertIn("beta-run", cache)
+        self.assertIn(
+            "beta-run", experiments_stream.runs_cache.get("beta")
+        )
         self.assertIn("job/j2/project_code_root.tar.gz", s3.objects)
         self.assertEqual(ray.jobs["run-2-j2-0"].status, "RUNNING")
 
@@ -187,7 +196,9 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
         self.client = TestClient(app)
         set_instance(None)
         _reset_stream()
-        experiments_stream.refresher.pin(experiments_stream.TOPIC)
+        experiments_stream.experiments_meta_refresher.pin(
+            experiments_stream.META_TOPIC
+        )
         self.addCleanup(_reset_stream)
         self.addCleanup(set_instance, None)
 
@@ -255,8 +266,10 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
                 [e.experiment_name for e in list_experiments()], ["beta"]
             )
 
-        cache = experiments_stream.cache.get(experiments_stream.TOPIC)
-        self.assertEqual(set(cache.keys()), {"beta-1"})
+        self.assertEqual(experiments_stream.runs_cache.get("alpha"), {})
+        self.assertEqual(
+            set(experiments_stream.runs_cache.get("beta").keys()), {"beta-1"}
+        )
 
         self.assertEqual([k for k in s3.objects if k.startswith("job/j1/")], [])
         self.assertEqual([k for k in s3.objects if k.startswith("job/j2/")], [])
