@@ -20,15 +20,15 @@ type Dashboard = {
   url: string
 }
 
+type ExperimentMeta = {
+  name: string
+  created_at_ms: number | null
+}
+
 type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; dashboards: Dashboard[] }
   | { status: 'error'; message: string }
-
-type StreamEvent =
-  | { type: 'added'; item: ExperimentRun }
-  | { type: 'updated'; item: ExperimentRun }
-  | { type: 'removed'; id: string }
 
 type PendingDelete =
   | { kind: 'experiment'; experiment_name: string }
@@ -38,41 +38,20 @@ function App() {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [selection, setSelection] = useState<Selection | null>(null)
   const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
-  const [runsById, setRunsById] = useState<Record<string, ExperimentRun>>({})
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    let socket: WebSocket | null = null
+  const experimentsByName = useStreamList<ExperimentMeta>(
+    '/api/experiments/meta/stream',
+    (e) => e.name,
+  )
 
-    function connect() {
-      if (cancelled) return
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const url = `${protocol}//${window.location.host}/api/experiments/stream`
-      socket = new WebSocket(url)
-      socket.onmessage = (e) => {
-        const event = JSON.parse(e.data) as StreamEvent
-        if (event.type === 'added' || event.type === 'updated') {
-          setRunsById((prev) => ({ ...prev, [event.item.run_name]: event.item }))
-        } else if (event.type === 'removed') {
-          setRunsById((prev) => {
-            const next = { ...prev }
-            delete next[event.id]
-            return next
-          })
-        }
-      }
-      socket.onclose = () => {
-        if (!cancelled) setTimeout(connect, 3000)
-      }
-    }
-
-    connect()
-    return () => {
-      cancelled = true
-      socket?.close()
-    }
-  }, [])
+  const selectedExperimentName = selection?.experiment_name ?? null
+  const runsByName = useStreamList<ExperimentRun>(
+    selectedExperimentName
+      ? `/api/experiments/${encodeURIComponent(selectedExperimentName)}/runs/stream`
+      : null,
+    (r) => r.run_name,
+  )
 
   async function handleConfirmDelete() {
     if (pendingDelete === null) return
@@ -104,22 +83,18 @@ function App() {
       : `Delete run "${target.run_name}"? This cannot be undone.`
   }
 
-  const experimentNames = useMemo(() => {
-    const names = new Set<string>()
-    for (const r of Object.values(runsById)) names.add(r.experiment_name)
-    return Array.from(names).sort()
-  }, [runsById])
+  const experimentNames = useMemo(
+    () => Object.keys(experimentsByName).sort(),
+    [experimentsByName],
+  )
 
   const runsByExperiment = useMemo(() => {
-    const map: Record<string, ExperimentRun[]> = {}
-    for (const r of Object.values(runsById)) {
-      ;(map[r.experiment_name] ??= []).push(r)
-    }
-    for (const list of Object.values(map)) {
-      list.sort((a, b) => a.run_name.localeCompare(b.run_name))
-    }
-    return map
-  }, [runsById])
+    if (selectedExperimentName === null) return {}
+    const list = Object.values(runsByName).sort((a, b) =>
+      a.run_name.localeCompare(b.run_name),
+    )
+    return { [selectedExperimentName]: list }
+  }, [selectedExperimentName, runsByName])
 
   const activeRunId =
     selection?.kind === 'run' || selection?.kind === 'job'
@@ -161,7 +136,7 @@ function App() {
         </button>
         <nav className="navbar__links" aria-label="Dashboards">
           {state.status === 'loading' && (
-            <span className="navbar__status">Loading…</span>
+            <span className="navbar__status">Loading...</span>
           )}
           {state.status === 'error' && (
             <span className="navbar__status navbar__status--error">
@@ -218,13 +193,21 @@ function App() {
             <Allotment.Pane>
               <LayoutPane>
                 {selection?.kind === 'experiment' ? (
-                  <ExperimentDashboard experimentName={selection.experiment_name} />
+                  <ExperimentDashboard
+                    experimentName={selection.experiment_name}
+                    createdAtMs={
+                      experimentsByName[selection.experiment_name]
+                        ?.created_at_ms ?? null
+                    }
+                  />
                 ) : selection?.kind === 'run' ? (
                   <RunDashboard
                     runId={selection.run_id}
                     runName={selection.run_name}
                     experimentName={selection.experiment_name}
                     jobs={activeRunJobs}
+                    startedAtMs={runsByName[selection.run_name]?.started_at_ms ?? null}
+                    endedAtMs={runsByName[selection.run_name]?.ended_at_ms ?? null}
                   />
                 ) : selection?.kind === 'job' ? (
                   <JobDashboard runId={selection.run_id} jobId={selection.job_id} />

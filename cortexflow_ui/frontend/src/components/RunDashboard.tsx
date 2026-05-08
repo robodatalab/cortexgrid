@@ -30,9 +30,11 @@ type Props = {
   runName: string
   experimentName: string
   jobs: Job[] | null
+  startedAtMs: number | null
+  endedAtMs: number | null
 }
 
-export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
+export function RunDashboard({ runId, runName, experimentName, jobs, startedAtMs, endedAtMs }: Props) {
   const items = useStreamList<DashboardItem>(
     `/api/runs/${runName}/stream`,
     (i) => i.id,
@@ -60,7 +62,14 @@ export function RunDashboard({ runId, runName, experimentName, jobs }: Props) {
       <Allotment.Pane>
         <div className="run-dashboard">
           <div className="run-dashboard__header">
-            <div className="run-dashboard__title">{experimentName} / {runName}</div>
+            <div className="run-dashboard__title-block">
+              <div className="run-dashboard__title">{experimentName} / {runName}</div>
+              <div className="run-dashboard__meta">
+                Started {startedAtMs ? new Date(startedAtMs).toLocaleString() : '-'}
+                {' | '}
+                Ended {endedAtMs ? new Date(endedAtMs).toLocaleString() : '-'}
+              </div>
+            </div>
             <div className="run-dashboard__actions">
               {hasStoppableJobs && (
                 <button

@@ -112,9 +112,10 @@ function NoteRow({ note, onEdit, onDelete }: RowProps) {
 
 type Props = {
   experimentName: string
+  createdAtMs: number | null
 }
 
-export function ExperimentDashboard({ experimentName }: Props) {
+export function ExperimentDashboard({ experimentName, createdAtMs }: Props) {
   const encodedName = encodeURIComponent(experimentName)
   const notes = useStreamList<CombinedNote>(
     `/api/experiments/${encodedName}/notes/stream`,
@@ -152,6 +153,9 @@ export function ExperimentDashboard({ experimentName }: Props) {
   return (
     <div className="experiment-dashboard">
       <div className="experiment-dashboard__title">{experimentName}</div>
+      <div className="experiment-dashboard__meta">
+        Created {createdAtMs ? new Date(createdAtMs).toLocaleString() : '-'}
+      </div>
       <div className="experiment-notes">
         <div className="experiment-notes__list">
           {sorted.length === 0 && (

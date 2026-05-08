@@ -352,13 +352,13 @@ class TestExperimentsStream(unittest.TestCase):
             run_name="alpha-run",
             jobs=[],
         )
-        stream_mod.cache.set(stream_mod.TOPIC, {"alpha-run": run})
+        stream_mod.runs_cache.set("alpha", {"alpha-run": run})
         try:
             self.assertEqual(stream_mod.resolve_run_id("alpha-run"), "r1")
             self.assertEqual(stream_mod.resolve_run_name("r1"), "alpha-run")
             self.assertEqual(stream_mod.runs_for_experiment("alpha"), ["alpha-run"])
         finally:
-            stream_mod.cache.clear(stream_mod.TOPIC)
+            stream_mod.runs_cache.clear("alpha")
 
 
 if __name__ == "__main__":
