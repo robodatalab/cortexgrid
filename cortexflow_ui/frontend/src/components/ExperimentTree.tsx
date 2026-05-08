@@ -7,6 +7,9 @@ export type ExperimentRun = {
     run_id: string;
     run_name: string;
     jobs: { job_id: string; status: string }[];
+    experiment_created_at_ms: number | null;
+    run_started_at_ms: number | null;
+    run_ended_at_ms: number | null;
 };
 
 export type Selection =

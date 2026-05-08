@@ -13,9 +13,20 @@
   gap: 16px;
 }
 
+.run-dashboard__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .run-dashboard__title {
   font-size: var(--font-lg);
   font-weight: 500;
+}
+
+.run-dashboard__meta {
+  font-size: var(--font-xs);
+  color: #999;
 }
 
 .run-dashboard__actions {

@@ -218,13 +218,21 @@ function App() {
             <Allotment.Pane>
               <LayoutPane>
                 {selection?.kind === 'experiment' ? (
-                  <ExperimentDashboard experimentName={selection.experiment_name} />
+                  <ExperimentDashboard
+                    experimentName={selection.experiment_name}
+                    createdAtMs={
+                      runsByExperiment[selection.experiment_name]?.[0]
+                        ?.experiment_created_at_ms ?? null
+                    }
+                  />
                 ) : selection?.kind === 'run' ? (
                   <RunDashboard
                     runId={selection.run_id}
                     runName={selection.run_name}
                     experimentName={selection.experiment_name}
                     jobs={activeRunJobs}
+                    startedAtMs={runsById[selection.run_name]?.run_started_at_ms ?? null}
+                    endedAtMs={runsById[selection.run_name]?.run_ended_at_ms ?? null}
                   />
                 ) : selection?.kind === 'job' ? (
                   <JobDashboard runId={selection.run_id} jobId={selection.job_id} />

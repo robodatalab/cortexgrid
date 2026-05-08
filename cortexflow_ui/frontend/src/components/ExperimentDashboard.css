@@ -8,6 +8,12 @@
 .experiment-dashboard__title {
   font-size: var(--font-lg);
   font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.experiment-dashboard__meta {
+  font-size: var(--font-xs);
+  color: #999;
   margin-bottom: 16px;
 }
 

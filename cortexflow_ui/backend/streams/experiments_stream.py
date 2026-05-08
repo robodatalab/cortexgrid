@@ -9,11 +9,13 @@ import logging
 from dataclasses import dataclass
 
 from cortexflow.experiment import list_experiments
+from cortexflow.infra import get_mlflow_tracking_uri
 from cortexflow.ray_util import (
     get_ray_job_id_for_cortexflow_job,
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
+from mlflow.tracking import MlflowClient
 from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
@@ -39,9 +41,18 @@ class Run:
     run_id: RunId
     run_name: RunName
     jobs: list[JobStatus]
+    experiment_created_at_ms: int | None = None
+    run_started_at_ms: int | None = None
+    run_ended_at_ms: int | None = None
 
 
-def _build_run(exp, all_ray_submission_ids: list[str]) -> Run:
+def _build_run(
+    exp,
+    all_ray_submission_ids: list[str],
+    client: MlflowClient,
+    exp_creation_times_ms: dict[str, int | None],
+) -> Run:
+    info = client.get_run(exp.run_id).info
     jobs = []
     for job_id in exp.get_jobs():
         try:
@@ -55,18 +66,27 @@ def _build_run(exp, all_ray_submission_ids: list[str]) -> Run:
     return Run(
         experiment_name=exp.experiment_name,
         run_id=exp.run_id,
-        run_name=exp.run_name(),
+        run_name=info.run_name or exp.run_id,
         jobs=jobs,
+        experiment_created_at_ms=exp_creation_times_ms.get(exp.experiment_name),
+        run_started_at_ms=info.start_time,
+        run_ended_at_ms=info.end_time or None,
     )
 
 
 def poll_experiments(_: None) -> dict[RunName, Run]:
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    exp_creation_times_ms = {
+        e.name: e.creation_time for e in client.search_experiments()
+    }
     experiments = list_experiments()
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     runs: dict[RunName, Run] = {}
     for exp in experiments:
         try:
-            run = _build_run(exp, all_ray_submission_ids)
+            run = _build_run(
+                exp, all_ray_submission_ids, client, exp_creation_times_ms
+            )
         except Exception:
             log.exception("Building run data failed for %s", exp.run_id)
             continue
