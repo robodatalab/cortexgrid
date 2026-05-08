@@ -22,6 +22,34 @@ Cluster topology — which IP is head vs worker, where the head's HDD is mounted
 
 Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
 
+### Argo Application hierarchy
+
+Within each profile the manifests are a three-tier App-of-Apps that mirrors the dependency direction (bootstrap → cortexflow → ui):
+
+```
+argo-bootstrap-<profile>           bootstrap (defined in argocd.yaml; no upstream deps)
+├── secrets/                       ClusterSecretStore + ExternalSecrets
+├── cert-manager                   leaf
+├── tailscale-operator             leaf
+├── nvidia                         leaf
+├── monitoring                     leaf (kube-prometheus-stack)
+├── mlflow-monitoring              leaf (Grafana dashboards)
+└── ui                             top aggregator (fires cortexflow-ui integration tests)
+    ├── cortexflow-ui              leaf
+    └── cortexflow                 mid aggregator (fires cortexflow library integration tests)
+        ├── jobs-control-plane     leaf
+        ├── mlflow                 leaf
+        ├── ray                    leaf
+        ├── minio                  leaf (onprem only)
+        └── postgres               leaf (onprem only)
+```
+
+The bootstrap App's `directory.exclude: 'ui/**'` keeps it from claiming anything below `ui/`, so the two aggregators own their subtrees exclusively. Bootstrap directly owns everything else: `secrets/`, the cluster-infra leaves (cert-manager, tailscale-operator, nvidia, monitoring, mlflow-monitoring), and `ui.yaml` itself.
+
+**Why secrets/ must stay bootstrap-owned.** ArgoCD reads its source repo using the `argo-github-repo` Secret, which is produced by an `ExternalSecret` backed by the `ClusterSecretStore` from `secrets/external-secrets/`. If those resources live downstream of an aggregator, ArgoCD enters a chicken-and-egg state on any sync that prunes them — the aggregator can't reload its source until git auth is restored, and git auth comes from what the aggregator was supposed to manage. Bootstrap-owning `secrets/` keeps the trust chain rooted at a layer that doesn't depend on git working. Recovery from accidentally nesting it requires re-running `make head-setup` so [BootstrapSecrets](../../k8s/seed/operators/bootstrap_secrets.py) can re-seed `argo-github-repo` directly via `kubectl apply`.
+
+**Test triggers.** Each aggregator subscribes to a distinct ArgoCD notification trigger (`on-cortexflow-stack-deployed`, `on-cortexflow-ui-stack-deployed`) declared in [argocd.yaml](../../k8s/argocd.yaml) and uses `oncePer: app.status.sync.revision` so it fires exactly once per main commit, only after every child is Synced + Healthy. The corresponding GitHub workflows under [.github/workflows/](../../.github/workflows/) listen for the matching `repository_dispatch` event types — no polling, no per-commit dedup logic on the GH side.
+
 ### Seeding
 
 Nodes are seeded and torn down via the repo-root Makefile:
