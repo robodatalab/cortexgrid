@@ -1,20 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cortexflow-ui
+  name: jobs-control-plane
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
-    notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""
 spec:
   project: default
   source:
     repoURL: https://github.com/paksas/robolab-infra.git
     targetRevision: main
-    path: k8s/workloads/cortexflow-ui
+    path: k8s/workloads/jobs-control-plane
   destination:
     server: https://kubernetes.default.svc
-    namespace: cortexflow-ui
+    namespace: jobs-control-plane
   syncPolicy:
     automated:
       prune: true
