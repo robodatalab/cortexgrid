@@ -35,7 +35,7 @@ spec:
               allow_embedding: true
           nodeSelector:
             role: head
-          # Loki is provisioned by ui/cortexflow/loki.yaml. Grafana reaches
+          # Loki is provisioned by the sibling loki.yaml. Grafana reaches
           # it via the in-cluster gateway Service; logs become browsable in
           # Explore once the loki App is Healthy.
           additionalDataSources:
