@@ -16,9 +16,9 @@ spec:
         # DaemonSet on every node (no nodeSelector). Each Vector pod tails
         # its node's /var/log/pods (tmpfs) and forwards to the in-cluster
         # Loki gateway. The on-disk buffer is the documented "fallback when
-        # connectivity drops" -- bounded to 128 MiB per node, on the OS
-        # root volume; only fills if Loki is unreachable for an extended
-        # period.
+        # connectivity drops" -- bounded to 256 MiB per node (Vector's
+        # minimum for disk buffers), on the OS root volume; only fills if
+        # Loki is unreachable for an extended period.
         role: Agent
         customConfig:
           data_dir: /vector-data-dir
@@ -43,7 +43,7 @@ spec:
                 node: '{{`{{ kubernetes.pod_node_name }}`}}'
               buffer:
                 type: disk
-                max_size: 134217728
+                max_size: 268435488
                 when_full: block
         resources:
           requests:
