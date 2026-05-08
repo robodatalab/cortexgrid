@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import { FlaskConical, Play, Cog, RefreshCw, Trash2 } from "lucide-react";
+import { FlaskConical, Play, Cog, Trash2 } from "lucide-react";
 import "./ExperimentTree.css";
 
 export type ExperimentRun = {
@@ -19,7 +19,6 @@ type ExperimentTreeProps = {
     runsByExperiment: Record<string, ExperimentRun[]>;
     selection: Selection | null;
     onSelect: (selection: Selection) => void;
-    onRefresh: () => void;
     onDeleteExperiment: (experimentName: string) => void;
     onDeleteRun: (runId: string, runName: string) => void;
 };
@@ -36,7 +35,6 @@ export function ExperimentTree({
     runsByExperiment,
     selection,
     onSelect,
-    onRefresh,
     onDeleteExperiment,
     onDeleteRun,
 }: ExperimentTreeProps) {
@@ -54,14 +52,6 @@ export function ExperimentTree({
         <div className="experiment-tree">
             <div className="experiment-tree__title">
                 <span>Experiments</span>
-                <button
-                    type="button"
-                    className="experiment-tree__refresh"
-                    onClick={onRefresh}
-                    aria-label="Refresh"
-                >
-                    <RefreshCw size={14} />
-                </button>
             </div>
             <div className="experiment-tree__list">
                 {experimentNames.length === 0 && (

@@ -34,7 +34,6 @@ function renderTree(selection: Selection | null) {
       runsByExperiment={runsByExperiment}
       selection={selection}
       onSelect={vi.fn()}
-      onRefresh={vi.fn()}
     />,
   )
 }
