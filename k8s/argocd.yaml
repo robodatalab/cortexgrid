@@ -40,18 +40,34 @@ spec:
           - name: Accept
             value: application/vnd.github+json
       templates:
-        template.app-synced: |
+        # One template per GH workflow. The event_type is the only thing
+        # the workflow filters on, so the template name is what wires
+        # an Argo subscription to a specific workflow.
+        template.cortexflow-stack-deployed: |
           webhook:
             github:
               method: POST
               path: /repos/paksas/robolab-infra/dispatches
               body: |
-                {"event_type": "argocd-synced", "client_payload": {"app": "{{.app.metadata.name}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
+                {"event_type": "cortexflow-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
+        template.cortexflow-ui-stack-deployed: |
+          webhook:
+            github:
+              method: POST
+              path: /repos/paksas/robolab-infra/dispatches
+              body: |
+                {"event_type": "cortexflow-ui-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
       triggers:
-        trigger.on-sync-succeeded: |
-          - description: Application synced successfully
-            send: [app-synced]
-            when: app.status.operationState.phase in ['Succeeded']
+        trigger.on-cortexflow-stack-deployed: |
+          - description: A member of the cortexflow test stack is Synced+Healthy at this revision
+            oncePer: app.status.sync.revision
+            send: [cortexflow-stack-deployed]
+            when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
+        trigger.on-cortexflow-ui-stack-deployed: |
+          - description: A member of the cortexflow-ui test stack is Synced+Healthy at this revision
+            oncePer: app.status.sync.revision
+            send: [cortexflow-ui-stack-deployed]
+            when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
 ---
 # Both bootstrap Applications are declared here so the deployment list per
 # profile is visible at a glance. K3sServer detects sys_vendor at install time
@@ -70,6 +86,9 @@ spec:
     path: k8s/argo-deployments/aws
     directory:
       recurse: true
+      # Anything inside ui/ is owned by the ui aggregator App (see ui.yaml).
+      # Bootstrap claims only the top-level ui.yaml entrypoint.
+      exclude: 'ui/**'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -103,6 +122,7 @@ spec:
     path: k8s/argo-deployments/onprem
     directory:
       recurse: true
+      exclude: 'ui/**'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

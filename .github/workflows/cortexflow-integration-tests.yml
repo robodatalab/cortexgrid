@@ -2,11 +2,11 @@ name: cortexflow integration tests
 
 on:
   repository_dispatch:
-    types: [argocd-synced]
+    types: [cortexflow-stack-deployed]
 
 concurrency:
-  group: cortexflow-integration
-  cancel-in-progress: false
+  group: cortexflow-integration-${{ github.event.client_payload.revision }}
+  cancel-in-progress: true
 
 permissions:
   id-token: write

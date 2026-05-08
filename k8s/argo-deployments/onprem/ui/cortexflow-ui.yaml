@@ -1,24 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: reflector
+  name: cortexflow-ui
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-1"
-    notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   project: default
   source:
-    repoURL: https://emberstack.github.io/helm-charts
-    chart: reflector
-    targetRevision: 7.1.288
-    helm:
-      values: |
-        nodeSelector:
-          role: head
+    repoURL: https://github.com/paksas/robolab-infra.git
+    targetRevision: main
+    path: k8s/workloads/cortexflow-ui
   destination:
     server: https://kubernetes.default.svc
-    namespace: reflector
+    namespace: cortexflow-ui
   syncPolicy:
     automated:
       prune: true
@@ -26,3 +21,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+      - ServerSideDiff=true
