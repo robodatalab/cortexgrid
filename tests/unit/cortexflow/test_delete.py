@@ -43,6 +43,14 @@ def _patched_infra(s3: FakeS3, mlflow: FakeMlflowClient, ray: FakeRay) -> ExitSt
         patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
+        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow)
+    )
+    stack.enter_context(
+        patch(
+            "cortexflow.model_storage.get_mlflow_tracking_uri", return_value=""
+        )
+    )
+    stack.enter_context(
         patch(
             "cortexflow.ray_util.get_ray_job_submission_client",
             return_value=ray,
@@ -180,7 +188,7 @@ class TestDeleteExperiment(unittest.TestCase):
             FakeMlflowRun(run_id="run-1", run_name="alpha-1", experiment_id="e1"),
             FakeMlflowRun(run_id="run-2", run_name="alpha-2", experiment_id="e1"),
         ]
-        artifacts = {"run-1": [], "run-2": []}
+        artifacts: dict[str, list[FakeArtifact]] = {"run-1": [], "run-2": []}
         mlflow = FakeMlflowClient().seed([exp], runs, artifacts)
 
         with _patched_infra(FakeS3(), mlflow, FakeRay()):

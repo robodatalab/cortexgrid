@@ -24,6 +24,7 @@ if ckpt:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 from cortexflow.checkpoint import checkpoint, resume
@@ -72,6 +73,13 @@ from cortexflow.ray_util import (
     JobStatus,
 )
 from cortexflow.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
+from cortexflow.model_storage import (
+    SavedModel,
+    delete_model,
+    list_models,
+    load_model,
+)
+from cortexflow.model_storage import save_model as _save_model_storage
 
 
 def remote(
@@ -93,6 +101,18 @@ def remote(
         num_cpus=num_cpus,
         retry=retry,
         **kwargs,
+    )
+
+
+def save_model(model_dir: str | Path, suffix: str, family: str) -> SavedModel:
+    """Persist a trained model under the current Experiment's run."""
+    experiment = Experiment.get_instance()
+    return _save_model_storage(
+        model_dir,
+        suffix,
+        family,
+        run_id=experiment.run_id,
+        run_name=experiment.run_name(),
     )
 
 
@@ -143,4 +163,10 @@ __all__ = [
     "set_secret",
     "list_secrets",
     "delete_secret",
+    # Model registry
+    "SavedModel",
+    "save_model",
+    "load_model",
+    "list_models",
+    "delete_model",
 ]

@@ -158,6 +158,12 @@ class FakeMlflowClient:
                 return
         raise KeyError(experiment_id)
 
+    def search_model_versions(self, filter_string: str = "") -> list[Any]:
+        return []
+
+    def delete_model_version(self, name: str, version: str) -> None:
+        return None
+
 
 @dataclass
 class FakeRayJob:
