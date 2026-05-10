@@ -18,7 +18,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: mlflow
-          image: ghcr.io/paksas/mlflow:main-14b8206bdcb8b580e6ae51a7b495d80f1cd33d46
+          image: ghcr.io/robodatalab/mlflow:main-07429b9705a39d5acad0441f6553911c24eb4cac
           resources:
             requests:
               cpu: "1"
