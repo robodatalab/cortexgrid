@@ -24,7 +24,7 @@ SAMPLE_PIP_FREEZE = (
     "cloudpickle==3.0.0\n"
     "tqdm==4.66.0\n"
     "numpy==1.26.0\n"
-    "cortexflow @ git+https://github.com/paksas/robolab-infra.git@abc123\n"
+    "cortexflow @ git+https://github.com/robodatalab/robolab-infra.git@abc123\n"
 )
 
 

@@ -100,7 +100,6 @@ One namespace, backed by AWS Secrets Manager:
 ### `terraform/website/` — Marketing website + investor auth
 
 Serves the marketing site at **robodatalab.com** and the investor authentication backend.
-Source: `robolabwebsite` repo.
 
 | Resource | Purpose |
 |----------|---------|
@@ -227,7 +226,6 @@ The secrets module provisions a GitHub Actions OIDC integration:
 | `robolab-platform` | Platform frontend and backend |
 | `robolab-sims-unity` | Unity simulation projects |
 | `robolab-sims-unreal` | Unreal Engine simulation projects |
-| `robolabwebsite` | Marketing website source |
 | `model-gateway` | LLM provider abstraction layer |
 | `model-training` | Training facilities (SFT, LoRA) |
 

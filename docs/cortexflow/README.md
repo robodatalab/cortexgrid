@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cortexflow = { git = "https://github.com/paksas/robolab-infra.git", subdirectory = "cortexflow" }
+cortexflow = { git = "https://github.com/robodatalab/robolab-infra.git", subdirectory = "cortexflow" }
 
 [tool.hatch.metadata]
 allow-direct-references = true

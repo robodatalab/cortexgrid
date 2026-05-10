@@ -14,7 +14,7 @@ FastAPI can serve a built SPA, but splitting them keeps CI triggers narrow: a Ty
 
 ## Dependencies
 
-- **Custom images** — [`../../docker/cortexflow-ui/backend/`](../../../../k8s/docker/cortexflow-ui/backend/) (`ghcr.io/paksas/cortexflow-ui-backend`) and [`../../docker/cortexflow-ui/frontend/`](../../../../k8s/docker/cortexflow-ui/frontend/) (`ghcr.io/paksas/cortexflow-ui-frontend`).
+- **Custom images** — [`../../docker/cortexflow-ui/backend/`](../../../../k8s/docker/cortexflow-ui/backend/) (`ghcr.io/robodatalab/cortexflow-ui-backend`) and [`../../docker/cortexflow-ui/frontend/`](../../../../k8s/docker/cortexflow-ui/frontend/) (`ghcr.io/robodatalab/cortexflow-ui-frontend`).
 - **MLflow** ([../mlflow/](../../../../k8s/argo-deployments/aws/mlflow/)) — source of experiments, runs, metrics, and artifacts. Accessed at `http://mlflow.mlflow.svc.cluster.local:5000`.
 - **Ray** ([../ray/](../../../../k8s/argo-deployments/aws/ray/)) — source of job status and logs. Accessed at `http://ray-head.ray.svc.cluster.local:8265`.
 - **MinIO** ([../minio/](../../../../k8s/argo-deployments/onprem/minio/)) — artifact bucket read-through. Accessed at `http://minio.minio.svc.cluster.local:9000`.
