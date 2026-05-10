@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: arc-runner-set
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: ghcr.io/actions/actions-runner-controller-charts
+    chart: gha-runner-scale-set
+    targetRevision: 0.14.1
+    helm:
+      releaseName: arc-runners
+      values: |
+        runnerScaleSetName: arc-runners
+        githubConfigUrl: https://github.com/robodatalab
+        githubConfigSecret: arc-github-app
+        minRunners: 0
+        maxRunners: 3
+        containerMode:
+          type: dind
+        template:
+          spec:
+            nodeSelector:
+              role: head
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: arc-runners
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
