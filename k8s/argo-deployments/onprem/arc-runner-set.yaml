@@ -28,6 +28,13 @@ spec:
           spec:
             nodeSelector:
               role: head
+            containers:
+              - name: dind
+                args:
+                  - dockerd
+                  - --host=unix:///var/run/docker.sock
+                  - --group=$(DOCKER_GROUP_GID)
+                  - --mtu=1230
   destination:
     server: https://kubernetes.default.svc
     namespace: arc-runners
