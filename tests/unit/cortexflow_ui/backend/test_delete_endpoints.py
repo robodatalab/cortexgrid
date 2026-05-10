@@ -44,6 +44,12 @@ def _patched_infra(
         patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
+        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow)
+    )
+    stack.enter_context(
+        patch("cortexflow.model_storage.get_mlflow_tracking_uri", return_value="")
+    )
+    stack.enter_context(
         patch(
             "cortexflow.ray_util.get_ray_job_submission_client",
             return_value=ray,
