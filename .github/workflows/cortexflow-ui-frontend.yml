@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: self-hosted
+    runs-on: arc-runners
     if: github.event_name == 'push'
 
     env:

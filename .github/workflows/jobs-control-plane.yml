@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   cortexflow-test:
-    runs-on: self-hosted
+    runs-on: arc-runners
 
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
         run: uv run python -m unittest discover -s tests/unit/cortexflow -v
 
   test:
-    runs-on: self-hosted
+    runs-on: arc-runners
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
         run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
 
   build-and-push:
-    runs-on: self-hosted
+    runs-on: arc-runners
     needs: [cortexflow-test, test]
     if: github.event_name == 'push'
 
