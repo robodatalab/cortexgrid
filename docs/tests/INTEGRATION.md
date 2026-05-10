@@ -7,7 +7,7 @@ End-to-end tests that run against the deployed cluster after every successful Ar
 ```
 Argo CD sync success on a subscribed Application
   -> Argo Notifications controller fires webhook
-  -> POST https://api.github.com/repos/paksas/robolab-infra/dispatches
+  -> POST https://api.github.com/repos/robodatalab/robolab-infra/dispatches
        (event_type: argocd-synced, client_payload: {app, aws_role_arn})
   -> GitHub Actions workflows triggered by repository_dispatch type "argocd-synced"
   -> Workflow assumes robolab-github-actions role (ARN from payload), joins tailnet, runs tests
@@ -19,7 +19,7 @@ The workflows have no `workflow_dispatch` trigger -- they only listen for `repos
 
 ```sh
 ROLE_ARN=$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('AWS_ROLE_ARN'))")
-gh api repos/paksas/robolab-infra/dispatches --input - <<EOF
+gh api repos/robodatalab/robolab-infra/dispatches --input - <<EOF
 {"event_type": "argocd-synced", "client_payload": {"app": "manual", "aws_role_arn": "$ROLE_ARN"}}
 EOF
 ```

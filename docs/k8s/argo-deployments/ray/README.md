@@ -23,13 +23,13 @@ When we add AWS and want real workers / GPU scaling:
 1. Install the KubeRay operator as a sibling Argo Application.
 2. Replace [../../workloads/ray/deployment.yaml](../../../../k8s/workloads/ray/deployment.yaml) + [service.yaml](../../../../k8s/workloads/ray/service.yaml) with a `RayCluster` CR — one head group, one or more worker groups with GPU resource requests.
 3. The existing [secrets.yaml](../../../../k8s/workloads/ray/secrets.yaml) (env Secret) and [metrics.yaml](../../../../k8s/workloads/ray/metrics.yaml) (PodMonitor) stay put; they reference the cluster by pod label, which we update to match KubeRay's scheme.
-4. The image [ghcr.io/paksas/ray-head](../../../../k8s/docker/ray/) stays the same — KubeRay invokes `ray start` itself, which our image supports (ray installed via pip on top of `python:3.11-slim`, no custom entrypoint).
+4. The image [ghcr.io/robodatalab/ray-head](../../../../k8s/docker/ray/) stays the same — KubeRay invokes `ray start` itself, which our image supports (ray installed via pip on top of `python:3.11-slim`, no custom entrypoint).
 
 The on-prem deployment can stay on raw manifests (the fixed head + DaemonSet-worker shape doesn't need KubeRay) or migrate to KubeRay if we ever want autoscaling worker groups.
 
 ## Dependencies
 
-- **Custom image** ([../../docker/ray/](../../../../k8s/docker/ray/)) — `ghcr.io/paksas/ray-head`.
+- **Custom image** ([../../docker/ray/](../../../../k8s/docker/ray/)) — `ghcr.io/robodatalab/ray-head`.
 - **Monitoring** ([../monitoring/](../../../../k8s/argo-deployments/aws/monitoring/)) — the PodMonitor in `workloads/ray/` tells Prometheus to scrape port 8080.
 - **External Secrets Operator** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) — materializes `ray-env` (dashboard's Grafana URL, Prometheus URL) from AWS Secrets Manager.
 - **Reflector** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) — provides the `ghcr-pull` Secret in this namespace so kubelet can pull the private image.

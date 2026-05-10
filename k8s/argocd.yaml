@@ -47,14 +47,14 @@ spec:
           webhook:
             github:
               method: POST
-              path: /repos/paksas/robolab-infra/dispatches
+              path: /repos/robodatalab/robolab-infra/dispatches
               body: |
                 {"event_type": "cortexflow-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
         template.cortexflow-ui-stack-deployed: |
           webhook:
             github:
               method: POST
-              path: /repos/paksas/robolab-infra/dispatches
+              path: /repos/robodatalab/robolab-infra/dispatches
               body: |
                 {"event_type": "cortexflow-ui-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
       triggers:
@@ -81,7 +81,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/paksas/robolab-infra.git
+    repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
     path: k8s/argo-deployments/aws
     directory:
@@ -117,7 +117,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/paksas/robolab-infra.git
+    repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
     path: k8s/argo-deployments/onprem
     directory:

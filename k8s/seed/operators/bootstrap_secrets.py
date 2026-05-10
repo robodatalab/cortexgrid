@@ -35,7 +35,7 @@ class BootstrapSecrets(Operator):
             type: Opaque
             stringData:
               type: git
-              url: https://github.com/paksas/robolab-infra.git
+              url: https://github.com/robodatalab/robolab-infra.git
               username: x-access-token
               password: "{github_token}"
         """)

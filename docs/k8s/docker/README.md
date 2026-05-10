@@ -1,6 +1,6 @@
 # Custom Images
 
-Docker images we build and push to GHCR, consumed by deployments in [../argo-deployments/](../../../k8s/argo-deployments/). Built by [GitHub Actions workflows](../../../.github/workflows/) on push; images land at `ghcr.io/paksas/<name>`.
+Docker images we build and push to GHCR, consumed by deployments in [../argo-deployments/](../../../k8s/argo-deployments/). Built by [GitHub Actions workflows](../../../.github/workflows/) on push; images land at `ghcr.io/robodatalab/<name>`.
 
 ## Why custom images exist
 
