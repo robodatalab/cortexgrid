@@ -17,6 +17,9 @@ spec:
         runnerScaleSetName: arc-runners
         githubConfigUrl: https://github.com/robodatalab
         githubConfigSecret: arc-github-app
+        controllerServiceAccount:
+          namespace: arc-systems
+          name: arc-controller-gha-rs-controller
         minRunners: 0
         maxRunners: 3
         containerMode:
