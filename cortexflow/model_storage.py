@@ -82,7 +82,7 @@ def save_model(
     prefix = f"models/{run_name}/{family}/{suffix}"
     s3_util.upload_dir(str(model_dir), dest_path=f"{prefix}/weights")
     source = f"s3://{bucket}/{prefix}/weights/"
-    name = f"{family}/{suffix}"
+    name = f"{family}__{suffix}"
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     _ensure_registered_model(client, name)
     version = client.create_model_version(
@@ -102,7 +102,7 @@ def load_model(
 ) -> Path:
     """Find the ModelVersion by (family, suffix, run_name) and download weights."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}/{suffix}"
+    name = f"{family}__{suffix}"
     versions = client.search_model_versions(
         f"name='{name}' and tags.run_name='{run_name}'"
     )
@@ -120,7 +120,7 @@ def list_models() -> list[SavedModel]:
 def delete_model(family: str, suffix: str, run_name: str) -> None:
     """Delete the ModelVersion in MLflow and its weights blob in S3."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}/{suffix}"
+    name = f"{family}__{suffix}"
     versions = client.search_model_versions(
         f"name='{name}' and tags.run_name='{run_name}'"
     )

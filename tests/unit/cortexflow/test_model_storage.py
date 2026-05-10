@@ -160,7 +160,7 @@ def _seed_version(
     run_name: str,
 ) -> FakeModelVersion:
     v = FakeModelVersion(
-        name=f"{family}/{suffix}",
+        name=f"{family}__{suffix}",
         version="1",
         source=f"s3://b/models/{run_name}/{family}/{suffix}/weights/",
         run_id=run_id,
@@ -199,10 +199,10 @@ class TestSaveModel(unittest.TestCase):
             _make_weights_dir(), "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        self.assertIn("Qwen2/instruct", self.mlflow.registered)
+        self.assertIn("Qwen2__instruct", self.mlflow.registered)
 
     def test_does_not_recreate_existing_registered_model(self) -> None:
-        self.mlflow.registered.add("Qwen2/instruct")
+        self.mlflow.registered.add("Qwen2__instruct")
         save_model(
             _make_weights_dir(), "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
