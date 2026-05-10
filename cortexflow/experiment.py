@@ -8,6 +8,7 @@ from cortexflow import s3_util
 from cortexflow.infra import get_mlflow_tracking_uri
 from cortexflow.jobs import stop_experiment_run_jobs
 from cortexflow.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
+from cortexflow.model_storage import delete_models_for_run
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 
@@ -156,6 +157,7 @@ def delete_run(run_id: str) -> None:
             if sid.startswith(prefix):
                 stop_ray_job(sid)
         s3_util.delete_prefix(f"job/{job_id}/")
+    delete_models_for_run(run_id)
     client.delete_run(run_id)
     log.info("delete_run(%s): done", run_id)
 

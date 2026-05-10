@@ -18,6 +18,10 @@ spec:
       port: 10001
       targetPort: 10001
       nodePort: 30001
+    - name: serve
+      port: 8000
+      targetPort: 8000
+      nodePort: 30000
     - name: gcs
       port: 6379
       targetPort: 6379
