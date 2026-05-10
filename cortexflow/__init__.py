@@ -80,6 +80,13 @@ from cortexflow.model_storage import (
     load_model,
 )
 from cortexflow.model_storage import save_model as _save_model_storage
+from cortexflow.model_serving import (
+    Deployment,
+    deploy_model,
+    list_deployed_models,
+    model_deployment,
+    undeploy_model,
+)
 
 
 def remote(
@@ -169,4 +176,10 @@ __all__ = [
     "load_model",
     "list_models",
     "delete_model",
+    # Model serving
+    "Deployment",
+    "deploy_model",
+    "undeploy_model",
+    "list_deployed_models",
+    "model_deployment",
 ]

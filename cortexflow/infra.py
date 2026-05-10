@@ -10,6 +10,11 @@ def get_ray_job_server_uri() -> str:
     return get_secret("RAY_JOB_SERVER_URI")
 
 
+def get_ray_serve_uri() -> str:
+    """HTTP base URL where Ray Serve apps are reachable (data plane, port 8000)."""
+    return get_secret("RAY_SERVE_URI")
+
+
 def get_s3_endpoint_url() -> str:
     # SM holds an empty string on the AWS profile (boto3 then uses real S3),
     # an in-cluster MinIO URL on the on-prem profile. Always written, never absent.
