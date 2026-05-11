@@ -29,6 +29,7 @@ helmCharts:
           containers:
             - name: runner
               image: ghcr.io/robodatalab/arc-runner:bootstrap
+              command: ["/home/runner/run.sh"]
 
 patches:
   - target:
