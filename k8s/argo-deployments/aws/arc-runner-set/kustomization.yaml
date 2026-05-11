@@ -17,13 +17,18 @@ helmCharts:
         namespace: arc-systems
         name: arc-controller-gha-rs-controller
       minRunners: 0
-      maxRunners: 3
+      maxRunners: 8
       containerMode:
         type: dind
       template:
         spec:
           nodeSelector:
             role: head
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: runner
+              image: ghcr.io/robodatalab/arc-runner:bootstrap
 
 patches:
   - target:
