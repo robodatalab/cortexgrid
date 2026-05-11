@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-notifications-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  service.webhook.github: |
+    url: https://api.github.com
+    headers:
+    - name: Authorization
+      value: token $github-token
+    - name: Accept
+      value: application/vnd.github+json
+  # One template per GH workflow. The event_type is the only thing the
+  # workflow filters on, so the template name is what wires an Argo
+  # subscription to a specific workflow.
+  template.cortexflow-stack-deployed: |
+    webhook:
+      github:
+        method: POST
+        path: /repos/robodatalab/robolab-infra/dispatches
+        body: |
+          {"event_type": "cortexflow-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
+  template.cortexflow-ui-stack-deployed: |
+    webhook:
+      github:
+        method: POST
+        path: /repos/robodatalab/robolab-infra/dispatches
+        body: |
+          {"event_type": "cortexflow-ui-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
+  trigger.on-cortexflow-stack-deployed: |
+    - description: A member of the cortexflow test stack is Synced+Healthy at this revision
+      oncePer: app.status.sync.revision
+      send: [cortexflow-stack-deployed]
+      when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
+  trigger.on-cortexflow-ui-stack-deployed: |
+    - description: A member of the cortexflow-ui test stack is Synced+Healthy at this revision
+      oncePer: app.status.sync.revision
+      send: [cortexflow-ui-stack-deployed]
+      when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
