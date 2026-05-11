@@ -17,7 +17,7 @@ helmCharts:
         namespace: arc-systems
         name: arc-controller-gha-rs-controller
       minRunners: 0
-      maxRunners: 3
+      maxRunners: 8
       containerMode:
         type: dind
       template:
