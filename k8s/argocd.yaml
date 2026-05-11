@@ -17,8 +17,6 @@ spec:
       params:
         server.insecure: true
         server.disable.auth: true
-      cm:
-        kustomize.buildOptions: --enable-helm
     server:
       service:
         type: NodePort
@@ -33,43 +31,6 @@ spec:
             secretName: robodatalab-wildcard-tls
     notifications:
       enabled: true
-      notifiers:
-        service.webhook.github: |
-          url: https://api.github.com
-          headers:
-          - name: Authorization
-            value: token $github-token
-          - name: Accept
-            value: application/vnd.github+json
-      templates:
-        # One template per GH workflow. The event_type is the only thing
-        # the workflow filters on, so the template name is what wires
-        # an Argo subscription to a specific workflow.
-        template.cortexflow-stack-deployed: |
-          webhook:
-            github:
-              method: POST
-              path: /repos/robodatalab/robolab-infra/dispatches
-              body: |
-                {"event_type": "cortexflow-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
-        template.cortexflow-ui-stack-deployed: |
-          webhook:
-            github:
-              method: POST
-              path: /repos/robodatalab/robolab-infra/dispatches
-              body: |
-                {"event_type": "cortexflow-ui-stack-deployed", "client_payload": {"app": "{{.app.metadata.name}}", "revision": "{{.app.status.sync.revision}}", "aws_role_arn": "{{printf `%s` .secrets.aws_role_arn}}"}}
-      triggers:
-        trigger.on-cortexflow-stack-deployed: |
-          - description: A member of the cortexflow test stack is Synced+Healthy at this revision
-            oncePer: app.status.sync.revision
-            send: [cortexflow-stack-deployed]
-            when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
-        trigger.on-cortexflow-ui-stack-deployed: |
-          - description: A member of the cortexflow-ui test stack is Synced+Healthy at this revision
-            oncePer: app.status.sync.revision
-            send: [cortexflow-ui-stack-deployed]
-            when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
 ---
 # Both bootstrap Applications are declared here so the deployment list per
 # profile is visible at a glance. K3sServer detects sys_vendor at install time
@@ -87,10 +48,10 @@ spec:
     targetRevision: main
     path: k8s/argo-deployments/aws
     directory:
-      recurse: true
-      # Anything inside ui/ is owned by the ui aggregator App (see ui.yaml).
-      # Bootstrap claims only the top-level ui.yaml entrypoint.
-      exclude: '{ui/**,arc-runner-set/**}'
+      # Bootstrap applies every *.yaml at the top level. Each top-level file
+      # is an Application; subdirs are owned by those Applications. Adding a
+      # new aggregator never requires editing this file.
+      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -98,18 +59,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    # Tight retry to absorb the App-of-Apps wave gap: when wave -1 Applications
-    # (external-secrets, reflector) are created, ArgoCD moves to wave 0 before
-    # their child pods (e.g. external-secrets-webhook) are Ready. Wave 0
-    # resources that depend on those pods (ClusterSecretStore validation
-    # webhook) fail their first apply. Without this block, ArgoCD's default
-    # backoff stretches recovery to 3+ minutes; with it, ~30-60s.
-    retry:
-      limit: 10
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 2m
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -123,8 +72,7 @@ spec:
     targetRevision: main
     path: k8s/argo-deployments/onprem
     directory:
-      recurse: true
-      exclude: '{ui/**,arc-runner-set/**}'
+      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -132,9 +80,3 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    retry:
-      limit: 10
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 2m
