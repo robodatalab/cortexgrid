@@ -24,6 +24,11 @@ helmCharts:
         spec:
           nodeSelector:
             role: head
+          imagePullSecrets:
+            - name: ghcr-pull
+          containers:
+            - name: runner
+              image: ghcr.io/robodatalab/arc-runner:bootstrap
 
 patches:
   - target:
