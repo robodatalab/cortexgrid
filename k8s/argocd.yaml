@@ -48,10 +48,10 @@ spec:
     targetRevision: main
     path: k8s/argo-deployments/aws
     directory:
-      recurse: true
-      # Anything inside ui/ is owned by the ui aggregator App (see ui.yaml).
-      # Bootstrap claims only the top-level ui.yaml entrypoint.
-      exclude: '{ui/**,arc-runner-set/**}'
+      # Bootstrap applies every *.yaml at the top level. Each top-level file
+      # is an Application; subdirs are owned by those Applications. Adding a
+      # new aggregator never requires editing this file.
+      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -59,18 +59,6 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    # Tight retry to absorb the App-of-Apps wave gap: when wave -1 Applications
-    # (external-secrets, reflector) are created, ArgoCD moves to wave 0 before
-    # their child pods (e.g. external-secrets-webhook) are Ready. Wave 0
-    # resources that depend on those pods (ClusterSecretStore validation
-    # webhook) fail their first apply. Without this block, ArgoCD's default
-    # backoff stretches recovery to 3+ minutes; with it, ~30-60s.
-    retry:
-      limit: 10
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 2m
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -84,8 +72,7 @@ spec:
     targetRevision: main
     path: k8s/argo-deployments/onprem
     directory:
-      recurse: true
-      exclude: '{ui/**,arc-runner-set/**}'
+      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -93,9 +80,3 @@ spec:
     automated:
       prune: true
       selfHeal: true
-    retry:
-      limit: 10
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 2m
