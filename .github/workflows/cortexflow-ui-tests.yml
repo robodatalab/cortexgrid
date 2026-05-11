@@ -18,7 +18,7 @@ on:
 
 jobs:
   backend:
-    runs-on: self-hosted
+    runs-on: arc-runners
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +35,7 @@ jobs:
         run: uv run python -m unittest discover -s tests/unit/cortexflow_ui/backend -v
 
   frontend:
-    runs-on: self-hosted
+    runs-on: arc-runners
     defaults:
       run:
         working-directory: cortexflow_ui/frontend

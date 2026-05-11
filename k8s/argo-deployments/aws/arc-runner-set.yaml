@@ -8,33 +8,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: ghcr.io/actions/actions-runner-controller-charts
-    chart: gha-runner-scale-set
-    targetRevision: 0.14.1
-    helm:
-      releaseName: arc-runners
-      values: |
-        runnerScaleSetName: arc-runners
-        githubConfigUrl: https://github.com/robodatalab
-        githubConfigSecret: arc-github-app
-        controllerServiceAccount:
-          namespace: arc-systems
-          name: arc-controller-gha-rs-controller
-        minRunners: 0
-        maxRunners: 3
-        containerMode:
-          type: dind
-        template:
-          spec:
-            nodeSelector:
-              role: head
-            containers:
-              - name: dind
-                args:
-                  - dockerd
-                  - --host=unix:///var/run/docker.sock
-                  - --group=$(DOCKER_GROUP_GID)
-                  - --mtu=1230
+    repoURL: https://github.com/robodatalab/robolab-infra.git
+    targetRevision: main
+    path: k8s/argo-deployments/aws/arc-runner-set
   destination:
     server: https://kubernetes.default.svc
     namespace: arc-runners

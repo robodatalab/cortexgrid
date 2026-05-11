@@ -28,3 +28,6 @@ uv.lock
 
 # local infra config
 infra-config.yaml
+
+# kustomize helmCharts pull cache (created by local `kustomize build --enable-helm`)
+k8s/argo-deployments/*/arc-runner-set/charts/

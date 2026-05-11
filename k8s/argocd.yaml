@@ -17,6 +17,8 @@ spec:
       params:
         server.insecure: true
         server.disable.auth: true
+      cm:
+        kustomize.buildOptions: --enable-helm
     server:
       service:
         type: NodePort
@@ -88,7 +90,7 @@ spec:
       recurse: true
       # Anything inside ui/ is owned by the ui aggregator App (see ui.yaml).
       # Bootstrap claims only the top-level ui.yaml entrypoint.
-      exclude: 'ui/**'
+      exclude: '{ui/**,arc-runner-set/**}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -122,7 +124,7 @@ spec:
     path: k8s/argo-deployments/onprem
     directory:
       recurse: true
-      exclude: 'ui/**'
+      exclude: '{ui/**,arc-runner-set/**}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
