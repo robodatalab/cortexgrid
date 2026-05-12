@@ -92,6 +92,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: any `.py` under `cortexflow/`
+- on PR: `test-cortexflow`, `test-cortexflow-ui-backend`, `test-jobs-control-plane`, `build-cortexflow-ui-backend`, `build-jobs-control-plane`, `bump`
+- after squash-merge in Argo: `cortexflow-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexflow-ui jobs-control-plane`)
+- after ~10 min in GitHub Actions: one `cortexflow integration tests` run and one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+
 ### Case 2 — `cortexflow_ui` (code, Dockerfile, or manifest)
 
 ```mermaid
@@ -146,6 +152,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: any `.py` or `.ts` under `cortexflow_ui/`
+- on PR: `test-cortexflow-ui-backend` and/or `test-cortexflow-ui-frontend`, `build-cortexflow-ui-backend` and/or `build-cortexflow-ui-frontend`
+- after squash-merge in Argo: `cortexflow-ui` synced (`kubectl -n argocd get app cortexflow-ui`)
+- after ~10 min in GitHub Actions: one `cortexflow-ui integration tests` run; `cortexflow integration tests` does NOT run (`gh run list --limit 5`)
+
 ### Case 3 — `jobs_control_plane` (code, Dockerfile, or manifest)
 
 ```mermaid
@@ -197,6 +209,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: any `.py` under `jobs_control_plane/`
+- on PR: `test-jobs-control-plane`, `build-jobs-control-plane`
+- after squash-merge in Argo: `jobs-control-plane` synced (`kubectl -n argocd get app jobs-control-plane`)
+- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+
 ### Case 4 — `mlflow` (Dockerfile or manifest)
 
 ```mermaid
@@ -242,6 +260,12 @@ flowchart TB
     end
     M --> Sync
 ```
+
+### Test it
+- input: edit `k8s/docker/mlflow/Dockerfile`
+- on PR: `build-mlflow`
+- after squash-merge in Argo: `mlflow` synced (`kubectl -n argocd get app mlflow`)
+- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
 
 ### Case 5 — `ray` (Dockerfile or manifest)
 
@@ -289,6 +313,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: edit `k8s/docker/ray/Dockerfile`
+- on PR: `build-ray-head`
+- after squash-merge in Argo: `ray` synced (`kubectl -n argocd get app ray`)
+- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+
 ### Case 6 — `arc-runner` (Dockerfile or kustomization)
 
 ```mermaid
@@ -324,6 +354,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: edit `k8s/docker/arc-runner/Dockerfile`
+- on PR: `build-arc-runner`
+- after squash-merge in Argo: `arc-runner-set` synced (`kubectl -n argocd get app arc-runner-set`)
+- after ~10 min in GitHub Actions: no integration test runs (`gh run list --limit 5`)
+
 ### Case 7 — `k8s/argo-deployments/**` (Argo Application definitions)
 
 ```mermaid
@@ -355,6 +391,12 @@ flowchart TB
     M --> Sync
 ```
 
+### Test it
+- input: edit any Application spec under `k8s/argo-deployments/`
+- on PR: no build, no bot commit
+- after squash-merge in Argo: parent App reconfigures children (`kubectl -n argocd get app`)
+- after ~10 min in GitHub Actions: integration tests fire only if a workload App actually rolled (`gh run list --limit 5`)
+
 ### Case 8 — `k8s/seed/**` or `terraform/**` (no Argo coupling)
 
 ```mermaid
@@ -381,6 +423,12 @@ flowchart TB
     end
     M --> Note
 ```
+
+### Test it
+- input: edit a file under `k8s/seed/` or `terraform/`
+- on PR: no build, no bot commit
+- after squash-merge in Argo: nothing (no Argo coupling)
+- after ~10 min in GitHub Actions: no integration test runs (`gh run list --limit 5`)
 
 Mapping back to requirements:
 
