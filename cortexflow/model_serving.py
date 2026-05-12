@@ -133,8 +133,17 @@ def _build_application_spec(
     return {
         "name": _app_name(family, suffix, run_name),
         "route_prefix": _route_prefix(family, suffix, run_name),
-        "import_path": import_path,
-        "args": {"family": family, "suffix": suffix, "run_name": run_name},
+        # Ray Serve REST requires import_path to point at an Application builder
+        # (callable returning a bound node) or an already-bound node. A bare
+        # Deployment class is rejected, so cortexflow.deploy_model goes through
+        # a generic builder that re-imports the user's class and binds it.
+        "import_path": "cortexflow._serve_entry:build",
+        "args": {
+            "class_import_path": import_path,
+            "family": family,
+            "suffix": suffix,
+            "run_name": run_name,
+        },
         "runtime_env": {"working_dir": working_dir, "pip": pip_list},
     }
 
