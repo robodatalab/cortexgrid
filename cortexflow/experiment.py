@@ -14,7 +14,7 @@ from mlflow.tracking import MlflowClient
 
 
 log = logging.getLogger(__name__)
-_SINGLETON_EXPERIMENT: "Experiment | None" = None
+_SINGLETON_EXPERIMENT: Experiment | None = None
 
 
 @dataclass
@@ -145,9 +145,7 @@ def delete_run(run_id: str) -> None:
     log.info("delete_run(%s): stop_experiment_run_jobs done", run_id)
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     job_ids = [
-        Path(f.path).name
-        for f in client.list_artifacts(run_id, path="job")
-        if f.is_dir
+        Path(f.path).name for f in client.list_artifacts(run_id, path="job") if f.is_dir
     ]
     log.info("delete_run(%s): %d job artifact(s) to clean", run_id, len(job_ids))
     all_submissions = list_ray_jobs_with_submission_id()
@@ -169,8 +167,7 @@ def list_run_ids_in_experiment(name: str) -> list[str]:
     if exp is None:
         return []
     return [
-        r.info.run_id
-        for r in client.search_runs(experiment_ids=[exp.experiment_id])
+        r.info.run_id for r in client.search_runs(experiment_ids=[exp.experiment_id])
     ]
 
 
@@ -185,8 +182,9 @@ def delete_experiment(name: str) -> None:
         log.info("delete_experiment(%r): early-exit, experiment not found", name)
         return
     if exp.lifecycle_stage != "active":
-        log.info("delete_experiment(%r): early-exit, lifecycle=%s",
-                 name, exp.lifecycle_stage)
+        log.info(
+            "delete_experiment(%r): early-exit, lifecycle=%s", name, exp.lifecycle_stage
+        )
         return
     runs = list(client.search_runs(experiment_ids=[exp.experiment_id]))
     log.info("delete_experiment(%r): %d active run(s) to delete", name, len(runs))
