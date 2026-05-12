@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -13,55 +12,22 @@ from cortexflow.model_serving import (
 )
 
 
-class _FakeBinding:
-    def __init__(self, cls: type, args: tuple) -> None:
-        self.cls = cls
-        self.args = args
-
-
-class _FakeRayDeployment:
-    """Stand-in for what `@serve.deployment(...)` wraps a class into."""
-
-    def __init__(self, cls: type) -> None:
-        self._cls = cls
-
-    def bind(self, *args: Any) -> _FakeBinding:
-        return _FakeBinding(self._cls, args)
-
-
-class FakeServe:
-    """In-memory Ray Serve stand-in. Tracks which app names are deployed."""
+class FakeServeState:
+    """In-memory stand-in for Ray Serve's declarative app registry."""
 
     def __init__(self) -> None:
-        self.apps: dict[str, str] = {}
+        self.apps: dict[str, dict[str, Any]] = {}
 
-    def deployment(self, **_: Any) -> Any:
-        def wrap(cls: type) -> _FakeRayDeployment:
-            return _FakeRayDeployment(cls)
+    def get_details(self) -> dict[str, Any]:
+        return {
+            "applications": {
+                name: {"status": "RUNNING", "deployed_app_config": spec}
+                for name, spec in self.apps.items()
+            }
+        }
 
-        return wrap
-
-    def run(self, app: _FakeBinding, *, name: str, route_prefix: str) -> None:
-        self.apps[name] = "RUNNING"
-
-    def delete(self, name: str) -> None:
-        self.apps.pop(name, None)
-
-    def status(self) -> Any:
-        return SimpleNamespace(
-            applications={n: SimpleNamespace(status=s) for n, s in self.apps.items()}
-        )
-
-
-def _patches(serve: FakeServe) -> list:
-    return [
-        patch("cortexflow.model_serving.ray.is_initialized", return_value=True),
-        patch("cortexflow.model_serving.serve", serve),
-        patch(
-            "cortexflow.model_serving.get_ray_serve_uri",
-            return_value="http://ray:30000",
-        ),
-    ]
+    def put(self, applications: list[dict[str, Any]]) -> None:
+        self.apps = {a["name"]: a for a in applications}
 
 
 @model_deployment(num_gpus=0)
@@ -70,10 +36,40 @@ class _TestableStub:
         self._info = (family, suffix, run_name)
 
 
+def _stub_build_spec(
+    cls: Any, family: str, suffix: str, run_name: str
+) -> dict[str, Any]:
+    return {
+        "name": f"{family}__{suffix}__{run_name}",
+        "route_prefix": f"/r/{family}/{suffix}/{run_name}",
+        "import_path": "stub:Stub",
+        "args": {"family": family, "suffix": suffix, "run_name": run_name},
+        "runtime_env": {"working_dir": "s3://bucket/stub.zip", "pip": []},
+    }
+
+
 class TestModelServing(unittest.TestCase):
     def setUp(self) -> None:
-        self.serve = FakeServe()
-        for p in _patches(self.serve):
+        self.state = FakeServeState()
+        patches = [
+            patch(
+                "cortexflow.model_serving.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch(
+                "cortexflow.model_serving.put_serve_applications",
+                side_effect=self.state.put,
+            ),
+            patch(
+                "cortexflow.model_serving.get_ray_serve_uri",
+                return_value="http://ray:30000",
+            ),
+            patch(
+                "cortexflow.model_serving._build_application_spec",
+                side_effect=_stub_build_spec,
+            ),
+        ]
+        for p in patches:
             p.start()
             self.addCleanup(p.stop)
 
@@ -98,12 +94,10 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(d.url, "http://ray:30000/r/Qwen2/instruct/boogey-46")
 
-    def test_apps_not_using_our_naming_scheme_excluded_from_listings(
-        self,
-    ) -> None:
+    def test_apps_not_using_our_naming_scheme_excluded_from_listings(self) -> None:
         deploy_model(_TestableStub, "Qwen2", "instruct", "boogey-46")
-        self.serve.apps["unrelated-app"] = "RUNNING"
-        self.serve.apps["only__two"] = "RUNNING"
+        self.state.apps["unrelated-app"] = {"name": "unrelated-app"}
+        self.state.apps["only__two"] = {"name": "only__two"}
 
         listed = list_deployed_models()
 
@@ -111,6 +105,12 @@ class TestModelServing(unittest.TestCase):
 
     def test_list_returns_empty_when_nothing_deployed(self) -> None:
         self.assertEqual(list_deployed_models(), [])
+
+    def test_redeploying_same_triple_replaces_prior_spec(self) -> None:
+        deploy_model(_TestableStub, "Qwen2", "instruct", "boogey-46")
+        deploy_model(_TestableStub, "Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(len(self.state.apps), 1)
 
 
 if __name__ == "__main__":

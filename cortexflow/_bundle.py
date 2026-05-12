@@ -1,7 +1,7 @@
-"""Static analysis for cortexflow.remote() job bundling.
+"""Static analysis for cortexflow code-bundling.
 
-Walks the import graph from a function's source file. Imports that resolve to
-files inside the workspace are shipped; imports that don't are recorded as
+Walks the import graph from an entry point's source file. Imports that resolve
+to files inside the workspace are shipped; imports that don't are recorded as
 external (their pinned versions come from pip freeze, not from pyproject).
 """
 
@@ -131,7 +131,7 @@ def find_pyproject_for(file: Path) -> Path:
 
 @dataclass
 class StagedBundle:
-    """A staged on-disk copy of the files needed to ship a function."""
+    """A staged on-disk copy of the files needed to ship an entry point."""
 
     ship_root: Path
     staging_dir: Path
@@ -139,13 +139,15 @@ class StagedBundle:
 
 
 @contextlib.contextmanager
-def stage_bundle(fn: Callable[..., Any]) -> Iterator[StagedBundle]:
-    """Bundle `fn`'s reachable workspace files into a tempdir; clean up on exit.
+def stage_bundle(entry: Callable[..., Any] | type) -> Iterator[StagedBundle]:
+    """Bundle `entry`'s reachable workspace files into a tempdir; clean up on exit.
 
     Yields a StagedBundle whose `staging_dir` mirrors the ship root and
-    contains only the files reachable from `fn`'s import graph.
+    contains only the files reachable from `entry`'s import graph. `entry`
+    is the file-defining symbol Ray will load (a function for `cortexflow.remote`,
+    a class for `cortexflow.deploy_model`).
     """
-    ship_root, files, external_deps = bundle_for_function(fn)
+    ship_root, files, external_deps = bundle_for_entry(entry)
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp)
         for f in files:
@@ -160,21 +162,21 @@ def stage_bundle(fn: Callable[..., Any]) -> Iterator[StagedBundle]:
         )
 
 
-def bundle_for_function(
-    fn: Callable[..., Any],
+def bundle_for_entry(
+    entry: Callable[..., Any] | type,
 ) -> tuple[Path, set[Path], set[str]]:
-    """Compute (ship_root, files_to_ship, external_imports) for shipping `fn`.
+    """Compute (ship_root, files_to_ship, external_imports) for shipping `entry`.
 
-    The pyproject.toml above the entry function only marks the workspace-root
+    The pyproject.toml above the entry's source file only marks the workspace-root
     candidate. Its [project].dependencies is intentionally ignored: external
     imports are detected from the code, and pinned versions come from pip
     freeze. This favours the live local version of any in-tree library over
     a published one declared in pyproject.
     """
-    fn_file = Path(inspect.getfile(fn)).resolve()
-    pyproject = find_pyproject_for(fn_file)
+    entry_file = Path(inspect.getfile(entry)).resolve()
+    pyproject = find_pyproject_for(entry_file)
     workspace_root = pyproject.parent
-    seeds = [fn_file]
+    seeds = [entry_file]
     if _CORTEXFLOW_DIR.is_relative_to(workspace_root):
         seeds.extend(_CORTEXFLOW_DIR.rglob("*.py"))
     files, external = collect_workspace(seeds, workspace_root)
