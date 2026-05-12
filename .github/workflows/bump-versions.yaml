@@ -1,0 +1,291 @@
+name: bump-versions
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: bump-versions
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: arc-runners
+    if: github.event.head_commit.author.email != '41898282+github-actions[bot]@users.noreply.github.com'
+    outputs:
+      cortexflow_ui_backend: ${{ steps.f.outputs.cortexflow_ui_backend }}
+      cortexflow_ui_frontend: ${{ steps.f.outputs.cortexflow_ui_frontend }}
+      jobs_control_plane: ${{ steps.f.outputs.jobs_control_plane }}
+      mlflow: ${{ steps.f.outputs.mlflow }}
+      ray_head: ${{ steps.f.outputs.ray_head }}
+      arc_runner: ${{ steps.f.outputs.arc_runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - id: f
+        run: |
+          CHANGED=$(git diff --name-only HEAD^ HEAD)
+
+          check() {
+            local name="$1"
+            shift
+            for prefix in "$@"; do
+              if echo "$CHANGED" | grep -q "^${prefix}"; then
+                echo "${name}=true" >> "$GITHUB_OUTPUT"
+                return
+              fi
+            done
+            echo "${name}=false" >> "$GITHUB_OUTPUT"
+          }
+
+          check cortexflow_ui_backend cortexflow/ cortexflow_ui/backend/ pyproject.toml k8s/docker/cortexflow-ui/backend/ .github/workflows/bump-versions.yaml
+          check cortexflow_ui_frontend cortexflow_ui/frontend/ k8s/docker/cortexflow-ui/frontend/ .github/workflows/bump-versions.yaml
+          check jobs_control_plane cortexflow/ jobs_control_plane/ pyproject.toml k8s/docker/jobs-control-plane/ .github/workflows/bump-versions.yaml
+          check mlflow k8s/docker/mlflow/ .github/workflows/bump-versions.yaml
+          check ray_head k8s/docker/ray/ .github/workflows/bump-versions.yaml
+          check arc_runner k8s/docker/arc-runner/ .github/workflows/bump-versions.yaml
+
+  cortexflow-ui-backend:
+    needs: detect
+    if: needs.detect.outputs.cortexflow_ui_backend == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/cortexflow-ui/backend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  cortexflow-ui-frontend:
+    needs: detect
+    if: needs.detect.outputs.cortexflow_ui_frontend == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/cortexflow-ui/frontend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  jobs-control-plane:
+    needs: detect
+    if: needs.detect.outputs.jobs_control_plane == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/jobs-control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/jobs-control-plane/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  mlflow:
+    needs: detect
+    if: needs.detect.outputs.mlflow == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/mlflow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/mlflow/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  ray-head:
+    needs: detect
+    if: needs.detect.outputs.ray_head == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/ray-head
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/arm64,linux/amd64 \
+            -f k8s/docker/ray/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  arc-runner:
+    needs: detect
+    if: needs.detect.outputs.arc_runner == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/arc-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: t
+        run: echo "value=main-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/arc-runner/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push k8s/docker/arc-runner
+
+  bump:
+    needs:
+      - detect
+      - cortexflow-ui-backend
+      - cortexflow-ui-frontend
+      - jobs-control-plane
+      - mlflow
+      - ray-head
+      - arc-runner
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: arc-runners
+    env:
+      OWNER: ${{ github.repository_owner }}
+      UI_BACKEND_TAG: ${{ needs.cortexflow-ui-backend.outputs.tag }}
+      UI_FRONTEND_TAG: ${{ needs.cortexflow-ui-frontend.outputs.tag }}
+      JCP_TAG: ${{ needs.jobs-control-plane.outputs.tag }}
+      MLFLOW_TAG: ${{ needs.mlflow.outputs.tag }}
+      RAY_HEAD_TAG: ${{ needs.ray-head.outputs.tag }}
+      ARC_RUNNER_TAG: ${{ needs.arc-runner.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply all bumps and push as one commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          git reset --hard origin/main
+
+          if [ -n "$UI_BACKEND_TAG" ]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:$UI_BACKEND_TAG" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow-ui/deployment-backend.yaml
+          fi
+
+          if [ -n "$UI_FRONTEND_TAG" ]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-frontend:$UI_FRONTEND_TAG" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow-ui/deployment-frontend.yaml
+          fi
+
+          if [ -n "$JCP_TAG" ]; then
+            NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:$JCP_TAG" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/jobs-control-plane/deployment.yaml
+          fi
+
+          if [ -n "$MLFLOW_TAG" ]; then
+            NEW_IMAGE="ghcr.io/$OWNER/mlflow:$MLFLOW_TAG" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/mlflow/deployment.yaml
+          fi
+
+          if [ -n "$RAY_HEAD_TAG" ]; then
+            NEW_IMAGE="ghcr.io/$OWNER/ray-head:$RAY_HEAD_TAG" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/ray/deployment.yaml
+          fi
+
+          if [ -n "$ARC_RUNNER_TAG" ]; then
+            for f in k8s/argo-deployments/onprem/arc-runner-set/kustomization.yaml k8s/argo-deployments/aws/arc-runner-set/kustomization.yaml; do
+              NEW_IMAGE="ghcr.io/$OWNER/arc-runner:$ARC_RUNNER_TAG" \
+                yq -i '(.helmCharts[0].valuesInline.template.spec.containers[] | select(.name == "runner")).image = strenv(NEW_IMAGE)' "$f"
+            done
+          fi
+
+          CURRENT=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+          NEW="$MAJOR.$MINOR.$((PATCH+1))"
+          sed -i -E "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
+
+          BUMPED=()
+          [ -n "$UI_BACKEND_TAG" ]   && BUMPED+=("cortexflow-ui-backend")
+          [ -n "$UI_FRONTEND_TAG" ]  && BUMPED+=("cortexflow-ui-frontend")
+          [ -n "$JCP_TAG" ]          && BUMPED+=("jobs-control-plane")
+          [ -n "$MLFLOW_TAG" ]       && BUMPED+=("mlflow")
+          [ -n "$RAY_HEAD_TAG" ]     && BUMPED+=("ray-head")
+          [ -n "$ARC_RUNNER_TAG" ]   && BUMPED+=("arc-runner")
+
+          git add -A
+          git diff --cached --quiet && exit 0
+          if [ ${#BUMPED[@]} -eq 0 ]; then
+            MSG="bump version to v$NEW"
+          else
+            MSG="bump $(IFS=,; echo "${BUMPED[*]}") to main-${{ github.sha }}, version v$NEW"
+          fi
+          git commit -m "$MSG"
+          git tag "v$NEW"
+          git push origin HEAD:main --follow-tags
