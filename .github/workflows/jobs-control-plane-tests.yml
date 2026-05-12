@@ -1,12 +1,12 @@
-name: cortexflow tests
+name: jobs-control-plane tests
 
 on:
   pull_request:
     paths:
-      - "cortexflow/**"
-      - "tests/unit/cortexflow/**"
+      - "jobs_control_plane/**"
+      - "tests/unit/jobs_control_plane/**"
       - "pyproject.toml"
-      - ".github/workflows/cortexflow-tests.yml"
+      - ".github/workflows/jobs-control-plane-tests.yml"
 
 jobs:
   test:
@@ -20,4 +20,4 @@ jobs:
           python-version: "3.11"
 
       - name: Run tests
-        run: uv run python -m unittest discover -s tests/unit/cortexflow -v
+        run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
