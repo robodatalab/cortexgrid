@@ -22,7 +22,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: cortexflow-ui-backend
-          image: ghcr.io/robodatalab/cortexflow-ui-backend:main-27fc8f1847445ba0ea56139177ee2f943aca1e5e
+          image: ghcr.io/robodatalab/cortexflow-ui-backend:main-4404be7d1215118e1ceaeedeb3eb8d072a9252e5
           env:
             # Retry-tolerant MLflow client: outlast a single OOMKill+restart cycle
             # (~30-60s of MLflow downtime) before surfacing the failure to UI users.
