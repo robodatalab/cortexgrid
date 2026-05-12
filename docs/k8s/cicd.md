@@ -95,7 +95,7 @@ flowchart TB
 ### Test it
 - input: any `.py` under `cortexflow/`
 - on PR: `test-cortexflow`, `test-cortexflow-ui-backend`, `test-jobs-control-plane`, `build-cortexflow-ui-backend`, `build-jobs-control-plane`, `bump`
-- after squash-merge in Argo: `cortexflow-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexflow-ui jobs-control-plane`)
+- after squash-merge in Argo: `cortexflow-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexflow-ui jobs-control-plane -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REV:.status.sync.revision,SYNCED_AT:.status.operationState.finishedAt'`)
 - after ~10 min in GitHub Actions: one `cortexflow integration tests` run and one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
 
 ### Case 2 — `cortexflow_ui` (code, Dockerfile, or manifest)
