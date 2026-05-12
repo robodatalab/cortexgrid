@@ -1,12 +1,6 @@
 name: jobs-control-plane tests
 
 on:
-  push:
-    paths:
-      - "jobs_control_plane/**"
-      - "tests/unit/jobs_control_plane/**"
-      - "pyproject.toml"
-      - ".github/workflows/jobs-control-plane-tests.yml"
   pull_request:
     paths:
       - "jobs_control_plane/**"

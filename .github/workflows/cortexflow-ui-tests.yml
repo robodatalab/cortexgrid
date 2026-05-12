@@ -1,13 +1,6 @@
 name: cortexflow-ui tests
 
 on:
-  push:
-    paths:
-      - "cortexflow_ui/**"
-      - "tests/unit/cortexflow_ui/backend/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/cortexflow-ui-tests.yml"
   pull_request:
     paths:
       - "cortexflow_ui/**"

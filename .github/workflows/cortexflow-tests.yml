@@ -1,12 +1,6 @@
 name: cortexflow tests
 
 on:
-  push:
-    paths:
-      - "cortexflow/**"
-      - "tests/unit/cortexflow/**"
-      - "pyproject.toml"
-      - ".github/workflows/cortexflow-tests.yml"
   pull_request:
     paths:
       - "cortexflow/**"
