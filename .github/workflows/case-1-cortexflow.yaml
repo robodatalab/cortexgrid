@@ -53,6 +53,8 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - id: t
         run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
@@ -71,17 +73,10 @@ jobs:
           fi
       - if: steps.exists.outputs.value != 'true'
         run: |
-          for attempt in 1 2 3; do
-            if docker buildx build --platform linux/amd64 \
-              -f k8s/docker/cortexflow-ui/backend/Dockerfile \
-              -t "$IMAGE:${{ steps.t.outputs.value }}" \
-              --push .; then
-              exit 0
-            fi
-            echo "build attempt $attempt failed"
-            sleep 10
-          done
-          exit 1
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/cortexflow-ui/backend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
 
   build-jobs-control-plane:
     needs: [test-cortexflow, test-jobs-control-plane]
@@ -92,6 +87,8 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/jobs-control-plane
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - id: t
         run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
@@ -110,17 +107,10 @@ jobs:
           fi
       - if: steps.exists.outputs.value != 'true'
         run: |
-          for attempt in 1 2 3; do
-            if docker buildx build --platform linux/amd64 \
-              -f k8s/docker/jobs-control-plane/Dockerfile \
-              -t "$IMAGE:${{ steps.t.outputs.value }}" \
-              --push .; then
-              exit 0
-            fi
-            echo "build attempt $attempt failed"
-            sleep 10
-          done
-          exit 1
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/jobs-control-plane/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
 
   bump:
     needs: [build-cortexflow-ui-backend, build-jobs-control-plane]
