@@ -1,10 +1,18 @@
-"""Query Ray cluster for job status and logs."""
+"""Talk to the Ray cluster's dashboard: job submission + Serve applications.
+
+Job submission goes through ray's `JobSubmissionClient`. Serve applications use
+the dashboard's declarative `/api/serve/applications/` REST endpoint directly -
+there's no public Python client for it that doesn't drag in `ray.init`, and the
+REST surface is tiny."""
 
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
-from cortexflow.infra import get_ray_job_server_uri
+import requests  # type: ignore
+
+from cortexflow.infra import get_ray_job_server_uri, get_ray_serve_applications_uri
 from ray.job_submission import JobSubmissionClient
 
 
@@ -134,3 +142,30 @@ def submit_ray_job(
         entrypoint_num_gpus=num_gpus,
         entrypoint_num_cpus=num_cpus,
     )
+
+
+def get_serve_details() -> dict[str, Any]:
+    """GET the Serve controller's view of currently-running applications.
+
+    Returns the full ServeInstanceDetails JSON; callers project the parts they
+    care about. Raises for any non-2xx response (HTTPError carries the body).
+    """
+    response = requests.get(get_ray_serve_applications_uri(), timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+def put_serve_applications(applications: list[dict[str, Any]]) -> None:
+    """PUT the full desired set of Serve applications.
+
+    The endpoint is declarative: any application not in `applications` is
+    deleted, any new application is created, any updated application is
+    rolled. Callers that want to mutate one app should GET first, splice,
+    and PUT the result.
+    """
+    response = requests.put(
+        get_ray_serve_applications_uri(),
+        json={"applications": applications},
+        timeout=60,
+    )
+    response.raise_for_status()

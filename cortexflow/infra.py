@@ -15,6 +15,11 @@ def get_ray_serve_uri() -> str:
     return get_secret("RAY_SERVE_URI")
 
 
+def get_ray_serve_applications_uri() -> str:
+    """Dashboard REST endpoint for declarative Serve app management."""
+    return f"{get_ray_job_server_uri()}/api/serve/applications/"
+
+
 def get_s3_endpoint_url() -> str:
     # SM holds an empty string on the AWS profile (boto3 then uses real S3),
     # an in-cluster MinIO URL on the on-prem profile. Always written, never absent.

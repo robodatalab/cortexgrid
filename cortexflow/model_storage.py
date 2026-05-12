@@ -118,7 +118,7 @@ def list_models() -> list[SavedModel]:
 
 
 def delete_model(family: str, suffix: str, run_name: str) -> None:
-    """Delete the ModelVersion in MLflow and its weights blob in S3."""
+    """Delete the ModelVersion in MLflow, its weights blob, and its serve bundle."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     name = f"{family}__{suffix}"
     versions = client.search_model_versions(
@@ -127,13 +127,15 @@ def delete_model(family: str, suffix: str, run_name: str) -> None:
     for v in versions:
         client.delete_model_version(name=v.name, version=v.version)
     s3_util.delete_prefix(f"models/{run_name}/{family}/{suffix}/")
+    s3_util.delete_prefix(f"serve-bundles/{run_name}/{family}__{suffix}")
 
 
 def delete_models_for_run(run_id: str) -> None:
-    """Delete every ModelVersion produced by an MLflow run, plus its blobs."""
+    """Delete every ModelVersion produced by an MLflow run, plus its blobs and serve bundles."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     run = client.get_run(run_id)
     run_name = run.info.run_name or run_id
     for v in client.search_model_versions(f"run_id='{run_id}'"):
         client.delete_model_version(name=v.name, version=v.version)
     s3_util.delete_prefix(f"models/{run_name}/")
+    s3_util.delete_prefix(f"serve-bundles/{run_name}/")

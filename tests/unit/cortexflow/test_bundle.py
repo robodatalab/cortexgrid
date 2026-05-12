@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from parameterized import parameterized  # type: ignore
 
-from cortexflow._bundle import bundle_for_function, filter_pip_freeze
+from cortexflow._bundle import bundle_for_entry, filter_pip_freeze
 
 
 SAMPLE_PIP_FREEZE = (
@@ -312,20 +312,20 @@ class TestBundle(unittest.TestCase):
     @parameterized.expand([(c.name, c) for c in CASES])
     def test_bundle_includes_expected_files(self, _name: str, case: Case) -> None:
         ws = self._build(case)
-        ship_root, files, _ = bundle_for_function(ws.fn())
+        ship_root, files, _ = bundle_for_entry(ws.fn())
         rel = {f.relative_to(ship_root).as_posix() for f in files}
         self.assertEqual(rel, case.expected_files)
 
     @parameterized.expand([(c.name, c) for c in CASES])
     def test_bundle_identifies_ship_root(self, _name: str, case: Case) -> None:
         ws = self._build(case)
-        ship_root, _, _ = bundle_for_function(ws.fn())
+        ship_root, _, _ = bundle_for_entry(ws.fn())
         self.assertEqual(ship_root, ws.ship_root)
 
     @parameterized.expand([(c.name, c) for c in CASES])
     def test_bundle_identifies_external_deps(self, _name: str, case: Case) -> None:
         ws = self._build(case)
-        _, _, external = bundle_for_function(ws.fn())
+        _, _, external = bundle_for_entry(ws.fn())
         self.assertEqual(external, case.expected_external_deps)
 
     @parameterized.expand([(c.name, c) for c in CASES])
