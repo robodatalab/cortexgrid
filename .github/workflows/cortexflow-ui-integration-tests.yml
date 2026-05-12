@@ -15,7 +15,6 @@ permissions:
 jobs:
   test:
     runs-on: arc-runners
-
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +27,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Playwright browser
-        run: uv run playwright install chromium --with-deps
+      - run: uv run playwright install chromium --with-deps
 
-      - name: Run integration tests
-        run: uv run python -m unittest discover -s tests/integration/cortexflow_ui -t . -v
+      - run: uv run python -m unittest discover -s tests/integration/cortexflow_ui -t . -v
