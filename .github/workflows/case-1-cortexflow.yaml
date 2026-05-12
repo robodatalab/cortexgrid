@@ -53,8 +53,6 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-backend
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - id: t
         run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
@@ -87,8 +85,6 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/jobs-control-plane
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
       - id: t
         run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
