@@ -1,4 +1,4 @@
-name: case-1-cortexflow
+name: cortexflow
 
 on:
   pull_request:
