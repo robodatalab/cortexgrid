@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cortexflow
+description: CortexFlow research platform - mlflow, ray, minio, postgres, jobs-control-plane
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,20 +1,24 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: ui
+  name: cortexflow
   namespace: argocd
   annotations:
-    notifications.argoproj.io/subscribe.on-cortexflow-ui-stack-deployed.github: ""
+    notifications.argoproj.io/subscribe.on-cortexflow-stack-deployed.github: ""
 spec:
   project: default
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/argo_deployments/onprem/cortexflow
+    path: k8s/workloads/cortexflow
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: cortexflow
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ServerSideDiff=true

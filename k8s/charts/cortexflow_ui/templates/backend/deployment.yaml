@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cortexflow-ui-backend
+  labels:
+    {{- include "cortexflow_ui.labels" . | nindent 4 }}
+    app: cortexflow-ui-backend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cortexflow-ui-backend
+  template:
+    metadata:
+      labels:
+        app: cortexflow-ui-backend
+    spec:
+      nodeSelector:
+        role: head
+      serviceAccountName: cortexflow-ui-backend
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: cortexflow-ui-backend
+          image: {{ .Values.images.backend }}
+          env:
+            - name: MLFLOW_HTTP_REQUEST_MAX_RETRIES
+              value: "{{ .Values.backend.mlflowHttpMaxRetries }}"
+            - name: MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR
+              value: "{{ .Values.backend.mlflowHttpBackoffFactor }}"
+          envFrom:
+            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY for boto3's default
+            # credential chain (used when cortexflow.secrets reads SM).
+            - secretRef:
+                name: aws-creds
+          ports:
+            - name: http
+              containerPort: {{ .Values.services.backend.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.services.backend.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5

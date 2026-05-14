@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobs-control-plane
+  labels:
+    {{- include "cortexflow.labels" . | nindent 4 }}
+    app: jobs-control-plane
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jobs-control-plane
+  template:
+    metadata:
+      labels:
+        app: jobs-control-plane
+    spec:
+      nodeSelector:
+        role: head
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: jobs-control-plane
+          image: {{ .Values.images.jobsControlPlane }}
+          env:
+            - name: CORTEXFLOW_POLL_INTERVAL
+              value: "5"
+            # Cap parallel job-submission subprocesses; sharing the head EC2 with
+            # argocd / mlflow / cortexflow-ui means burst CPU is the constrained
+            # resource. Bump higher only after measuring head CPU under load.
+            - name: CORTEXFLOW_STARTER_WORKERS
+              value: "2"
+          envFrom:
+            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY -- real AWS keys for
+            # cortexflow.secrets to call AWS Secrets Manager. S3 access goes
+            # through cortexflow.s3_util, which fetches its own creds from SM.
+            - secretRef:
+                name: aws-creds
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /tmp/cp_heartbeat && [ $(( $(date +%s) - $(stat -c %Y /tmp/cp_heartbeat) )) -lt 30 ]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
