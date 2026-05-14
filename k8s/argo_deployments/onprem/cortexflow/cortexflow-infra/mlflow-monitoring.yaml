@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/workloads/mlflow-monitoring
+    path: k8s/workloads/mlflow_monitoring
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

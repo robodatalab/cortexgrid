@@ -87,13 +87,13 @@ make node-teardown IP=<tailscale-ip>      # k3s teardown on a single node
 make head-aws-destroy                     # single terraform destroy of the platform stack
 ```
 
-`head-setup` installs k3s, stages [k8s/argocd.yaml](../k8s/argocd.yaml), publishes the k3s token + service URLs to AWS Secrets Manager under `robolab/infra/*`, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo-deployments/](../k8s/argo-deployments/) from `main`. Topology is recorded in [infra-config.yaml](../infra-config.yaml) at the repo root.
+`head-setup` installs k3s, stages [k8s/argocd.yaml](../k8s/argocd.yaml), publishes the k3s token + service URLs to AWS Secrets Manager under `robolab/infra/*`, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo_deployments/](../k8s/argo_deployments/) from `main`. Topology is recorded in [infra-config.yaml](../infra-config.yaml) at the repo root.
 
 ### Secrets management
 
 One namespace, backed by AWS Secrets Manager:
 
-- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key), `PlatformConfig` (profile-specific S3 + mlflow backend coordinates), and `terraform/platform/{rds,s3}` (AWS-managed coordinates). Read at cluster level by [External Secrets Operator](../k8s/argo-deployments/aws/secrets/) (which materializes `aws-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexflow.secrets`](../cortexflow/secrets.py).
+- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key), `PlatformConfig` (profile-specific S3 + mlflow backend coordinates), and `terraform/platform/{rds,s3}` (AWS-managed coordinates). Read at cluster level by [External Secrets Operator](../k8s/argo_deployments/aws/secrets/) (which materializes `aws-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexflow.secrets`](../cortexflow/secrets.py).
 
 ## Website infrastructure
 
@@ -239,6 +239,6 @@ The secrets module provisions a GitHub Actions OIDC integration:
 ## Further documentation
 
 - [k8s/README.md](k8s/README.md) — GitOps overview + bootstrap FAQ
-- [k8s/argo-deployments/](../k8s/argo-deployments/) — one-pager README per platform component (Ray, MLflow, monitoring, secrets, NVIDIA device plugin, jobs control plane; on-prem-only: MinIO, Postgres)
+- [k8s/argo_deployments/](../k8s/argo_deployments/) — one-pager README per platform component (Ray, MLflow, monitoring, secrets, NVIDIA device plugin, jobs control plane; on-prem-only: MinIO, Postgres)
 - [cortexflow/README.md](cortexflow/README.md) — Python library reference
 - [tests/INTEGRATION.md](tests/INTEGRATION.md) — integration test platform: trigger flow, secrets, how to add a target

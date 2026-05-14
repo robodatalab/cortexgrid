@@ -13,7 +13,7 @@ Cortexflow assumes that:
 All secrets — ArgoCD bootstrap (GHCR pull, repo clone, AWS access) and application-level (consumed by `cortexflow.secrets` at runtime) — live under a single namespace `robolab/infra/*`. Both consumers reach them through `cortexflow.secrets` (ExternalSecrets operator reads via AWS SDK; application code via `cortexflow.secrets.get_secret()`).
 
 
-## Functionality of deployments from k8s/argo-deployments/secrets
+## Functionality of deployments from k8s/argo_deployments/secrets
 
 external-secrets/ connect to AWS Secrets Manager and will act as a provider of keys used to provision new K8s Pods. These secrets, specifically, will be:
 - GitHub access tokens to grant access to organization's private repositories
@@ -27,7 +27,7 @@ reflector/ replicates a single Secret into every K8s namespace, present and futu
 The user will be responsible for adding those required secrets:
 
 1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexflow/secrets.py](../../../../cortexflow/secrets.py) or AWS console).
-2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo-deployments/aws/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
+2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo_deployments/aws/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
 3. Commit + push. ESO creates the k8s Secret; rotation auto-propagates.
 
 There is no static list — it grows with the platform. A new secret is needed whenever a deployment fails with an auth error (ArgoCD shows it, `kubectl describe` names the missing credential) or when adding a deployment that talks to a new external system.

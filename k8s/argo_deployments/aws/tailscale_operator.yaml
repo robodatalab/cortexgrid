@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/workloads/tailscale-operator
+    path: k8s/workloads/tailscale_operator
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale

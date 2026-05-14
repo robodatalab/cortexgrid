@@ -10,7 +10,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY cortexflow/ ./cortexflow/
-COPY tests/integration/cortexflow-ui/ ./tests/
+COPY tests/integration/cortexflow_ui/ ./tests/
 
 RUN uv sync
 

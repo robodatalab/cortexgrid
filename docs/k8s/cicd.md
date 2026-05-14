@@ -104,9 +104,9 @@ flowchart TB
 flowchart TB
     b["cortexflow_ui/backend/** code changed"]
     f["cortexflow_ui/frontend/** code changed"]
-    db["k8s/docker/cortexflow-ui/backend/** Dockerfile changed"]
-    df["k8s/docker/cortexflow-ui/frontend/** Dockerfile changed"]
-    wl["k8s/workloads/cortexflow-ui/** manifest direct-edit"]
+    db["k8s/docker/cortexflow_ui/backend/** Dockerfile changed"]
+    df["k8s/docker/cortexflow_ui/frontend/** Dockerfile changed"]
+    wl["k8s/workloads/cortexflow_ui/** manifest direct-edit"]
 
     subgraph S1["Stage 1: PR push (only when a code or Dockerfile change needs rebuilding)"]
         direction TB
@@ -163,8 +163,8 @@ flowchart TB
 ```mermaid
 flowchart TB
     src["jobs_control_plane/** code changed"]
-    dsrc["k8s/docker/jobs-control-plane/** Dockerfile changed"]
-    wl["k8s/workloads/jobs-control-plane/** manifest direct-edit"]
+    dsrc["k8s/docker/jobs_control_plane/** Dockerfile changed"]
+    wl["k8s/workloads/jobs_control_plane/** manifest direct-edit"]
 
     subgraph S1["Stage 1: PR push (only when a code or Dockerfile change needs rebuilding)"]
         direction TB
@@ -324,7 +324,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     dsrc["k8s/docker/arc-runner/** Dockerfile changed"]
-    wl["k8s/argo-deployments/{onprem,aws}/arc-runner-set/** kustomization direct-edit"]
+    wl["k8s/argo_deployments/{onprem,aws}/arc-runner-set/** kustomization direct-edit"]
 
     subgraph S1["Stage 1: PR push (only when the Dockerfile change needs rebuilding)"]
         direction TB
@@ -360,11 +360,11 @@ flowchart TB
 - after squash-merge in Argo: `arc-runner-set` synced (`kubectl -n argocd get app arc-runner-set`)
 - after ~10 min in GitHub Actions: no integration test runs (`gh run list --limit 5`)
 
-### Case 7 — `k8s/argo-deployments/**` (Argo Application definitions)
+### Case 7 — `k8s/argo_deployments/**` (Argo Application definitions)
 
 ```mermaid
 flowchart TB
-    src["k8s/argo-deployments/** changed (Application specs, paths, sync policies)"]
+    src["k8s/argo_deployments/** changed (Application specs, paths, sync policies)"]
 
     subgraph S1["Stage 1: PR push"]
         direction TB
@@ -392,7 +392,7 @@ flowchart TB
 ```
 
 ### Test it
-- input: edit any Application spec under `k8s/argo-deployments/`
+- input: edit any Application spec under `k8s/argo_deployments/`
 - on PR: no build, no bot commit
 - after squash-merge in Argo: parent App reconfigures children (`kubectl -n argocd get app`)
 - after ~10 min in GitHub Actions: integration tests fire only if a workload App actually rolled (`gh run list --limit 5`)

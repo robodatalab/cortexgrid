@@ -14,6 +14,6 @@ All chart components (Prometheus, Alertmanager, Grafana, Operator, kube-state-me
 
 ## Dependencies
 
-- **Ray** ([../ray/](../../../../k8s/argo-deployments/aws/ray/)) — Ray head pod exposes Prometheus metrics on port 8080. [../ray/metrics.yaml](../../../../k8s/argo-deployments/aws/ray/metrics.yaml) declares the PodMonitor that causes Prometheus to scrape it.
+- **Ray** ([../ray/](../../../../k8s/argo_deployments/aws/ray/)) — Ray head pod exposes Prometheus metrics on port 8080. [../ray/metrics.yaml](../../../../k8s/argo_deployments/aws/ray/metrics.yaml) declares the PodMonitor that causes Prometheus to scrape it.
 - **CRDs** — `ServiceMonitor` / `PodMonitor` / `PrometheusRule` come from this chart. Any sibling deployment using them must annotate its resources with `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true` to survive the initial install ordering.
 - **Grafana UI reachable from Mac** — head node's Tailscale IP + NodePort `:30300`. Default login: admin/admin, anonymous viewer enabled.

@@ -13,4 +13,4 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY k8s/docker/cortexflow-ui/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY k8s/docker/cortexflow_ui/frontend/nginx.conf /etc/nginx/conf.d/default.conf

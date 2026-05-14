@@ -32,7 +32,7 @@ Both `cortexflow integration tests` and `cortexflow-ui integration tests` will s
 - **Subscribed Applications** carry the annotation `notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""`:
   - cortexflow-ui, mlflow, ray, jobs-control-plane (cortexflow's cluster-side stack)
   - external-secrets, reflector (secrets plumbing)
-- **Notifications secret** ([k8s/argo-deployments/aws/secrets/external-secrets/argocd-notifications.yaml](../../k8s/argo-deployments/aws/secrets/external-secrets/argocd-notifications.yaml)) is materialized by ESO from SM. Two keys:
+- **Notifications secret** ([k8s/argo_deployments/aws/secrets/external-secrets/argocd-notifications.yaml](../../k8s/argo_deployments/aws/secrets/external-secrets/argocd-notifications.yaml)) is materialized by ESO from SM. Two keys:
   - `github-token` <- `robolab/infra/GH_TOKEN` (used in the webhook Authorization header)
   - `aws-role-arn` <- `robolab/infra/AWS_ROLE_ARN` (substituted into the dispatch payload)
 
@@ -71,7 +71,7 @@ Different changes propagate through different paths:
 | Terraform secrets module (e.g. new SM entry) | `cd terraform/platform/secrets && terraform apply` |
 | `.env` (e.g. new key) | `make head-setup IP=<head-ip> STORAGE_PATH=/storage` (re-runs EnvSecrets) |
 | `k8s/argocd.yaml` (notifications template, Helm values) | `kubectl apply -f k8s/argocd.yaml` (or re-run `make head-setup`) |
-| `k8s/argo-deployments/**` (ExternalSecrets, Application annotations) | push to `main`; Argo CD syncs |
+| `k8s/argo_deployments/**` (ExternalSecrets, Application annotations) | push to `main`; Argo CD syncs |
 | `.github/workflows/**` | push to any branch (workflows are read from default branch on dispatch) |
 
 ## Adding a new test target

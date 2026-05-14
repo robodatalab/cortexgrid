@@ -30,7 +30,7 @@ The on-prem deployment can stay on raw manifests (the fixed head + DaemonSet-wor
 ## Dependencies
 
 - **Custom image** ([../../docker/ray/](../../../../k8s/docker/ray/)) — `ghcr.io/robodatalab/ray-head`.
-- **Monitoring** ([../monitoring/](../../../../k8s/argo-deployments/aws/monitoring/)) — the PodMonitor in `workloads/ray/` tells Prometheus to scrape port 8080.
-- **External Secrets Operator** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) — materializes `ray-env` (dashboard's Grafana URL, Prometheus URL) from AWS Secrets Manager.
-- **Reflector** ([../secrets/](../../../../k8s/argo-deployments/aws/secrets/)) — provides the `ghcr-pull` Secret in this namespace so kubelet can pull the private image.
-- **Jobs Control Plane** ([../jobs-control-plane/](../../../../k8s/argo-deployments/aws/jobs-control-plane/)) — submits runs to this Ray head via `RAY_ADDRESS`.
+- **Monitoring** ([../monitoring/](../../../../k8s/argo_deployments/aws/monitoring/)) — the PodMonitor in `workloads/ray/` tells Prometheus to scrape port 8080.
+- **External Secrets Operator** ([../secrets/](../../../../k8s/argo_deployments/aws/secrets/)) — materializes `ray-env` (dashboard's Grafana URL, Prometheus URL) from AWS Secrets Manager.
+- **Reflector** ([../secrets/](../../../../k8s/argo_deployments/aws/secrets/)) — provides the `ghcr-pull` Secret in this namespace so kubelet can pull the private image.
+- **Jobs Control Plane** ([../jobs_control_plane/](../../../../k8s/argo_deployments/aws/jobs_control_plane/)) — submits runs to this Ray head via `RAY_ADDRESS`.

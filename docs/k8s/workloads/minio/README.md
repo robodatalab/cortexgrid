@@ -1,6 +1,6 @@
 # MinIO — K8s Spec
 
-How the MinIO server runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/onprem/minio/](../../../../k8s/argo-deployments/onprem/minio/). On-prem only — the AWS profile excludes this workload (real S3 takes over).
+How the MinIO server runs inside Kubernetes. Applied by the Argo Application at [../../argo_deployments/onprem/minio/](../../../../k8s/argo_deployments/onprem/minio/). On-prem only — the AWS profile excludes this workload (real S3 takes over).
 
 ## Deployment shape
 
