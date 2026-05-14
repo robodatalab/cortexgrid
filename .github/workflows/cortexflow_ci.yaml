@@ -18,8 +18,10 @@ jobs:
     outputs:
       changed_arc_runner: ${{steps.compute_dependency_fanout.outputs.changed_arc_runner}}
       changed_cortexflow: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow}}
+      changed_cortexflow_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_integration}}
       changed_cortexflow_ui_backend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_backend}}
       changed_cortexflow_ui_frontend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_frontend}}
+      changed_cortexflow_ui_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_integration}}
       changed_jobs_control_plane: ${{steps.compute_dependency_fanout.outputs.changed_jobs_control_plane}}
       changed_k8s_seed: ${{steps.compute_dependency_fanout.outputs.changed_k8s_seed}}
       changed_mlflow: ${{steps.compute_dependency_fanout.outputs.changed_mlflow}}
@@ -35,6 +37,9 @@ jobs:
             cortexflow:
               - 'cortexflow/**'
               - 'tests/unit/cortexflow/**'
+            cortexflow_integration:
+              - 'tests/integration/cortexflow/**'
+              - 'k8s/docker/integration_tests/cortexflow/**'
             cortexflow_ui_backend:
               - 'cortexflow_ui/backend/**'
               - 'tests/unit/cortexflow_ui/backend/**'
@@ -43,6 +48,9 @@ jobs:
               - 'cortexflow_ui/frontend/**'
               - 'k8s/docker/cortexflow_ui/frontend/**'
               - 'tests/unit/cortexflow_ui/frontend/**'
+            cortexflow_ui_integration:
+              - 'tests/integration/cortexflow_ui/**'
+              - 'k8s/docker/integration_tests/cortexflow_ui/**'
             jobs_control_plane:
               - 'jobs_control_plane/**'
               - 'k8s/docker/jobs_control_plane/**'
@@ -59,22 +67,28 @@ jobs:
         run: |
           changed_arc_runner=${{steps.filter.outputs.arc_runner}}
           changed_cortexflow=${{steps.filter.outputs.cortexflow}}
+          changed_cortexflow_integration=${{steps.filter.outputs.cortexflow_integration}}
           changed_cortexflow_ui_backend=${{steps.filter.outputs.cortexflow_ui_backend}}
           changed_cortexflow_ui_frontend=${{steps.filter.outputs.cortexflow_ui_frontend}}
+          changed_cortexflow_ui_integration=${{steps.filter.outputs.cortexflow_ui_integration}}
           changed_jobs_control_plane=${{steps.filter.outputs.jobs_control_plane}}
           changed_k8s_seed=${{steps.filter.outputs.k8s_seed}}
           changed_mlflow=${{steps.filter.outputs.mlflow}}
           changed_ray=${{steps.filter.outputs.ray}}
 
-          if [[ "${{steps.filter.outputs.cortexflow}}" == "true" ]]; then
+          if [[ "$changed_cortexflow" == "true" ]]; then
               changed_cortexflow_ui_backend=true
               changed_jobs_control_plane=true
+              changed_cortexflow_integration=true
+              changed_cortexflow_ui_integration=true
           fi
 
           echo "changed_arc_runner=$changed_arc_runner" >> "$GITHUB_OUTPUT"
           echo "changed_cortexflow=$changed_cortexflow" >> "$GITHUB_OUTPUT"
+          echo "changed_cortexflow_integration=$changed_cortexflow_integration" >> "$GITHUB_OUTPUT"
           echo "changed_cortexflow_ui_backend=$changed_cortexflow_ui_backend"  >> "$GITHUB_OUTPUT"
           echo "changed_cortexflow_ui_frontend=$changed_cortexflow_ui_frontend"  >> "$GITHUB_OUTPUT"
+          echo "changed_cortexflow_ui_integration=$changed_cortexflow_ui_integration" >> "$GITHUB_OUTPUT"
           echo "changed_jobs_control_plane=$changed_jobs_control_plane"  >> "$GITHUB_OUTPUT"
           echo "changed_k8s_seed=$changed_k8s_seed"  >> "$GITHUB_OUTPUT"
           echo "changed_mlflow=$changed_mlflow"  >> "$GITHUB_OUTPUT"
@@ -203,6 +217,38 @@ jobs:
             -t "$IMAGE:${{ steps.t.outputs.value }}" \
             --push .
 
+  build_cortexflow_integration:
+    needs: detect
+    if: needs.detect.outputs.changed_cortexflow_integration == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-integration
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.t.outputs.value }}" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.value != 'true'
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/integration_tests/cortexflow/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
   build_cortexflow_ui_backend:
     needs: test_cortexflow_ui_backend
     runs-on: arc-runners
@@ -262,6 +308,38 @@ jobs:
         run: |
           docker buildx build --platform linux/amd64 \
             -f k8s/docker/cortexflow_ui/frontend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  build_cortexflow_ui_integration:
+    needs: detect
+    if: needs.detect.outputs.changed_cortexflow_ui_integration == 'true'
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-integration
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.t.outputs.value }}" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.value != 'true'
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/integration_tests/cortexflow_ui/Dockerfile \
             -t "$IMAGE:${{ steps.t.outputs.value }}" \
             --push .
 
