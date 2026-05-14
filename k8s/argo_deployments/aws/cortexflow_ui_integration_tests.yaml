@@ -1,24 +1,21 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cortexflow
+  name: cortexflow-ui-integration-tests
   namespace: argocd
-  annotations:
-    notifications.argoproj.io/subscribe.on-cortexflow-deployed.argocd-api: ""
 spec:
   project: default
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/workloads/cortexflow
+    path: k8s/workloads/cortexflow_ui_integration_tests
   destination:
     server: https://kubernetes.default.svc
     namespace: cortexflow
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # Intentionally no `automated:` block. This App is synced by webhook from
+    # either the cortexflow or cortexflow-ui chart App's `on-*-deployed`
+    # notification trigger, after the upstream chart is Synced+Healthy.
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      - ServerSideDiff=true

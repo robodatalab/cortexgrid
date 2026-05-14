@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ray-worker
+  labels:
+    {{- include "cortexflow.labels" . | nindent 4 }}
+    app: ray-worker
+spec:
+  selector:
+    matchLabels:
+      app: ray-worker
+  template:
+    metadata:
+      labels:
+        app: ray-worker
+    spec:
+      runtimeClassName: nvidia
+      nodeSelector:
+        role: worker
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: ray-worker
+          image: {{ .Values.images.ray }}
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: "1"
+          command:
+            - ray
+            - start
+            - --address={{ .Values.services.ray.headHost }}:{{ .Values.services.ray.headPort }}
+            - --num-gpus=1
+            - --block
+          envFrom:
+            # Real AWS keys for cortexflow.secrets to call AWS Secrets Manager.
+            # S3 access goes through cortexflow.s3_util (explicit SM-fetched creds).
+            - secretRef:
+                name: aws-creds
+          livenessProbe:
+            exec:
+              command: ["ray", "status"]
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10

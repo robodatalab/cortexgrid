@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.webhook.argocd-api: |
+    url: http://argocd-server.argocd.svc.cluster.local
+    headers:
+      - name: Authorization
+        value: Bearer $argocd-api-token
+      - name: Content-Type
+        value: application/json
+
+  # One template per test Application. The path hardcodes the target App
+  # name; a trigger's `send:` list decides which templates fire for a given
+  # subscription. That is the fan-out mechanism.
+  template.sync-cortexflow-integration: |
+    webhook:
+      argocd-api:
+        method: POST
+        path: /api/v1/applications/cortexflow-integration-tests/sync
+        body: '{"prune": true}'
+  template.sync-cortexflow-ui-integration: |
+    webhook:
+      argocd-api:
+        method: POST
+        path: /api/v1/applications/cortexflow-ui-integration-tests/sync
+        body: '{"prune": true}'
+
+  # Subscribed by the cortexflow chart App. Fires once per main commit
+  # (oncePer revision) when the App is Synced+Healthy, fanning out to BOTH
+  # integration test Apps.
+  trigger.on-cortexflow-deployed: |
+    - description: cortexflow chart App is Synced+Healthy at this revision
+      oncePer: app.status.sync.revision
+      send: [sync-cortexflow-integration, sync-cortexflow-ui-integration]
+      when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'
+  # Subscribed by the cortexflow-ui chart App. Same condition, only the UI
+  # integration tests are synced.
+  trigger.on-cortexflow-ui-deployed: |
+    - description: cortexflow-ui chart App is Synced+Healthy at this revision
+      oncePer: app.status.sync.revision
+      send: [sync-cortexflow-ui-integration]
+      when: app.status.sync.status == 'Synced' and app.status.health.status == 'Healthy'

@@ -443,8 +443,10 @@ jobs:
       [
         bump-cortexflow-version,
         build_arc_runner,
+        build_cortexflow_integration,
         build_cortexflow_ui_backend,
         build_cortexflow_ui_frontend,
+        build_cortexflow_ui_integration,
         build_jobs_control_plane,
         build_mlflow,
         build_ray,
@@ -466,6 +468,10 @@ jobs:
               yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/argo_deployments/aws/arc_runner_set/kustomization.yaml \
               && yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/argo_deployments/onprem/arc_runner_set/kustomization.yaml
           fi
+          if [[ "${{ needs.build_cortexflow_integration.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-integration:${{ needs.build_cortexflow_integration.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_integration_tests/job.yaml
+          fi
           if [[ "${{ needs.build_cortexflow_ui_backend.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:${{ needs.build_cortexflow_ui_backend.outputs.tag }}" \
               yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_backend.yaml
@@ -473,6 +479,10 @@ jobs:
           if [[ "${{ needs.build_cortexflow_ui_frontend.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-frontend:${{ needs.build_cortexflow_ui_frontend.outputs.tag }}" \
               yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_frontend.yaml
+          fi
+          if [[ "${{ needs.build_cortexflow_ui_integration.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-integration:${{ needs.build_cortexflow_ui_integration.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui_integration_tests/job.yaml
           fi
           if [[ "${{ needs.build_jobs_control_plane.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:${{ needs.build_jobs_control_plane.outputs.tag }}" \

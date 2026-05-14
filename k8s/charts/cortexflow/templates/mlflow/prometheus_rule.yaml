@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mlflow-memory
+  # Discovered by kube-prometheus-stack via the release label below, so this
+  # resource lives in the monitoring namespace regardless of the cortexflow
+  # release namespace.
+  namespace: monitoring
+  labels:
+    {{- include "cortexflow.labels" . | nindent 4 }}
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: mlflow-memory
+      rules:
+        - alert: MlflowHighMemory
+          expr: container_memory_working_set_bytes{namespace="{{ .Release.Namespace }}", pod=~"mlflow-.*", container="mlflow"} > 3.5e9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: MLflow memory usage above 3.5 GiB
+            description: "MLflow has been using more than 3.5 GiB (87% of 4 GiB limit) for 5 minutes. OOMKill is imminent. Investigate leak vs load spike via the MLflow memory dashboard."
+        - alert: MlflowOOMKilled
+          expr: increase(kube_pod_container_status_last_terminated_reason{namespace="{{ .Release.Namespace }}", reason="OOMKilled"}[10m]) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: MLflow OOMKilled
+            description: "MLflow container was OOMKilled within the last 10 minutes. Backend cascades will follow until MLflow stabilises."

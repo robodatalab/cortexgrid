@@ -1,0 +1,18 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "cortexflow.labels" . | nindent 4 }}
+    app: postgres
+spec:
+  type: NodePort
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: {{ .Values.services.postgres.port }}
+      targetPort: {{ .Values.services.postgres.port }}
+      nodePort: 30432
+{{- end }}
