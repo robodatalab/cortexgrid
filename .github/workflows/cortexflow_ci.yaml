@@ -1,0 +1,284 @@
+name: case-1-cortexflow
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: cortexflow-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: arc-runners
+    outputs:
+      changed_cortexflow: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow}}
+      changed_cortexflow_ui_backend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_backend}}
+      changed_cortexflow_ui_frontend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_frontend}}
+      changed_jobs_control_plane: ${{steps.compute_dependency_fanout.outputs.changed_jobs_control_plane}}
+      changed_k8s_seed: ${{steps.compute_dependency_fanout.outputs.changed_k8s_seed}}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cortexflow:
+              - 'cortexflow/**'
+              - 'tests/unit/cortexflow/**'
+            cortexflow_ui_backend:
+              - 'cortexflow_ui/backend/**'
+              - 'tests/unit/cortexflow_ui/backend/**'
+            cortexflow_ui_frontend:
+              - 'cortexflow_ui/frontend/**'
+              - 'tests/unit/cortexflow_ui/frontend/**'
+            jobs_control_plane:
+              - 'jobs_control_plane/**'
+              - 'tests/unit/jobs_control_plane/**'
+            k8s_seed:
+              - 'k8s/seed/**'
+              - 'tests/unit/k8s/seed/**'
+
+      - id: compute_dependency_fanout
+        run: |
+          changed_cortexflow=${{steps.filter.outputs.cortexflow}}
+          changed_cortexflow_ui_backend=${{steps.filter.outputs.cortexflow_ui_backend}}
+          changed_cortexflow_ui_frontend=${{steps.filter.outputs.cortexflow_ui_frontend}}
+          changed_jobs_control_plane=${{steps.filter.outputs.jobs_control_plane}}
+          changed_k8s_seed=${{steps.filter.outputs.k8s_seed}}
+
+          if [[ "${{steps.filter.outputs.cortexflow}}" == "true" ]]; then
+              changed_cortexflow_ui_backend=true
+              changed_jobs_control_plane=true
+          fi
+
+          echo "changed_cortexflow=$changed_cortexflow" >> "$GITHUB_OUTPUT"
+          echo "changed_cortexflow_ui_backend=$changed_cortexflow_ui_backend"  >> "$GITHUB_OUTPUT"
+          echo "changed_cortexflow_ui_frontend=$changed_cortexflow_ui_frontend"  >> "$GITHUB_OUTPUT"
+          echo "changed_jobs_control_plane=$changed_jobs_control_plane"  >> "$GITHUB_OUTPUT"
+          echo "changed_k8s_seed=$changed_k8s_seed"  >> "$GITHUB_OUTPUT"
+
+  test_cortexflow:
+    needs: detect
+    if: needs.detect.outputs.changed_cortexflow == 'true'
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv run python -m unittest discover -s tests/unit/cortexflow -v
+
+  bump-cortexflow-version:
+    needs: test_cortexflow
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          MAIN_VERSION=$(git show origin/main:pyproject.toml | grep -E '^version = ' | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          CURRENT=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          if [ "$CURRENT" = "$MAIN_VERSION" ]; then
+            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT" | cut -d. -f3)
+            NEW="$MAJOR.$MINOR.$((PATCH+1))"
+            sed -i -E "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
+          fi
+
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "bump cortexflow library version"
+          git push
+
+  test_cortexflow_ui_backend:
+    needs: detect
+    if: needs.detect.outputs.changed_cortexflow_ui_backend == 'true'
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --group dev --group ui
+      - env:
+          PYTHONPATH: cortexflow_ui/backend
+        run: uv run python -m unittest discover -s tests/unit/cortexflow_ui/backend -v
+
+  test_cortexflow_ui_frontend:
+    needs: detect
+    if: needs.detect.outputs.changed_cortexflow_ui_frontend == 'true'
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: cortexflow_ui/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm run test:run
+
+  test_jobs_control_plane:
+    needs: detect
+    if: needs.detect.outputs.changed_jobs_control_plane == 'true'
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
+
+  test_k8s_seed:
+    needs: detect
+    if: needs.detect.outputs.changed_k8s_seed == 'true'
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv run python -m unittest discover -s tests/unit/k8s/seed -v
+
+  build_cortexflow_ui_backend:
+    needs: test_cortexflow_ui_backend
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-backend
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.t.outputs.value }}" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.value != 'true'
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/cortexflow_ui/backend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  build_cortexflow_ui_frontend:
+    needs: test_cortexflow_ui_frontend
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.t.outputs.value }}" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.value != 'true'
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/cortexflow_ui/frontend/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  build_jobs_control_plane:
+    needs: test_jobs_control_plane
+    runs-on: arc-runners
+    outputs:
+      tag: ${{ steps.t.outputs.value }}
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/jobs-control-plane
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        run: echo "value=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: exists
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.t.outputs.value }}" >/dev/null 2>&1; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.exists.outputs.value != 'true'
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -f k8s/docker/jobs_control_plane/Dockerfile \
+            -t "$IMAGE:${{ steps.t.outputs.value }}" \
+            --push .
+
+  update_image_tags:
+    needs:
+      [
+        bump-cortexflow-version,
+        build_cortexflow_ui_backend,
+        build_cortexflow_ui_frontend,
+        build_jobs_control_plane,
+      ]
+    if: ${{ always() && contains(needs.*.result, 'success') }}
+    runs-on: arc-runners
+    env:
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ "${{ needs.build_cortexflow_ui_backend.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:${{ needs.build_cortexflow_ui_backend.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_backend.yaml
+          fi
+          if [[ "${{ needs.build_cortexflow_ui_frontend.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-frontend:${{ needs.build_cortexflow_ui_frontend.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_frontend.yaml
+          fi
+          if [[ "${{ needs.build_jobs_control_plane.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:${{ needs.build_jobs_control_plane.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/jobs_control_plane/deployment.yaml
+          fi
+
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "bump image versions"
+          git push
