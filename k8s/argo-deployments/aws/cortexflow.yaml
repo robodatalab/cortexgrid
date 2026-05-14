@@ -10,7 +10,7 @@ spec:
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/argo-deployments/aws/ui
+    path: k8s/argo-deployments/aws/cortexflow
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
