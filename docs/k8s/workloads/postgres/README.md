@@ -1,6 +1,6 @@
 # Postgres — K8s Spec
 
-How the on-prem Postgres runs inside Kubernetes. Applied by the Argo Application at [../../argo-deployments/onprem/postgres/](../../../../k8s/argo-deployments/onprem/postgres/). Replaces RDS on the AWS profile.
+How the on-prem Postgres runs inside Kubernetes. Applied by the Argo Application at [../../argo_deployments/onprem/postgres/](../../../../k8s/argo_deployments/onprem/postgres/). Replaces RDS on the AWS profile.
 
 ## Deployment shape
 

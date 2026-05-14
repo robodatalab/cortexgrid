@@ -1,6 +1,6 @@
 # k8s
 
-GitOps manifests watched by Argo CD. See [argo-deployments/](../../k8s/argo-deployments/) for the actual deployment specs. [argocd.yaml](../../k8s/argocd.yaml) is the one-shot bootstrap applied at seed time and is not watched by Argo.
+GitOps manifests watched by Argo CD. See [argo_deployments/](../../k8s/argo_deployments/) for the actual deployment specs. [argocd.yaml](../../k8s/argocd.yaml) is the one-shot bootstrap applied at seed time and is not watched by Argo.
 
 ## Topology
 
@@ -17,8 +17,8 @@ Cluster topology — which IP is head vs worker, where the head's HDD is mounted
 
 `K3sServer` ([k8s/seed/operators/k3s_server.py](../../k8s/seed/operators/k3s_server.py)) auto-detects the profile at seed time from `/sys/class/dmi/id/sys_vendor`:
 
-- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs only [argo-deployments/aws/](../../k8s/argo-deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
-- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo-deployments/onprem/](../../k8s/argo-deployments/onprem/) (the same shared Apps as `aws/` plus MinIO + Postgres). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
+- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs only [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
+- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (the same shared Apps as `aws/` plus MinIO + Postgres). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
 
 Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
 

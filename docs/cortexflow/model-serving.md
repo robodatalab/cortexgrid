@@ -189,7 +189,7 @@ Cleanup cascades: `cortexflow.delete_run(run_id)` (and therefore `delete_experim
 Already deployed in the cluster:
 - Ray + Ray Serve ([k8s/workloads/ray/](../../k8s/workloads/ray/), with port 8000 exposed at NodePort 30000)
 - MLflow + MinIO ([k8s/workloads/mlflow/](../../k8s/workloads/mlflow/), [k8s/workloads/minio/](../../k8s/workloads/minio/))
-- Tailscale ([k8s/workloads/tailscale-operator/](../../k8s/workloads/tailscale-operator/))
+- Tailscale ([k8s/workloads/tailscale_operator/](../../k8s/workloads/tailscale_operator/))
 
 cortexflow secrets used:
 - `RAY_JOB_SERVER_URI` - dashboard endpoint (port 30265); `deploy_model`/`undeploy_model`/`list_deployed_models` PUT/DELETE/GET against `/api/serve/applications/` here. Same secret `cortexflow.remote` already uses.

@@ -149,7 +149,7 @@ s3_client = cortexflow.get_s3_client()           # boto3 S3 client
 
 ## ML compute stack
 
-The DGX Spark runs the following services as k8s workloads managed by Argo CD (see [../k8s/argo-deployments/](../../k8s/argo-deployments/)):
+The DGX Spark runs the following services as k8s workloads managed by Argo CD (see [../k8s/argo_deployments/](../../k8s/argo_deployments/)):
 
 | Service | Port | Purpose |
 |---------|------|---------|
