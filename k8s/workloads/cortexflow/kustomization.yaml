@@ -16,4 +16,3 @@ helmCharts:
         mlflow: ghcr.io/robodatalab/mlflow:main-69897f2932233e6985dd8f2ad42fa3e9b97b4b32
         ray: ghcr.io/robodatalab/ray-head:main-69897f2932233e6985dd8f2ad42fa3e9b97b4b32
         jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:8de836cc78ef2ac2d79f234dd3d0816fed45d72a
-        cortexflowIntegration: ghcr.io/robodatalab/cortexflow-integration:latest

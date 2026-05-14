@@ -470,7 +470,7 @@ jobs:
           fi
           if [[ "${{ needs.build_cortexflow_integration.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-integration:${{ needs.build_cortexflow_integration.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/deployment_integration_tests.yaml
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_integration_tests/job.yaml
           fi
           if [[ "${{ needs.build_cortexflow_ui_backend.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:${{ needs.build_cortexflow_ui_backend.outputs.tag }}" \
@@ -482,7 +482,7 @@ jobs:
           fi
           if [[ "${{ needs.build_cortexflow_ui_integration.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-integration:${{ needs.build_cortexflow_ui_integration.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_integration_tests.yaml
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui_integration_tests/job.yaml
           fi
           if [[ "${{ needs.build_jobs_control_plane.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:${{ needs.build_jobs_control_plane.outputs.tag }}" \

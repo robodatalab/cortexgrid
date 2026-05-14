@@ -2,7 +2,6 @@ images:
   mlflow: ghcr.io/robodatalab/mlflow:latest
   ray: ghcr.io/robodatalab/ray-head:latest
   jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:latest
-  cortexflowIntegration: ghcr.io/robodatalab/cortexflow-integration:latest
 
 # Per-component switches. On AWS, minio and postgres are external (S3, RDS) so
 # the in-cluster deployments are disabled and the chart only ships the consumers.

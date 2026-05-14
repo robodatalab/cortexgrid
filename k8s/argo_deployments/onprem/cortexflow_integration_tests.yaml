@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cortexflow-integration-tests
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/robodatalab/robolab-infra.git
+    targetRevision: main
+    path: k8s/workloads/cortexflow_integration_tests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cortexflow
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

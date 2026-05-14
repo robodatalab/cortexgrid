@@ -1,7 +1,6 @@
 images:
   backend: ghcr.io/robodatalab/cortexflow-ui-backend:latest
   frontend: ghcr.io/robodatalab/cortexflow-ui-frontend:latest
-  integration: ghcr.io/robodatalab/cortexflow-ui-integration:latest
 
 services:
   backend:

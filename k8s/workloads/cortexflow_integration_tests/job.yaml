@@ -1,21 +1,25 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: cortexflow-ui-integration-tests
+  name: cortexflow-integration-tests
+  namespace: cortexflow
   annotations:
-    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
   labels:
-    {{- include "cortexflow_ui.labels" . | nindent 4 }}
+    app.kubernetes.io/part-of: cortexflow
+    app.kubernetes.io/component: integration-tests
 spec:
   backoffLimit: 1
   ttlSecondsAfterFinished: 600
   template:
     spec:
       restartPolicy: Never
+      nodeSelector:
+        role: head
       containers:
         - name: tests
-          image: {{ .Values.images.integration }}
+          image: ghcr.io/robodatalab/cortexflow-integration:latest
           volumeMounts:
             - name: test-results
               mountPath: /tmp
