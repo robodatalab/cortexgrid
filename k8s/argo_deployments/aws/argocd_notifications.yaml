@@ -1,24 +1,20 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cortexflow
+  name: argocd-notifications
   namespace: argocd
-  annotations:
-    notifications.argoproj.io/subscribe.on-cortexflow-deployed.argocd-api: ""
 spec:
   project: default
   source:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
-    path: k8s/workloads/cortexflow
+    path: k8s/workloads/argocd_notifications
   destination:
     server: https://kubernetes.default.svc
-    namespace: cortexflow
+    namespace: argocd
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
       - ServerSideApply=true
-      - ServerSideDiff=true

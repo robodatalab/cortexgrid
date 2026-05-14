@@ -5,6 +5,7 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    notifications.argoproj.io/subscribe.on-cortexflow-ui-deployed.argocd-api: ""
 spec:
   project: default
   source:

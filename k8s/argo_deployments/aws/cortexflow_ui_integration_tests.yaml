@@ -13,9 +13,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: cortexflow
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # Intentionally no `automated:` block. This App is synced by webhook from
+    # either the cortexflow or cortexflow-ui chart App's `on-*-deployed`
+    # notification trigger, after the upstream chart is Synced+Healthy.
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
