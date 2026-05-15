@@ -31,8 +31,6 @@ spec:
           - hosts:
               - argo.robodatalab.com
             secretName: robodatalab-wildcard-tls
-    notifications:
-      enabled: true
 ---
 # Both bootstrap Applications are declared here so the deployment list per
 # profile is visible at a glance. K3sServer detects sys_vendor at install time
