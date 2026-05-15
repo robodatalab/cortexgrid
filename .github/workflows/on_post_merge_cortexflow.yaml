@@ -5,9 +5,7 @@ on:
         branches: [main]
         paths:
             - "k8s/workloads/cortexflow_integration_tests/job.yaml"
-            - "k8s/workloads/jobs_control_plane/deployment.yaml"
-            - "k8s/workloads/mlflow/deployment.yaml"
-            - "k8s/workloads/ray/deployment.yaml"
+            - "k8s/workloads/cortexflow/kustomization.yaml"
 
 concurrency:
     group: cortexflow-integration

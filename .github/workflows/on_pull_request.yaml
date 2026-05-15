@@ -497,8 +497,7 @@ jobs:
 
           if [[ "${{ needs.build_arc_runner.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/arc-runner:${{ needs.build_arc_runner.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/argo_deployments/aws/arc_runner_set/kustomization.yaml \
-              && yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/argo_deployments/onprem/arc_runner_set/kustomization.yaml
+              yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/arc_runner_set/kustomization.yaml
           fi
           if [[ "${{ needs.build_cortexflow_integration.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-integration:${{ needs.build_cortexflow_integration.outputs.tag }}" \
@@ -506,11 +505,11 @@ jobs:
           fi
           if [[ "${{ needs.build_cortexflow_ui_backend.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:${{ needs.build_cortexflow_ui_backend.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_backend.yaml
+              yq -i '.helmCharts[0].valuesInline.images.backend = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/kustomization.yaml
           fi
           if [[ "${{ needs.build_cortexflow_ui_frontend.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-frontend:${{ needs.build_cortexflow_ui_frontend.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/deployment_frontend.yaml
+              yq -i '.helmCharts[0].valuesInline.images.frontend = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/kustomization.yaml
           fi
           if [[ "${{ needs.build_cortexflow_ui_integration.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-integration:${{ needs.build_cortexflow_ui_integration.outputs.tag }}" \
@@ -518,15 +517,15 @@ jobs:
           fi
           if [[ "${{ needs.build_jobs_control_plane.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:${{ needs.build_jobs_control_plane.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/jobs_control_plane/deployment.yaml
+              yq -i '.helmCharts[0].valuesInline.images.jobsControlPlane = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
           fi
           if [[ "${{ needs.build_mlflow.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/mlflow:${{ needs.build_mlflow.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/mlflow/deployment.yaml
+              yq -i '.helmCharts[0].valuesInline.images.mlflow = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
           fi
           if [[ "${{ needs.build_ray.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/ray-head:${{ needs.build_ray.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/ray/deployment.yaml
+              yq -i '.helmCharts[0].valuesInline.images.ray = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
           fi
 
 
