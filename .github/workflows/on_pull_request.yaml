@@ -1,4 +1,4 @@
-name: cortexflow
+name: on_pull_request
 
 on:
   pull_request:
