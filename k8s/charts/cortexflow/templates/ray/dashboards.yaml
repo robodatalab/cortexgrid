@@ -1,0 +1,20 @@
+{{- $dashboards := dict
+  "data.json" "ray-data-grafana-dashboard"
+  "default.json" "ray-default-grafana-dashboard"
+  "ray-jobs.json" "dashboard-ray-jobs"
+  "ray-overview.json" "dashboard-ray-overview"
+  "serve.json" "ray-serve-grafana-dashboard"
+  "serve_deployment.json" "ray-serve-deployment-grafana-dashboard"
+}}
+{{- range $file, $cmName := $dashboards }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  {{ $file }}: |-
+{{ $.Files.Get (printf "files/dashboards/%s" $file) | indent 4 }}
+{{- end }}
