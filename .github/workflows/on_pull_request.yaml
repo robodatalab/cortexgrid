@@ -1,4 +1,4 @@
-name: cortexflow
+name: on_pull_request
 
 on:
   pull_request:
@@ -211,11 +211,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/arc_runner/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/arc_runner/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=arc-runner
+          cache-to: type=gha,mode=max,scope=arc-runner
 
   build_cortexflow_integration:
     needs: detect
@@ -243,11 +247,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/integration_tests/cortexflow/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/integration_tests/cortexflow/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=cortexflow-integration
+          cache-to: type=gha,mode=max,scope=cortexflow-integration
 
   build_cortexflow_ui_backend:
     needs: test_cortexflow_ui_backend
@@ -274,11 +282,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/cortexflow_ui/backend/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/cortexflow_ui/backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=cortexflow-ui-backend
+          cache-to: type=gha,mode=max,scope=cortexflow-ui-backend
 
   build_cortexflow_ui_frontend:
     needs: test_cortexflow_ui_frontend
@@ -305,11 +317,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/cortexflow_ui/frontend/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/cortexflow_ui/frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=cortexflow-ui-frontend
+          cache-to: type=gha,mode=max,scope=cortexflow-ui-frontend
 
   build_cortexflow_ui_integration:
     needs: detect
@@ -337,11 +353,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/integration_tests/cortexflow_ui/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/integration_tests/cortexflow_ui/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=cortexflow-ui-integration
+          cache-to: type=gha,mode=max,scope=cortexflow-ui-integration
 
   build_jobs_control_plane:
     needs: test_jobs_control_plane
@@ -368,11 +388,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/jobs_control_plane/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/jobs_control_plane/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=jobs-control-plane
+          cache-to: type=gha,mode=max,scope=jobs-control-plane
 
   build_mlflow:
     needs: detect
@@ -400,11 +424,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/mlflow/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/mlflow/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=mlflow
+          cache-to: type=gha,mode=max,scope=mlflow
 
   build_ray:
     needs: detect
@@ -432,11 +460,15 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.exists.outputs.value != 'true'
-        run: |
-          docker buildx build --platform linux/amd64 \
-            -f k8s/docker/ray/Dockerfile \
-            -t "$IMAGE:${{ steps.t.outputs.value }}" \
-            --push .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/docker/ray/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
+          cache-from: type=gha,scope=ray-head
+          cache-to: type=gha,mode=max,scope=ray-head
 
   update_image_tags:
     needs:

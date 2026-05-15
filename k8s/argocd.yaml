@@ -17,6 +17,8 @@ spec:
       params:
         server.insecure: true
         server.disable.auth: true
+      cm:
+        kustomize.buildOptions: --enable-helm
     server:
       service:
         type: NodePort
@@ -29,8 +31,6 @@ spec:
           - hosts:
               - argo.robodatalab.com
             secretName: robodatalab-wildcard-tls
-    notifications:
-      enabled: true
 ---
 # Both bootstrap Applications are declared here so the deployment list per
 # profile is visible at a glance. K3sServer detects sys_vendor at install time

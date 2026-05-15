@@ -1,93 +1,39 @@
-# Integration test platform
+# Integration tests
 
-End-to-end tests that run against the deployed cluster after every successful Argo CD sync. Tests live in this repo's `tests/integration/` (and, in time, in consumer repos).
+End-to-end tests that run against the deployed cluster after a workload changes on `main`. Tests live in `tests/integration/<target>/` (unittest).
 
 ## Trigger flow
 
 ```
-Argo CD sync success on a subscribed Application
-  -> Argo Notifications controller fires webhook
-  -> POST https://api.github.com/repos/robodatalab/robolab-infra/dispatches
-       (event_type: argocd-synced, client_payload: {app, aws_role_arn})
-  -> GitHub Actions workflows triggered by repository_dispatch type "argocd-synced"
-  -> Workflow assumes robolab-github-actions role (ARN from payload), joins tailnet, runs tests
+PR merges to main with a workload manifest change
+  -> push event matches workflow `paths:` filter
+  -> arc-runners executes the workflow in-cluster
+     1. argocd app sync <app> && argocd app wait --health --sync   (block on rollout)
+     2. kubectl apply -f <test job manifest>
+     3. kubectl wait --for=condition=complete job/<job>            (block on tests)
 ```
 
-### Manual trigger
-
-The workflows have no `workflow_dispatch` trigger -- they only listen for `repository_dispatch`. To kick a run without waiting for an Argo sync (e.g. to validate a fresh cluster), POST the same payload Argo would have sent:
-
-```sh
-ROLE_ARN=$(uv run python -c "from cortexflow.secrets import get_secret; print(get_secret('AWS_ROLE_ARN'))")
-gh api repos/robodatalab/robolab-infra/dispatches --input - <<EOF
-{"event_type": "argocd-synced", "client_payload": {"app": "manual", "aws_role_arn": "$ROLE_ARN"}}
-EOF
-```
-
-Both `cortexflow integration tests` and `cortexflow-ui integration tests` will start within ~10s. Watch with `gh run list --limit 3` or `gh run watch`.
-
-## What's wired
-
-- **Notifications controller** is enabled in the argocd Helm chart via [k8s/argocd.yaml](../../k8s/argocd.yaml). The webhook notifier, template, and `on-sync-succeeded` trigger are all in the `valuesContent` block.
-- **Subscribed Applications** carry the annotation `notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""`:
-  - cortexflow-ui, mlflow, ray, jobs-control-plane (cortexflow's cluster-side stack)
-  - external-secrets, reflector (secrets plumbing)
-- **Notifications secret** ([k8s/argo_deployments/aws/secrets/external-secrets/argocd-notifications.yaml](../../k8s/argo_deployments/aws/secrets/external-secrets/argocd-notifications.yaml)) is materialized by ESO from SM. Two keys:
-  - `github-token` <- `robolab/infra/GH_TOKEN` (used in the webhook Authorization header)
-  - `aws-role-arn` <- `robolab/infra/AWS_ROLE_ARN` (substituted into the dispatch payload)
+The runner is an `arc-runners` pod inside the cluster, so `kubectl` and `argocd` CLIs are already authenticated.
 
 ## Workflows
 
-Each workflow listens for `repository_dispatch: argocd-synced` and runs `unittest discover` against a target directory.
-
-- [.github/workflows/cortexflow-integration-tests.yml](../../.github/workflows/cortexflow-integration-tests.yml) -> `tests/integration/cortexflow`
-- [.github/workflows/cortexflow-ui-integration-tests.yml](../../.github/workflows/cortexflow-ui-integration-tests.yml) -> `tests/integration/cortexflow_ui`
-
-Each workflow:
-
-1. Assumes `robolab-github-actions` via OIDC using `client_payload.aws_role_arn`.
-2. Fetches `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET` from SM.
-3. Joins the tailnet via `tailscale/github-action@v2` with `tag:ci`.
-4. Runs `uv run python -m unittest discover -s <target>`.
-
-A `concurrency` block with `cancel-in-progress: true` collapses fan-out: if 6 Applications sync at once, only the last dispatch's run survives.
-
-## Single sources of truth
-
-| Value | Lives in | Flows to |
+| Workflow | Watched `paths:` | Tests |
 |---|---|---|
-| GitHub PAT (`GH_TOKEN`) | `.env` | SM (via EnvSecrets) -> argocd-notifications-secret (ESO) |
-| Tailscale OAuth (`TS_OAUTH_CLIENT_ID`/`SECRET`) | `.env` | SM (via EnvSecrets) -> workflow env (via OIDC + `aws secretsmanager get-secret-value`) |
-| GitHub Actions role ARN (`AWS_ROLE_ARN`) | terraform ([terraform/platform/secrets/iam.tf](../../terraform/platform/secrets/iam.tf)) | SM -> argocd-notifications-secret -> webhook payload -> workflow |
+| [.github/workflows/on_post_merge_cortexflow.yaml](../../.github/workflows/on_post_merge_cortexflow.yaml) | `mlflow`, `ray`, `jobs_control_plane`, `cortexflow_integration_tests` job | `tests/integration/cortexflow` |
+| [.github/workflows/on_post_merge_cortexflow_ui.yaml](../../.github/workflows/on_post_merge_cortexflow_ui.yaml) | same as above plus `cortexflow_ui/deployment_*`, `cortexflow_ui_integration_tests` job | `tests/integration/cortexflow_ui` |
 
-The role ARN is the one bootstrap value the workflow can't fetch from SM (since SM access requires assuming the role). It travels in the dispatch payload so it's still sourced from terraform, not duplicated in a GH variable.
+A `concurrency` block per workflow with `cancel-in-progress: false` queues runs in order rather than collapsing them.
 
-## Apply order
+## How image tags reach `main`
 
-Different changes propagate through different paths:
+[.github/workflows/on_pull_request.yaml](../../.github/workflows/on_pull_request.yaml) builds each changed image, tags it `<branch-slug>-<sha>`, and rewrites the image field in the corresponding workload manifest (e.g. `k8s/workloads/ray/deployment.yaml`) with `yq`. When the PR merges, those manifest edits land on `main`, and the post-merge `paths:` filter fires the integration workflow.
 
-| Change | How to apply |
-|---|---|
-| Terraform secrets module (e.g. new SM entry) | `cd terraform/platform/secrets && terraform apply` |
-| `.env` (e.g. new key) | `make head-setup IP=<head-ip> STORAGE_PATH=/storage` (re-runs EnvSecrets) |
-| `k8s/argocd.yaml` (notifications template, Helm values) | `kubectl apply -f k8s/argocd.yaml` (or re-run `make head-setup`) |
-| `k8s/argo_deployments/**` (ExternalSecrets, Application annotations) | push to `main`; Argo CD syncs |
-| `.github/workflows/**` | push to any branch (workflows are read from default branch on dispatch) |
+## Manual trigger
+
+There is no `workflow_dispatch`. To rerun a workflow without a new merge, use the Actions UI's "Re-run jobs" button on a past run.
 
 ## Adding a new test target
 
-1. Add tests under `tests/integration/<target>/` using `unittest`.
-2. Copy one of the existing workflow files in `.github/workflows/` and change `name`, `concurrency.group`, and the `discover -s` path.
-3. If the tests should run only when specific Applications sync, add a top-level `if:` on the `test` job filtering on `github.event.client_payload.app`.
-
-## Adding a new subscribed Application
-
-Add the annotation to the Application CR:
-
-```yaml
-metadata:
-  annotations:
-    notifications.argoproj.io/subscribe.on-sync-succeeded.github: ""
-```
-
-Push to main; Argo picks it up on next sync.
+1. Add tests under `tests/integration/<target>/`.
+2. Add a Job manifest at `k8s/workloads/<target>_integration_tests/job.yaml`.
+3. Copy an existing `on_post_merge_*` workflow. Update: `paths:`, the `argocd app sync/wait` target(s), the `kubectl apply` path, and the `kubectl wait job/<name>` name.

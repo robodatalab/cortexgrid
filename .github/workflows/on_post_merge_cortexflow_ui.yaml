@@ -1,0 +1,37 @@
+name: on_post_merge_cortexflow_ui
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "k8s/workloads/cortexflow_integration_tests/job.yaml"
+            - "k8s/workloads/jobs_control_plane/deployment.yaml"
+            - "k8s/workloads/mlflow/deployment.yaml"
+            - "k8s/workloads/ray/deployment.yaml"
+            - "k8s/workloads/cortexflow_ui/deployment_backend.yaml"
+            - "k8s/workloads/cortexflow_ui/deployment_frontend.yaml"
+            - "k8s/workloads/cortexflow_ui_integration_tests/job.yaml"
+
+concurrency:
+    group: cortexflow-ui-integration
+    cancel-in-progress: false
+
+jobs:
+    wait_for_cortexflow_deployment:
+        runs-on: arc-runners
+        steps:
+            - run: argocd app sync cortexflow && argocd app wait cortexflow --health --sync --timeout 600
+
+    wait_for_cortexflow_ui_deployment:
+        runs-on: arc-runners
+        steps:
+            - run: argocd app sync cortexflow-ui && argocd app wait cortexflow-ui --health --sync --timeout 600
+
+    test_cortexflow_ui_integration:
+        needs:
+            [wait_for_cortexflow_deployment, wait_for_cortexflow_ui_deployment]
+        runs-on: arc-runners
+        steps:
+            - uses: actions/checkout@v4
+            - run: kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
+            - run: kubectl wait --for=condition=complete job/cortexflow-ui-integration --timeout=15m
