@@ -17,6 +17,8 @@ spec:
       params:
         server.insecure: true
         server.disable.auth: true
+      cm:
+        kustomize.buildOptions: --enable-helm
     server:
       service:
         type: NodePort
