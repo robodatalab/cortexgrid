@@ -3,8 +3,6 @@ kind: Application
 metadata:
   name: cortexflow
   namespace: argocd
-  annotations:
-    notifications.argoproj.io/subscribe.on-cortexflow-deployed.argocd-api: ""
 spec:
   project: default
   source:
