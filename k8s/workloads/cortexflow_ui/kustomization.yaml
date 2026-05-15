@@ -11,4 +11,4 @@ helmCharts:
     valuesInline:
       images:
         backend: ghcr.io/robodatalab/cortexflow-ui-backend:8de836cc78ef2ac2d79f234dd3d0816fed45d72a
-        frontend: ghcr.io/robodatalab/cortexflow-ui-frontend:main-69897f2932233e6985dd8f2ad42fa3e9b97b4b32
+        frontend: ghcr.io/robodatalab/cortexflow-ui-frontend:manual-e126677
