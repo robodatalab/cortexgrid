@@ -4,23 +4,13 @@ on:
     push:
         branches: [main]
         paths:
-            - "cortexflow/**"
-            - "tests/unit/cortexflow/**"
-            - "tests/integration/cortexflow/**"
-            - "k8s/docker/integration_tests/cortexflow/**"
-            - "jobs_control_plane/**"
-            - "k8s/docker/jobs_control_plane/**"
-            - "tests/unit/jobs_control_plane/**"
-            - "k8s/docker/mlflow/**"
-            - "k8s/docker/ray/**"
-            - "cortexflow_ui/backend/**"
-            - "tests/unit/cortexflow_ui/backend/**"
-            - "k8s/docker/cortexflow_ui/backend/**"
-            - "cortexflow_ui/frontend/**"
-            - "k8s/docker/cortexflow_ui/frontend/**"
-            - "tests/unit/cortexflow_ui/frontend/**"
-            - "tests/integration/cortexflow_ui/**"
-            - "k8s/docker/integration_tests/cortexflow_ui/**"
+            - "k8s/workloads/cortexflow_integration_tests/job.yaml"
+            - "k8s/workloads/jobs_control_plane/deployment.yaml"
+            - "k8s/workloads/mlflow/deployment.yaml"
+            - "k8s/workloads/ray/deployment.yaml"
+            - "k8s/workloads/cortexflow_ui/deployment_backend.yaml"
+            - "k8s/workloads/cortexflow_ui/deployment_frontend.yaml"
+            - "k8s/workloads/cortexflow_ui_integration_tests/job.yaml"
 
 concurrency:
     group: cortexflow-ui-integration
@@ -42,5 +32,6 @@ jobs:
             [wait_for_cortexflow_deployment, wait_for_cortexflow_ui_deployment]
         runs-on: arc-runners
         steps:
+            - uses: actions/checkout@v4
             - run: kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
             - run: kubectl wait --for=condition=complete job/cortexflow-ui-integration --timeout=15m
