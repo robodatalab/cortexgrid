@@ -34,7 +34,7 @@ from k8s.seed.pipeline import Operator
 log = logging.getLogger("k8s.seed.operators.postgres_credentials")
 
 
-_NAMESPACE = "postgres"
+_NAMESPACE = "cortexflow"
 _SECRET_NAME = "postgres-credentials"
 _USER = "robolab"
 _DB_INITIAL = "mlflow"

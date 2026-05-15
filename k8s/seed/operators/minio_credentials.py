@@ -40,7 +40,7 @@ from k8s.seed.pipeline import Operator
 log = logging.getLogger("k8s.seed.operators.minio_credentials")
 
 
-_NAMESPACE = "minio"
+_NAMESPACE = "cortexflow"
 _SECRET_NAME = "minio-credentials"
 _USER = "admin"
 _BUCKET = "mlflow-artifacts"
