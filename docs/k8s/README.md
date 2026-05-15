@@ -17,8 +17,10 @@ Cluster topology — which IP is head vs worker, where the head's HDD is mounted
 
 `K3sServer` ([k8s/seed/operators/k3s_server.py](../../k8s/seed/operators/k3s_server.py)) auto-detects the profile at seed time from `/sys/class/dmi/id/sys_vendor`:
 
-- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs only [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
-- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (the same shared Apps as `aws/` plus MinIO + Postgres). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
+Both profiles render via kustomize from a shared [argo_deployments/base/](../../k8s/argo_deployments/base/) plus a per-profile overlay that supplies a profile-local `loki.yaml`, the profile's `secrets/` ExternalSecret folder, and a patch on the secrets Application's `path:`.
+
+- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
+- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (`base/` plus the on-prem `loki.yaml` and `secrets/` overlay; on-prem-only MinIO + Postgres Apps would also live here when added). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
 
 Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
 

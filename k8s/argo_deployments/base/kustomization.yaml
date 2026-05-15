@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - arc_controller.yaml
+  - arc_runner_set.yaml
+  - argocd.yaml
+  - cert_manager.yaml
+  - cortexflow.yaml
+  - cortexflow_ui.yaml
+  - monitoring.yaml
+  - nvidia.yaml
+  - secrets.yaml
+  - tailscale_operator.yaml
+  - vector.yaml

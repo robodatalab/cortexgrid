@@ -33,11 +33,9 @@ spec:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
     path: k8s/argo_deployments/aws
-    directory:
-      # Bootstrap applies every *.yaml at the top level. Each top-level file
-      # is an Application; subdirs are owned by those Applications. Adding a
-      # new aggregator never requires editing this file.
-      recurse: false
+    # kustomization.yaml at this path renders the base Application list plus
+    # profile-specific patches and resources. Adding a new shared Application
+    # is done in base/; profile-specific Applications go alongside this file.
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
@@ -57,8 +55,6 @@ spec:
     repoURL: https://github.com/robodatalab/robolab-infra.git
     targetRevision: main
     path: k8s/argo_deployments/onprem
-    directory:
-      recurse: false
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
