@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 9.5.11
+    helm:
+      values: |
+        global:
+          nodeSelector:
+            role: head
+        configs:
+          params:
+            server.insecure: true
+            server.disable.auth: true
+          cm:
+            kustomize.buildOptions: --enable-helm --load-restrictor LoadRestrictionsNone
+        server:
+          service:
+            type: NodePort
+            nodePortHttp: 30080
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hostname: argo.robodatalab.com
+            extraTls:
+              - hosts:
+                  - argo.robodatalab.com
+                secretName: robodatalab-wildcard-tls
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
