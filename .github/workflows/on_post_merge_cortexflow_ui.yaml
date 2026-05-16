@@ -46,7 +46,8 @@ jobs:
             - run: |
                   kubectl delete -n cortexflow job/cortexflow-ui-integration-tests --ignore-not-found --wait=true
                   kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
-                  kubectl wait -n cortexflow --for=condition=ready pod -l job-name=cortexflow-ui-integration-tests --timeout=120s
+                  until kubectl get pod -n cortexflow -l job-name=cortexflow-ui-integration-tests --no-headers 2>/dev/null | grep -q .; do sleep 1; done
+                  kubectl wait -n cortexflow --for=condition=ready pod -l job-name=cortexflow-ui-integration-tests --timeout=600s
                   kubectl logs -n cortexflow -f job/cortexflow-ui-integration-tests &
                   kubectl wait -n cortexflow --for=condition=complete --timeout=15m job/cortexflow-ui-integration-tests
 
