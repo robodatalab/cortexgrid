@@ -6,6 +6,8 @@ on:
         paths:
             - "k8s/workloads/cortexflow_integration_tests/job.yaml"
             - "k8s/workloads/cortexflow/kustomization.yaml"
+            - "k8s/workloads/arc_runner_set/**"
+            - ".github/workflows/on_post_merge_cortexflow.yaml"
 
 concurrency:
     group: cortexflow-integration
@@ -18,7 +20,11 @@ jobs:
     wait_for_cortexflow_deployment:
         runs-on: arc-runners
         steps:
-            - run: argocd app sync cortexflow && argocd app wait cortexflow --health --sync --timeout 600
+            - run: |
+                  kubectl annotate -n argocd app cortexflow argocd.argoproj.io/refresh=normal --overwrite
+                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.sync.revision}'=$GITHUB_SHA --timeout=600s
+                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
+                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
 
     test_cortexflow_integration:
         needs: wait_for_cortexflow_deployment
