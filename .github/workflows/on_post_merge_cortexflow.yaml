@@ -11,6 +11,9 @@ concurrency:
     group: cortexflow-integration
     cancel-in-progress: false
 
+permissions:
+    contents: write
+
 jobs:
     wait_for_cortexflow_deployment:
         runs-on: arc-runners

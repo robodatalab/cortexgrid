@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+
 jobs:
   promote:
     runs-on: arc-runners
@@ -17,13 +22,14 @@ jobs:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR=$(gh pr list --state merged --search "${{ github.sha }}" --json number -q '.[0].number')
+          PR_JSON=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls")
+          PR=$(echo "$PR_JSON" | jq -r '.[0].number // empty')
           if [ -z "$PR" ]; then
             echo "no merged PR for ${{ github.sha }}, nothing to promote"
             exit 0
           fi
-          BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
-          RUN=$(gh run list --workflow on_pull_request.yaml --branch "$BRANCH" --limit 1 --json databaseId -q '.[0].databaseId')
+          BRANCH=$(echo "$PR_JSON" | jq -r '.[0].head.ref')
+          RUN=$(gh api "repos/${{ github.repository }}/actions/workflows/on_pull_request.yaml/runs?branch=$BRANCH&per_page=1" -q '.workflow_runs[0].id')
           if [ -z "$RUN" ]; then
             echo "no on_pull_request run for branch $BRANCH, nothing to promote"
             exit 0
