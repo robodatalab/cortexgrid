@@ -159,9 +159,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: cortexflow_ui/frontend
 
       - name: Run frontend tests
         run: npm run test:run
+        working-directory: cortexflow_ui/frontend
 
   test_jobs_control_plane:
     needs: detect
@@ -218,8 +220,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=arc-runner
-          cache-to: type=gha,mode=max,scope=arc-runner
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_cortexflow_integration:
     needs: detect
@@ -254,8 +256,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=cortexflow-integration
-          cache-to: type=gha,mode=max,scope=cortexflow-integration
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_cortexflow_ui_backend:
     needs: test_cortexflow_ui_backend
@@ -289,8 +291,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=cortexflow-ui-backend
-          cache-to: type=gha,mode=max,scope=cortexflow-ui-backend
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_cortexflow_ui_frontend:
     needs: test_cortexflow_ui_frontend
@@ -324,8 +326,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=cortexflow-ui-frontend
-          cache-to: type=gha,mode=max,scope=cortexflow-ui-frontend
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_cortexflow_ui_integration:
     needs: detect
@@ -360,8 +362,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=cortexflow-ui-integration
-          cache-to: type=gha,mode=max,scope=cortexflow-ui-integration
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_jobs_control_plane:
     needs: test_jobs_control_plane
@@ -395,8 +397,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=jobs-control-plane
-          cache-to: type=gha,mode=max,scope=jobs-control-plane
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_mlflow:
     needs: detect
@@ -431,8 +433,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=mlflow
-          cache-to: type=gha,mode=max,scope=mlflow
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   build_ray:
     needs: detect
@@ -467,8 +469,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=gha,scope=ray-head
-          cache-to: type=gha,mode=max,scope=ray-head
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
   update_image_tags:
     needs:

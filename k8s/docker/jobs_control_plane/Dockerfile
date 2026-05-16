@@ -10,10 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+RUN --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project
+
 COPY cortexflow/ ./cortexflow/
 COPY jobs_control_plane/ ./jobs_control_plane/
 
-RUN uv sync
+RUN --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked
 
 CMD ["/app/.venv/bin/python", "-m", "jobs_control_plane.server"]
