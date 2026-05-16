@@ -6,6 +6,8 @@ on:
         paths:
             - "k8s/workloads/cortexflow_integration_tests/job.yaml"
             - "k8s/workloads/cortexflow/kustomization.yaml"
+            - "k8s/workloads/arc_runner_set/**"
+            - ".github/workflows/on_post_merge_cortexflow.yaml"
 
 concurrency:
     group: cortexflow-integration

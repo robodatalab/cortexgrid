@@ -8,6 +8,8 @@ on:
             - "k8s/workloads/cortexflow/kustomization.yaml"
             - "k8s/workloads/cortexflow_ui/kustomization.yaml"
             - "k8s/workloads/cortexflow_ui_integration_tests/job.yaml"
+            - "k8s/workloads/arc_runner_set/**"
+            - ".github/workflows/on_post_merge_cortexflow_ui.yaml"
 
 concurrency:
     group: cortexflow-ui-integration
