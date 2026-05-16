@@ -1,15 +1,26 @@
 # RoboLab Infrastructure
 
-[![cortexflow tests](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-tests.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-tests.yml)
-[![cortexflow integration tests](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-integration-tests.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-integration-tests.yml)
-[![cortexflow-ui tests](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-tests.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-tests.yml)
-[![cortexflow-ui integration tests](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-integration-tests.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-integration-tests.yml)
-[![cortexflow-ui-backend](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-backend.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-backend.yml)
-[![cortexflow-ui-frontend](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-frontend.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/cortexflow-ui-frontend.yml)
-[![jobs-control-plane](https://github.com/robodatalab/robolab-infra/actions/workflows/jobs-control-plane.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/jobs-control-plane.yml)
-[![mlflow](https://github.com/robodatalab/robolab-infra/actions/workflows/mlflow.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/mlflow.yml)
-[![ray-head](https://github.com/robodatalab/robolab-infra/actions/workflows/ray-head.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/ray-head.yml)
-[![version-bump](https://github.com/robodatalab/robolab-infra/actions/workflows/version-bump.yml/badge.svg)](https://github.com/robodatalab/robolab-infra/actions/workflows/version-bump.yml)
+**Unit tests**
+
+[![cortexflow tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![ui backend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_backend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![ui frontend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_frontend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![jobs control plane tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_jobs_control_plane.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![k8s seed tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_k8s_seed.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+
+**Docker builds**
+
+[![jobs control plane build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_jobs_control_plane.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![mlflow build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_mlflow.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![ray build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_ray.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![arc runner build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_arc_runner.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![ui backend build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_cortexflow_ui_backend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+[![ui frontend build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_cortexflow_ui_frontend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+
+**Integration tests**
+
+[![cortexflow integration](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_integration.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_post_merge_cortexflow.yaml)
+[![ui integration](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_integration.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_post_merge_cortexflow_ui.yaml)
 
 > **Run any Python function on your own GPUs — no Dockerfile, no decorator, no commit.**
 
