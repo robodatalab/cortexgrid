@@ -44,7 +44,7 @@ jobs:
         steps:
             - uses: actions/checkout@v4
             - run: kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
-            - run: kubectl wait --for=condition=complete job/cortexflow-ui-integration --timeout=15m
+            - run: kubectl wait -n cortexflow --for=condition=complete job/cortexflow-ui-integration-tests --timeout=15m
 
     report:
         needs: test_cortexflow_ui_integration
