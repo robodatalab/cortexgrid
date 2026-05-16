@@ -5,55 +5,14 @@ metadata:
   namespace: arc-runners
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRoleBinding
 metadata:
-  name: arc-runner-ci-jobs
-  namespace: cortexflow
-rules:
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: arc-runner-ci-jobs
-  namespace: cortexflow
+  name: arc-runner-ci-admin
 subjects:
   - kind: ServiceAccount
     name: arc-runner-ci
     namespace: arc-runners
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: arc-runner-ci-jobs
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: arc-runner-ci-argo-apps
-  namespace: argocd
-rules:
-  - apiGroups: ["argoproj.io"]
-    resources: ["applications"]
-    verbs: ["get", "list", "watch", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: arc-runner-ci-argo-apps
-  namespace: argocd
-subjects:
-  - kind: ServiceAccount
-    name: arc-runner-ci
-    namespace: arc-runners
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: arc-runner-ci-argo-apps
+  kind: ClusterRole
+  name: cluster-admin

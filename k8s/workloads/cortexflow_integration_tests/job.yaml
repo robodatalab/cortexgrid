@@ -17,12 +17,25 @@ spec:
       restartPolicy: Never
       nodeSelector:
         role: head
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: tests
           image: ghcr.io/robodatalab/cortexflow-integration:04228357687bb32056a323b63567d247d5182e53
           volumeMounts:
             - name: test-results
               mountPath: /tmp
+            - name: aws-creds
+              mountPath: /root/.aws
+              readOnly: true
       volumes:
         - name: test-results
           emptyDir: {}
+        - name: aws-creds
+          secret:
+            secretName: aws-creds
+            items:
+              - key: credentials
+                path: credentials
