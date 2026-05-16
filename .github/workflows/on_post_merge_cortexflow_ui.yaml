@@ -43,8 +43,11 @@ jobs:
         runs-on: arc-runners
         steps:
             - uses: actions/checkout@v4
-            - run: kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
-            - run: kubectl wait -n cortexflow --for=condition=complete job/cortexflow-ui-integration-tests --timeout=15m
+            - run: |
+                  kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
+                  kubectl wait -n cortexflow --for=condition=ready pod -l job-name=cortexflow-ui-integration-tests --timeout=120s
+                  kubectl logs -n cortexflow -f job/cortexflow-ui-integration-tests &
+                  kubectl wait -n cortexflow --for=condition=complete --timeout=15m job/cortexflow-ui-integration-tests
 
     report:
         needs: test_cortexflow_ui_integration
