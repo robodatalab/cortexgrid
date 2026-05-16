@@ -11,6 +11,6 @@ helmCharts:
     namespace: cortexflow
     valuesInline:
       images:
-        mlflow: ghcr.io/robodatalab/mlflow:8886b8a15e504930a4ce086a3fd6372da81f2647
-        ray: ghcr.io/robodatalab/ray-head:8886b8a15e504930a4ce086a3fd6372da81f2647
-        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:8de836cc78ef2ac2d79f234dd3d0816fed45d72a
+        mlflow: ghcr.io/robodatalab/mlflow:04228357687bb32056a323b63567d247d5182e53
+        ray: ghcr.io/robodatalab/ray-head:04228357687bb32056a323b63567d247d5182e53
+        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:04228357687bb32056a323b63567d247d5182e53

@@ -19,7 +19,7 @@ spec:
         role: head
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexflow-integration:34ada3b69d5e43a0ac2f5655bda800eb96dbc77e
+          image: ghcr.io/robodatalab/cortexflow-integration:04228357687bb32056a323b63567d247d5182e53
           volumeMounts:
             - name: test-results
               mountPath: /tmp
