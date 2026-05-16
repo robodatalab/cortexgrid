@@ -19,3 +19,5 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 EXPOSE 5000
 
 CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
+
+# trigger: 315-trigger-tests-2026-05-16
