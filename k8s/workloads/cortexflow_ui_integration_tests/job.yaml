@@ -25,6 +25,15 @@ spec:
           volumeMounts:
             - name: test-results
               mountPath: /tmp
+            - name: aws-creds
+              mountPath: /root/.aws
+              readOnly: true
       volumes:
         - name: test-results
           emptyDir: {}
+        - name: aws-creds
+          secret:
+            secretName: aws-creds
+            items:
+              - key: credentials
+                path: credentials
