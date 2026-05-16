@@ -23,9 +23,6 @@ lambda/*.zip
 # claude stuff
 .claude/
 
-# uv
-uv.lock
-
 # local infra config
 infra-config.yaml
 
