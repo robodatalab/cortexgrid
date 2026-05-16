@@ -1,0 +1,69 @@
+name: on_post_merge_badges
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  promote:
+    runs-on: arc-runners
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: badges
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=$(gh pr list --state merged --search "${{ github.sha }}" --json number -q '.[0].number')
+          if [ -z "$PR" ]; then
+            echo "no merged PR for ${{ github.sha }}, nothing to promote"
+            exit 0
+          fi
+          BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
+          RUN=$(gh run list --workflow on_pull_request.yaml --branch "$BRANCH" --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ -z "$RUN" ]; then
+            echo "no on_pull_request run for branch $BRANCH, nothing to promote"
+            exit 0
+          fi
+
+          mkdir -p badges
+          declare -A LABELS=(
+            [test_cortexflow]="cortexflow tests"
+            [test_cortexflow_ui_backend]="ui backend tests"
+            [test_cortexflow_ui_frontend]="ui frontend tests"
+            [test_jobs_control_plane]="jobs control plane tests"
+            [test_k8s_seed]="k8s seed tests"
+            [build_arc_runner]="arc runner build"
+            [build_cortexflow_ui_backend]="ui backend build"
+            [build_cortexflow_ui_frontend]="ui frontend build"
+            [build_jobs_control_plane]="jobs control plane build"
+            [build_mlflow]="mlflow build"
+            [build_ray]="ray build"
+          )
+
+          JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" --paginate)
+          for name in "${!LABELS[@]}"; do
+            conclusion=$(echo "$JOBS" | jq -r --arg n "$name" '.jobs[] | select(.name==$n) | .conclusion')
+            if [ -z "$conclusion" ] || [ "$conclusion" = "skipped" ] || [ "$conclusion" = "cancelled" ]; then
+              continue
+            fi
+            if [ "$conclusion" = "success" ]; then
+              msg=passing
+              color=brightgreen
+            else
+              msg=failing
+              color=red
+            fi
+            jq -n --arg l "${LABELS[$name]}" --arg m "$msg" --arg c "$color" \
+              '{schemaVersion:1, label:$l, message:$m, color:$c}' > "badges/${name}.json"
+          done
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges
+          if git diff --cached --quiet; then
+            echo "no badge changes"
+            exit 0
+          fi
+          git commit -m "promote badges from PR #$PR"
+          git push origin badges
