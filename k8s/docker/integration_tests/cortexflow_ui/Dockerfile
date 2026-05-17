@@ -13,7 +13,9 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --locked --no-install-project
 
 COPY cortexflow/ ./cortexflow/
-COPY tests/integration/cortexflow_ui/ ./tests/
+COPY tests/__init__.py ./tests/
+COPY tests/integration/__init__.py ./tests/integration/
+COPY tests/integration/cortexflow_ui/ ./tests/integration/cortexflow_ui/
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
