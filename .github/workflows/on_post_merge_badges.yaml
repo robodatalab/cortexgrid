@@ -64,9 +64,9 @@ jobs:
               continue
             fi
             if [ "$conclusion" = "success" ]; then
-              msg=passing
+              msg="🟢 passing"
             else
-              msg=failing
+              msg="🔴 failing"
             fi
             sed -i -E "s|<!--s:${name}-->[^<]*<!--/s-->|<!--s:${name}-->${msg}<!--/s-->|" README.md
           done
