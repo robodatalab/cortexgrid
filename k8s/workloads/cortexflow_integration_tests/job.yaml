@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexflow-integration:d6f76fb041d5c285d2ae7241ca935d748c0b8778
+          image: ghcr.io/robodatalab/cortexflow-integration:7247d776ec558bc355c89d635a22fae54fc287b9
           volumeMounts:
             - name: test-results
               mountPath: /tmp
