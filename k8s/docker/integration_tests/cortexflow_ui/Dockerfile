@@ -21,4 +21,6 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked
 
+RUN /app/.venv/bin/playwright install --with-deps chromium
+
 CMD ["/app/.venv/bin/python", "-m", "unittest", "discover", "-s", "./tests", "-p", "test_*.py", "-v"]
