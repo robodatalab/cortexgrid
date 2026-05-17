@@ -61,10 +61,10 @@ jobs:
                   else
                       msg=failing
                   fi
-                  sed -i -E "s|<!--s:test_cortexflow_integration-->[^<]*<!--/s-->|<!--s:test_cortexflow_integration-->${msg}<!--/s-->|" README.md
                   git config user.name  "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git pull --rebase origin main
+                  sed -i -E "s|<!--s:test_cortexflow_integration-->[^<]*<!--/s-->|<!--s:test_cortexflow_integration-->${msg}<!--/s-->|" README.md
                   git add README.md
                   if git diff --cached --quiet; then
                       exit 0

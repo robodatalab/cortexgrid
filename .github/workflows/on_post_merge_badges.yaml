@@ -53,6 +53,11 @@ jobs:
           )
 
           JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" --paginate)
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+
           for name in "${JOB_KEYS[@]}"; do
             conclusion=$(echo "$JOBS" | jq -r --arg n "$name" '.jobs[] | select(.name==$n) | .conclusion')
             if [ -z "$conclusion" ] || [ "$conclusion" = "skipped" ] || [ "$conclusion" = "cancelled" ]; then
@@ -66,9 +71,6 @@ jobs:
             sed -i -E "s|<!--s:${name}-->[^<]*<!--/s-->|<!--s:${name}-->${msg}<!--/s-->|" README.md
           done
 
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
           git add README.md
           if git diff --cached --quiet; then
             echo "no status changes"
