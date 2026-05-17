@@ -12,6 +12,7 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project
 
+COPY pyproject.toml ./
 COPY cortexflow/ ./cortexflow/
 COPY tests/__init__.py ./tests/
 COPY tests/integration/__init__.py ./tests/integration/
