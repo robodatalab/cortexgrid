@@ -2,25 +2,31 @@
 
 **Unit tests**
 
-[![cortexflow tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![ui backend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_backend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![ui frontend tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_frontend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![jobs control plane tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_jobs_control_plane.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![k8s seed tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_k8s_seed.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+| job | status |
+| --- | --- |
+| cortexflow | <!--s:test_cortexflow-->unknown<!--/s--> |
+| ui backend | <!--s:test_cortexflow_ui_backend-->unknown<!--/s--> |
+| ui frontend | <!--s:test_cortexflow_ui_frontend-->unknown<!--/s--> |
+| jobs control plane | <!--s:test_jobs_control_plane-->unknown<!--/s--> |
+| k8s seed | <!--s:test_k8s_seed-->unknown<!--/s--> |
 
 **Docker builds**
 
-[![jobs control plane build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_jobs_control_plane.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![mlflow build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_mlflow.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![ray build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_ray.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![arc runner build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_arc_runner.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![ui backend build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_cortexflow_ui_backend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
-[![ui frontend build](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/build_cortexflow_ui_frontend.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_pull_request.yaml)
+| job | status |
+| --- | --- |
+| jobs control plane | <!--s:build_jobs_control_plane-->unknown<!--/s--> |
+| mlflow | <!--s:build_mlflow-->unknown<!--/s--> |
+| ray | <!--s:build_ray-->unknown<!--/s--> |
+| arc runner | <!--s:build_arc_runner-->unknown<!--/s--> |
+| ui backend | <!--s:build_cortexflow_ui_backend-->unknown<!--/s--> |
+| ui frontend | <!--s:build_cortexflow_ui_frontend-->unknown<!--/s--> |
 
 **Integration tests**
 
-[![cortexflow integration](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_integration.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_post_merge_cortexflow.yaml)
-[![ui integration](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/robodatalab/robolab-infra/badges/badges/test_cortexflow_ui_integration.json)](https://github.com/robodatalab/robolab-infra/actions/workflows/on_post_merge_cortexflow_ui.yaml)
+| job | status |
+| --- | --- |
+| cortexflow | <!--s:test_cortexflow_integration-->unknown<!--/s--> |
+| ui | <!--s:test_cortexflow_ui_integration-->unknown<!--/s--> |
 
 > **Run any Python function on your own GPUs — no Dockerfile, no decorator, no commit.**
 

@@ -3,6 +3,7 @@ name: on_post_merge_badges
 on:
   push:
     branches: [main]
+    paths-ignore: [README.md]
 
 permissions:
   contents: write
@@ -18,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: badges
+          ref: main
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -35,44 +36,41 @@ jobs:
             exit 0
           fi
 
-          mkdir -p badges
-          declare -A LABELS=(
-            [test_cortexflow]="cortexflow tests"
-            [test_cortexflow_ui_backend]="ui backend tests"
-            [test_cortexflow_ui_frontend]="ui frontend tests"
-            [test_jobs_control_plane]="jobs control plane tests"
-            [test_k8s_seed]="k8s seed tests"
-            [build_arc_runner]="arc runner build"
-            [build_cortexflow_ui_backend]="ui backend build"
-            [build_cortexflow_ui_frontend]="ui frontend build"
-            [build_jobs_control_plane]="jobs control plane build"
-            [build_mlflow]="mlflow build"
-            [build_ray]="ray build"
+          JOB_KEYS=(
+            test_cortexflow
+            test_cortexflow_ui_backend
+            test_cortexflow_ui_frontend
+            test_jobs_control_plane
+            test_k8s_seed
+            build_arc_runner
+            build_cortexflow_ui_backend
+            build_cortexflow_ui_frontend
+            build_jobs_control_plane
+            build_mlflow
+            build_ray
           )
 
           JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" --paginate)
-          for name in "${!LABELS[@]}"; do
+          for name in "${JOB_KEYS[@]}"; do
             conclusion=$(echo "$JOBS" | jq -r --arg n "$name" '.jobs[] | select(.name==$n) | .conclusion')
             if [ -z "$conclusion" ] || [ "$conclusion" = "skipped" ] || [ "$conclusion" = "cancelled" ]; then
               continue
             fi
             if [ "$conclusion" = "success" ]; then
               msg=passing
-              color=brightgreen
             else
               msg=failing
-              color=red
             fi
-            jq -n --arg l "${LABELS[$name]}" --arg m "$msg" --arg c "$color" \
-              '{schemaVersion:1, label:$l, message:$m, color:$c}' > "badges/${name}.json"
+            sed -i -E "s|<!--s:${name}-->[^<]*<!--/s-->|<!--s:${name}-->${msg}<!--/s-->|" README.md
           done
 
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add badges
+          git pull --rebase origin main
+          git add README.md
           if git diff --cached --quiet; then
-            echo "no badge changes"
+            echo "no status changes"
             exit 0
           fi
-          git commit -m "promote badges from PR #$PR"
-          git push origin badges
+          git commit -m "promote statuses from PR #$PR"
+          git push origin main
