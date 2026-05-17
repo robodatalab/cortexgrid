@@ -22,4 +22,4 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked
 
-CMD ["/app/.venv/bin/python", "-m", "unittest", "discover", "-s", "./tests", "-p", "test_*.py", "-v"]
+CMD ["/app/.venv/bin/python", "-m", "unittest", "discover", "-t", "/app", "-s", "tests", "-p", "test_*.py", "-v"]

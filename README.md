@@ -4,16 +4,16 @@
 
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
-| cortexflow integration | - | <!--s:build_cortexflow_integration-->unknown<!--/s--> | <!--s:test_cortexflow_integration-->failing<!--/s--> |
-| ui integration | - | <!--s:build_cortexflow_ui_integration-->unknown<!--/s--> | <!--s:test_cortexflow_ui_integration-->passing<!--/s--> |
-| cortexflow | <!--s:test_cortexflow-->unknown<!--/s--> | - | - |
-| jobs control plane | <!--s:test_jobs_control_plane-->unknown<!--/s--> | <!--s:build_jobs_control_plane-->unknown<!--/s--> | - |
-| mlflow | - | <!--s:build_mlflow-->unknown<!--/s--> | - |
-| ray | - | <!--s:build_ray-->unknown<!--/s--> | - |
-| arc runner | - | <!--s:build_arc_runner-->unknown<!--/s--> | - |
-| ui backend | <!--s:test_cortexflow_ui_backend-->unknown<!--/s--> | <!--s:build_cortexflow_ui_backend-->unknown<!--/s--> | - |
-| ui frontend | <!--s:test_cortexflow_ui_frontend-->unknown<!--/s--> | <!--s:build_cortexflow_ui_frontend-->unknown<!--/s--> | - |
-| k8s seed | <!--s:test_k8s_seed-->unknown<!--/s--> | - | - |
+| cortexflow integration | - | <!--s:build_cortexflow_integration-->⚪ unknown<!--/s--> | <!--s:test_cortexflow_integration-->🔴 failing<!--/s--> |
+| ui integration | - | <!--s:build_cortexflow_ui_integration-->⚪ unknown<!--/s--> | <!--s:test_cortexflow_ui_integration-->🟢 passing<!--/s--> |
+| cortexflow | <!--s:test_cortexflow-->⚪ unknown<!--/s--> | - | - |
+| jobs control plane | <!--s:test_jobs_control_plane-->⚪ unknown<!--/s--> | <!--s:build_jobs_control_plane-->⚪ unknown<!--/s--> | - |
+| mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
+| ray | - | <!--s:build_ray-->⚪ unknown<!--/s--> | - |
+| arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
+| ui backend | <!--s:test_cortexflow_ui_backend-->⚪ unknown<!--/s--> | <!--s:build_cortexflow_ui_backend-->⚪ unknown<!--/s--> | - |
+| ui frontend | <!--s:test_cortexflow_ui_frontend-->⚪ unknown<!--/s--> | <!--s:build_cortexflow_ui_frontend-->⚪ unknown<!--/s--> | - |
+| k8s seed | <!--s:test_k8s_seed-->⚪ unknown<!--/s--> | - | - |
 
 
 > **Run any Python function on your own GPUs — no Dockerfile, no decorator, no commit.**
