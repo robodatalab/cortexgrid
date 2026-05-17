@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 import unittest
 
 import cortexflow
 from playwright.sync_api import Page, sync_playwright
 
 
-UI_URL = "https://cortexflow.robodatalab.com"
+UI_URL = os.environ["CORTEXFLOW_UI_URL"]
 
 
 class UITestCase(unittest.TestCase):
