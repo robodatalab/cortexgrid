@@ -22,6 +22,9 @@ spec:
       containers:
         - name: tests
           image: ghcr.io/robodatalab/cortexflow-ui-integration:381adbfd0d3e7ca6dd949334f4538c785368e8b8
+          env:
+            - name: CORTEXFLOW_UI_URL
+              value: "http://$(CORTEXFLOW_UI_FRONTEND_SERVICE_HOST):$(CORTEXFLOW_UI_FRONTEND_SERVICE_PORT)"
           volumeMounts:
             - name: test-results
               mountPath: /tmp
