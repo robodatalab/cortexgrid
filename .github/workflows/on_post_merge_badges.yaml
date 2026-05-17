@@ -43,8 +43,10 @@ jobs:
             test_jobs_control_plane
             test_k8s_seed
             build_arc_runner
+            build_cortexflow_integration
             build_cortexflow_ui_backend
             build_cortexflow_ui_frontend
+            build_cortexflow_ui_integration
             build_jobs_control_plane
             build_mlflow
             build_ray
