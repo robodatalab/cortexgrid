@@ -101,9 +101,15 @@ class JobLifecycle:
 
     def download_project_code_root(self) -> str:
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        manifest_path = client.download_artifacts(
-            self.run_id, f"job/{self.job_id}/manifest.json"
-        )
+        manifest_rel = f"job/{self.job_id}/manifest.json"
+        if not any(
+            a.path == manifest_rel
+            for a in client.list_artifacts(self.run_id, f"job/{self.job_id}")
+        ):
+            raise FileNotFoundError(
+                f"artifact {manifest_rel} not found in run {self.run_id}"
+            )
+        manifest_path = client.download_artifacts(self.run_id, manifest_rel)
         manifest = json.loads(Path(manifest_path).read_text())
         _, _, src_path = (
             manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
@@ -135,7 +141,15 @@ class JobLifecycle:
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "JobLifecycle":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        local_path = client.download_artifacts(run_id, f"job/{job_id}/lifecycle.json")
+        lifecycle_rel = f"job/{job_id}/lifecycle.json"
+        if not any(
+            a.path == lifecycle_rel
+            for a in client.list_artifacts(run_id, f"job/{job_id}")
+        ):
+            raise FileNotFoundError(
+                f"artifact {lifecycle_rel} not found in run {run_id}"
+            )
+        local_path = client.download_artifacts(run_id, lifecycle_rel)
         return cls.from_json(Path(local_path).read_text())
 
 
@@ -199,7 +213,15 @@ class Payload(BaseModel):
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "Payload":
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
-        manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
+        manifest_rel = f"job/{job_id}/manifest.json"
+        if not any(
+            a.path == manifest_rel
+            for a in client.list_artifacts(run_id, f"job/{job_id}")
+        ):
+            raise FileNotFoundError(
+                f"artifact {manifest_rel} not found in run {run_id}"
+            )
+        manifest_path = client.download_artifacts(run_id, manifest_rel)
         manifest = json.loads(Path(manifest_path).read_text())
         _, _, src_path = (
             manifest["code_tarball_uri"].removeprefix("s3://").partition("/")

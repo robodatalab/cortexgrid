@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cortexflow.checkpoint import (
@@ -41,6 +42,15 @@ class FakeMLflow:
         if not local.exists():
             raise FileNotFoundError(path)
         return str(local)
+
+    def list_artifacts(self, run_id: str, path: str = "") -> list:
+        parent = self.root / path if path else self.root
+        if not parent.is_dir():
+            return []
+        return [
+            SimpleNamespace(path=f"{path}/{p.name}" if path else p.name)
+            for p in parent.iterdir()
+        ]
 
 
 class FakeS3:
