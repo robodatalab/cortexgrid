@@ -172,10 +172,14 @@ class Checkpoint:
         exp = Experiment.get_instance()
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
 
+        manifest_rel = f"{prefix}/manifest.json"
+        if not any(
+            a.path == manifest_rel for a in client.list_artifacts(exp.run_id, prefix)
+        ):
+            return None
+
         try:
-            manifest_path = client.download_artifacts(
-                exp.run_id, f"{prefix}/manifest.json"
-            )
+            manifest_path = client.download_artifacts(exp.run_id, manifest_rel)
             manifest = json.loads(Path(manifest_path).read_text())
         except Exception:
             return None
