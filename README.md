@@ -9,7 +9,7 @@ component | unit test | docker image | integration test |
 | cortexflow | <!--s:test_cortexflow-->🟢 passing<!--/s--> | - | - |
 | jobs control plane | <!--s:test_jobs_control_plane-->🟢 passing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
-| ray | - | <!--s:build_ray-->⚪ unknown<!--/s--> | - |
+| ray | - | <!--s:build_ray-->🟢 passing<!--/s--> | - |
 | arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
 | ui backend | <!--s:test_cortexflow_ui_backend-->🟢 passing<!--/s--> | <!--s:build_cortexflow_ui_backend-->🟢 passing<!--/s--> | - |
 | ui frontend | <!--s:test_cortexflow_ui_frontend-->⚪ unknown<!--/s--> | <!--s:build_cortexflow_ui_frontend-->⚪ unknown<!--/s--> | - |
