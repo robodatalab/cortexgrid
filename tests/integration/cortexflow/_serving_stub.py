@@ -18,6 +18,7 @@ from fastapi import FastAPI
 from ray import serve
 
 import cortexflow
+from cortexflow.ray_util import get_serve_details
 
 
 _app = FastAPI()
@@ -51,7 +52,40 @@ def wait_for_endpoint(url: str, timeout_s: float = 30) -> requests.Response:
         except requests.RequestException as exc:
             last_error = repr(exc)
         time.sleep(1)
-    raise AssertionError(f"GET {url} never succeeded: {last_error}")
+    raise AssertionError(
+        f"GET {url} never succeeded: {last_error}\n"
+        f"Serve controller view: {_format_serve_apps()}"
+    )
+
+
+def _format_serve_apps() -> str:
+    """Project the Serve controller's app+deployment statuses into a compact
+    string for failure diagnostics. Swallows any dashboard error so a probe
+    timeout still raises the original assertion."""
+    try:
+        details = get_serve_details()
+    except Exception as exc:
+        return f"<get_serve_details failed: {exc!r}>"
+    apps = []
+    for name, app in details.get("applications", {}).items():
+        deployments = {
+            dname: {
+                "status": d.get("status"),
+                "message": d.get("message"),
+                "replica_states": d.get("replica_states"),
+            }
+            for dname, d in app.get("deployments", {}).items()
+        }
+        apps.append(
+            {
+                "name": name,
+                "status": app.get("status"),
+                "message": app.get("message"),
+                "route_prefix": app.get("route_prefix"),
+                "deployments": deployments,
+            }
+        )
+    return json.dumps(apps, default=str)
 
 
 def contact_deployment(url: str, expected_marker: str) -> None:

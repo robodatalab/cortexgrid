@@ -19,12 +19,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from ray import serve
 from ray.serve.deployment import Deployment as RayDeployment
+from ray.serve.schema import ApplicationStatus
 
 from cortexflow._bundle import filter_pip_freeze, stage_bundle
 from cortexflow.infra import get_ray_serve_uri
@@ -166,24 +168,63 @@ def _current_application_specs() -> list[dict[str, Any]]:
     return specs
 
 
+def _wait_for_application_running(
+    name: str, timeout_s: float = 300.0, interval_s: float = 2.0
+) -> None:
+    """Poll the Serve controller until the named application is RUNNING.
+
+    Raises immediately on DEPLOY_FAILED with the controller's message. Other
+    non-RUNNING statuses (NOT_STARTED, DEPLOYING, UNHEALTHY) are treated as
+    transient until the timeout fires.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_status: str = "(missing)"
+    last_message: str = ""
+    while time.monotonic() < deadline:
+        app = get_serve_details().get("applications", {}).get(name)
+        if app is not None:
+            last_status = str(app.get("status", "(missing)"))
+            last_message = str(app.get("message", ""))
+            if last_status == ApplicationStatus.RUNNING.value:
+                return
+            if last_status == ApplicationStatus.DEPLOY_FAILED.value:
+                raise RuntimeError(
+                    f"Serve app {name!r} DEPLOY_FAILED: {last_message}"
+                )
+        time.sleep(interval_s)
+    raise TimeoutError(
+        f"Serve app {name!r} did not reach RUNNING within {timeout_s}s "
+        f"(last status={last_status!r}, message={last_message!r})"
+    )
+
+
 def deploy_model(
-    cls: type | RayDeployment, family: str, suffix: str, run_name: str
+    cls: type | RayDeployment,
+    family: str,
+    suffix: str,
+    run_name: str,
+    wait: bool = False,
 ) -> Deployment:
     """Schedule a Ray Serve app bound to (family, suffix, run_name).
 
     `cls` must be a class decorated with @model_deployment (or @serve.deployment).
     The union accepts both views of the decorated value: pyright tracks the
     transformation and sees a Deployment, mypy keeps the original `type`.
+
+    With `wait=True`, blocks until the Serve controller reports the app
+    RUNNING (5 min cap). DEPLOY_FAILED raises; timing out raises.
     """
     spec = _build_application_spec(cls, family, suffix, run_name)
     existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
     put_serve_applications([*existing, spec])
+    if wait:
+        _wait_for_application_running(spec["name"])
     return Deployment(
         family=family,
         suffix=suffix,
         run_name=run_name,
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
-        status="deploying",
+        status="running" if wait else "deploying",
     )
 
 

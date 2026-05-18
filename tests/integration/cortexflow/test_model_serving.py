@@ -44,7 +44,7 @@ class TestModelServing(unittest.TestCase):
         marker = self._save_marker_model(family, suffix)
 
         deployment = cortexflow.deploy_model(
-            CheckpointReadingStub, family, suffix, self.run_name
+            CheckpointReadingStub, family, suffix, self.run_name, wait=True
         )
         try:
             response = wait_for_endpoint(f"{deployment.url}/marker")
@@ -57,7 +57,7 @@ class TestModelServing(unittest.TestCase):
         marker = self._save_marker_model(family, suffix)
 
         deployment = cortexflow.deploy_model(
-            CheckpointReadingStub, family, suffix, self.run_name
+            CheckpointReadingStub, family, suffix, self.run_name, wait=True
         )
         try:
             run("remote", log, contact_deployment, deployment.url, marker)

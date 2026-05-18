@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import patch
 
 from cortexflow.model_serving import (
+    _wait_for_application_running,
     deploy_model,
     list_deployed_models,
     model_deployment,
@@ -17,11 +18,17 @@ class FakeServeState:
 
     def __init__(self) -> None:
         self.apps: dict[str, dict[str, Any]] = {}
+        self.status: str = "RUNNING"
+        self.message: str = ""
 
     def get_details(self) -> dict[str, Any]:
         return {
             "applications": {
-                name: {"status": "RUNNING", "deployed_app_config": spec}
+                name: {
+                    "status": self.status,
+                    "message": self.message,
+                    "deployed_app_config": spec,
+                }
                 for name, spec in self.apps.items()
             }
         }
@@ -111,6 +118,64 @@ class TestModelServing(unittest.TestCase):
         deploy_model(_TestableStub, "Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(len(self.state.apps), 1)
+
+    def test_deploy_model_with_wait_returns_when_app_is_running(self) -> None:
+        self.state.status = "RUNNING"
+
+        d = deploy_model(_TestableStub, "Qwen2", "instruct", "boogey-46", wait=True)
+
+        self.assertEqual(d.status, "running")
+
+    def test_deploy_model_with_wait_raises_on_deploy_failed(self) -> None:
+        self.state.status = "DEPLOY_FAILED"
+        self.state.message = "replica died on import"
+
+        with patch("cortexflow.model_serving.time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                deploy_model(
+                    _TestableStub, "Qwen2", "instruct", "boogey-46", wait=True
+                )
+
+        self.assertIn("DEPLOY_FAILED", str(ctx.exception))
+        self.assertIn("replica died on import", str(ctx.exception))
+
+
+class TestWaitForApplicationRunning(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = FakeServeState()
+        self.state.apps["Qwen2__instruct__boogey-46"] = {
+            "name": "Qwen2__instruct__boogey-46"
+        }
+        patches = [
+            patch(
+                "cortexflow.model_serving.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch("cortexflow.model_serving.time.sleep"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_times_out_when_status_never_reaches_running(self) -> None:
+        self.state.status = "DEPLOYING"
+        self.state.message = "still booting"
+
+        with self.assertRaises(TimeoutError) as ctx:
+            _wait_for_application_running(
+                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
+            )
+
+        self.assertIn("DEPLOYING", str(ctx.exception))
+        self.assertIn("still booting", str(ctx.exception))
+
+    def test_treats_unhealthy_as_transient_until_timeout(self) -> None:
+        self.state.status = "UNHEALTHY"
+
+        with self.assertRaises(TimeoutError):
+            _wait_for_application_running(
+                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
+            )
 
 
 if __name__ == "__main__":
