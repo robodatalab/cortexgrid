@@ -20,9 +20,18 @@ jobs:
     wait_for_cortexflow_deployment:
         runs-on: arc-runners
         steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: main
+                  fetch-depth: 0
             - run: |
                   kubectl annotate -n argocd app cortexflow argocd.argoproj.io/refresh=normal --overwrite
-                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.sync.revision}'=$GITHUB_SHA --timeout=600s
+                  deadline=$(($(date +%s) + 600))
+                  until git merge-base --is-ancestor "$GITHUB_SHA" \
+                        "$(kubectl get -n argocd app/cortexflow -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
+                      [ $(date +%s) -ge $deadline ] && { echo "timed out waiting for argo to deploy $GITHUB_SHA or a descendant"; exit 1; }
+                      sleep 5
+                  done
                   kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
                   kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
 
