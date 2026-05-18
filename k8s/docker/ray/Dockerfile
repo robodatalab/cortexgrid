@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir \
     "ray[default]==2.9.3" \
+    "smart_open[s3]==7.0.4" \
     mlflow==3.11.1 \
     python-dotenv==1.0.1 \
     psutil==5.9.8
