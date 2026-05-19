@@ -486,7 +486,7 @@ jobs:
         build_mlflow,
         build_ray,
       ]
-    if: ${{ always() && contains(needs.*.result, 'success') }}
+    if: ${{ always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: arc-runners
     env:
       OWNER: ${{ github.repository_owner }}
@@ -536,3 +536,33 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "bump image versions"
           git push
+
+  all_checks_passed:
+    needs:
+      - detect
+      - test_cortexflow
+      - bump-cortexflow-version
+      - test_cortexflow_ui_backend
+      - test_cortexflow_ui_frontend
+      - test_jobs_control_plane
+      - test_k8s_seed
+      - build_arc_runner
+      - build_cortexflow_integration
+      - build_cortexflow_ui_backend
+      - build_cortexflow_ui_frontend
+      - build_cortexflow_ui_integration
+      - build_jobs_control_plane
+      - build_mlflow
+      - build_ray
+      - update_image_tags
+    if: always()
+    runs-on: arc-runners
+    steps:
+      - name: Verify no upstream failures
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" \
+             || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more upstream jobs failed or were cancelled."
+            exit 1
+          fi
+          echo "All upstream jobs succeeded or were skipped."
