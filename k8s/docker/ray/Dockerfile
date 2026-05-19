@@ -2,6 +2,7 @@
 # Multi-stage: builder compiles any native deps, final image only keeps the
 # installed packages. No custom entrypoint — the pod's command runs
 # `ray start --head` directly.
+# rebuild-force: 19-02-2026 16:18
 
 FROM python:3.11-slim AS builder
 
