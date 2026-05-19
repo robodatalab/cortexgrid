@@ -5,7 +5,7 @@ import uuid
 import cortexflow
 from playwright.sync_api import Page, expect
 
-from tests.integration.cortexflow_ui._base import UI_URL, UITestCase
+from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
 
 
 def _experiment_name(test: UITestCase) -> str:
@@ -13,14 +13,14 @@ def _experiment_name(test: UITestCase) -> str:
 
 
 def _open_run(page: Page, experiment: str, run: str) -> None:
-    page.goto(UI_URL)
+    page.goto(get_test_ui_url())
     tree = page.locator(".experiment-tree__list")
     tree.get_by_text(experiment).click()
     tree.get_by_text(run).click()
 
 
 def _open_experiment(page: Page, experiment: str) -> None:
-    page.goto(UI_URL)
+    page.goto(get_test_ui_url())
     page.locator(".experiment-tree__list").get_by_text(experiment).click()
 
 
@@ -69,11 +69,15 @@ class TestExperimentNotes(UITestCase):
         panel.get_by_role("button", name="Edit").click()
         panel.get_by_label("Edit note").fill("amended experiment note")
         panel.get_by_role("button", name="Save").click()
-        expect(panel.get_by_text("amended experiment note")).to_be_visible(timeout=10_000)
+        expect(panel.get_by_text("amended experiment note")).to_be_visible(
+            timeout=10_000
+        )
         expect(panel.get_by_text("an experiment note")).not_to_be_visible()
 
         panel.get_by_role("button", name="Delete").click()
-        expect(panel.get_by_text("amended experiment note")).not_to_be_visible(timeout=10_000)
+        expect(panel.get_by_text("amended experiment note")).not_to_be_visible(
+            timeout=10_000
+        )
 
 
 class TestNotesCrossContext(UITestCase):
@@ -92,11 +96,15 @@ class TestNotesCrossContext(UITestCase):
         viewer = self.new_user()
         _open_experiment(viewer, name)
         viewer_panel = viewer.locator(".experiment-dashboard")
-        expect(viewer_panel.get_by_text("ran-from-run-view")).to_be_visible(timeout=10_000)
+        expect(viewer_panel.get_by_text("ran-from-run-view")).to_be_visible(
+            timeout=10_000
+        )
         expect(viewer_panel.get_by_text(f"Run: {run_name}")).to_be_visible()
 
         run_panel.get_by_role("button", name="Delete").click()
-        expect(viewer_panel.get_by_text("ran-from-run-view")).not_to_be_visible(timeout=10_000)
+        expect(viewer_panel.get_by_text("ran-from-run-view")).not_to_be_visible(
+            timeout=10_000
+        )
 
 
 class TestNotesMultiUser(UITestCase):

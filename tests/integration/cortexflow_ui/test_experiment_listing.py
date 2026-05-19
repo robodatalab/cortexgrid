@@ -5,7 +5,7 @@ import uuid
 import cortexflow
 from playwright.sync_api import expect
 
-from tests.integration.cortexflow_ui._base import UI_URL, UITestCase
+from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
 
 
 def _experiment_name(test: UITestCase) -> str:
@@ -18,7 +18,7 @@ def _noop_job() -> None:
 
 class TestExperimentListing(UITestCase):
     def test_experiment_appears_then_disappears_after_delete(self) -> None:
-        self.page.goto(UI_URL)
+        self.page.goto(get_test_ui_url())
         name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         tree = self.page.locator(".experiment-tree__list")
@@ -40,8 +40,8 @@ class TestExperimentListing(UITestCase):
 
         a = self.page
         b = self.new_user()
-        a.goto(UI_URL)
-        b.goto(UI_URL)
+        a.goto(get_test_ui_url())
+        b.goto(get_test_ui_url())
         a_tree = a.locator(".experiment-tree__list")
         b_tree = b.locator(".experiment-tree__list")
 
@@ -61,7 +61,7 @@ class TestExperimentListing(UITestCase):
         expect(b_tree.get_by_text(exp2)).to_be_visible()
 
     def test_run_and_job_appear_then_disappear_after_delete(self) -> None:
-        self.page.goto(UI_URL)
+        self.page.goto(get_test_ui_url())
         name = _experiment_name(self)
         self.addCleanup(cortexflow.delete_experiment, name)
         tree = self.page.locator(".experiment-tree__list")
