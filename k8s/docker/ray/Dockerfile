@@ -11,11 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
     "ray[default,serve]==2.9.3" \
     "smart_open[s3]==7.0.4" \
     mlflow==3.11.1 \
     python-dotenv==1.0.1 \
-    psutil==5.9.8
+    psutil==5.9.8 \
+    torch==2.10.0
 
 FROM python:3.11-slim
 

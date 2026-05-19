@@ -184,9 +184,17 @@ def bundle_for_entry(
     return ship_root, files, external
 
 
+# Distributions baked into the ray image's system site-packages. Runtime envs
+# created by Ray use --system-site-packages, so these are visible to the
+# virtualenv without re-installing; emitting them in runtime_env.pip would
+# force a multi-minute re-install of the CUDA torch wheel on every deploy.
+_BAKED_INTO_IMAGE: set[str] = {"torch"}
+
+
 def filter_pip_freeze(freeze_output: str, keep_top_levels: set[str]) -> str:
     """Drop pip freeze lines whose distribution doesn't cover any top-level
-    name in `keep_top_levels`. Lines that don't parse as a dist are dropped.
+    name in `keep_top_levels`, plus any distribution baked into the ray image.
+    Lines that don't parse as a dist are dropped.
 
     Distribution -> top-level mapping comes from importlib.metadata; for
     editable installs that aren't in that map, the canonical dist name itself
@@ -202,6 +210,8 @@ def filter_pip_freeze(freeze_output: str, keep_top_levels: set[str]) -> str:
         if not match:
             continue
         dist_canon = _canonicalize(match.group(0))
+        if dist_canon in _BAKED_INTO_IMAGE:
+            continue
         tops = dist_to_tops.get(dist_canon, {dist_canon.replace("-", "_")})
         if tops & keep_top_levels:
             kept.append(line)
