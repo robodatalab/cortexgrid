@@ -470,12 +470,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          # mode=min: only the final image's layers are cached. mode=max
-          # additionally caches intermediate builder layers, which for this
-          # image (~3 GB torch wheel + nvidia/triton) overflows GHCR's
-          # per-blob cap and hangs the cache export.
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=min
 
   update_image_tags:
     needs:
