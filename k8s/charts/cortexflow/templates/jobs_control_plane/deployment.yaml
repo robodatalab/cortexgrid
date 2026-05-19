@@ -34,11 +34,11 @@ spec:
             - name: CORTEXFLOW_STARTER_WORKERS
               value: "2"
           envFrom:
-            # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY -- real AWS keys for
-            # cortexflow.secrets to call AWS Secrets Manager. S3 access goes
-            # through cortexflow.s3_util, which fetches its own creds from SM.
+            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
             - secretRef:
-                name: aws-creds
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
           livenessProbe:
             exec:
               command:

@@ -8,7 +8,8 @@ cortexflow library, CI runners) only reads from SM and stays profile-agnostic.
 Generates a random MinIO admin password on first run, persists it in the
 in-cluster minio-credentials Secret (so MinIO can boot via
 MINIO_ROOT_USER/PASSWORD), and publishes:
-  - AWS_S3_ENDPOINT_URL   = http://<head-tailscale-ip>:30900
+  - S3_ENDPOINT_URL       = http://<head-tailscale-ip>:30900
+  - S3_REGION             = us-east-1 (MinIO ignores it; boto3 needs a value)
   - S3_BUCKET_NAME        = mlflow-artifacts
   - S3_ACCESS_KEY_ID      = <user>
   - S3_SECRET_ACCESS_KEY  = <password>
@@ -44,7 +45,12 @@ _NAMESPACE = "cortexflow"
 _SECRET_NAME = "minio-credentials"
 _USER = "admin"
 _BUCKET = "mlflow-artifacts"
-_SECRET_AWS_S3_ENDPOINT_URL = "AWS_S3_ENDPOINT_URL"
+# MinIO is region-agnostic; boto3's SigV4 still requires a region string,
+# so any well-formed AWS region works. us-east-1 is the standard placeholder
+# in MinIO docs.
+_REGION = "us-east-1"
+_SECRET_S3_ENDPOINT_URL = "S3_ENDPOINT_URL"
+_SECRET_S3_REGION = "S3_REGION"
 _SECRET_S3_BUCKET_NAME = "S3_BUCKET_NAME"
 _SECRET_S3_ACCESS_KEY_ID = "S3_ACCESS_KEY_ID"
 _SECRET_S3_SECRET_ACCESS_KEY = "S3_SECRET_ACCESS_KEY"
@@ -57,7 +63,8 @@ class MinioCredentials(Operator):
         self._publish(deps["node_ip"], password)
 
     def teardown(self, deps: dict) -> None:
-        delete_secret(_SECRET_AWS_S3_ENDPOINT_URL)
+        delete_secret(_SECRET_S3_ENDPOINT_URL)
+        delete_secret(_SECRET_S3_REGION)
         delete_secret(_SECRET_S3_BUCKET_NAME)
         delete_secret(_SECRET_S3_ACCESS_KEY_ID)
         delete_secret(_SECRET_S3_SECRET_ACCESS_KEY)
@@ -109,8 +116,9 @@ class MinioCredentials(Operator):
         util.kubectl("apply", "-f", "-", input=manifest, capture=False)
 
     def _publish(self, node_ip: str, password: str) -> None:
-        log.info("Publishing AWS_S3_ENDPOINT_URL + S3_* keys to SM...")
-        set_secret(_SECRET_AWS_S3_ENDPOINT_URL, util.minio_s3_endpoint_for(node_ip))
+        log.info("Publishing S3_* keys to SM...")
+        set_secret(_SECRET_S3_ENDPOINT_URL, util.minio_s3_endpoint_for(node_ip))
+        set_secret(_SECRET_S3_REGION, _REGION)
         set_secret(_SECRET_S3_BUCKET_NAME, _BUCKET)
         set_secret(_SECRET_S3_ACCESS_KEY_ID, _USER)
         set_secret(_SECRET_S3_SECRET_ACCESS_KEY, password)

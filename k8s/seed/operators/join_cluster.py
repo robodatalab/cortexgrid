@@ -12,7 +12,7 @@ and python3-boto3); they're idempotent, and we may not know which setup path
 was actually used.
 
 Required deps (setup, mode="direct"):   connection, node_ip, head_ip, head_token
-Required deps (setup, mode="deferred"): connection, node_ip, aws_access_key_id, aws_secret_access_key
+Required deps (setup, mode="deferred"): connection, node_ip, sm_access_key_id, sm_secret_access_key, sm_region
 Required deps (teardown):                connection
 """
 
@@ -47,7 +47,11 @@ class JoinCluster(Operator):
             self._direct_join(c, node_ip, deps["head_ip"], deps["head_token"])
         else:
             self._deferred_join(
-                c, node_ip, deps["aws_access_key_id"], deps["aws_secret_access_key"]
+                c,
+                node_ip,
+                deps["sm_access_key_id"],
+                deps["sm_secret_access_key"],
+                deps["sm_region"],
             )
 
     def teardown(self, deps: dict) -> None:
@@ -82,8 +86,9 @@ EOF
         self,
         c,
         node_ip: str,
-        aws_access_key_id: str,
-        aws_secret_access_key: str,
+        sm_access_key_id: str,
+        sm_secret_access_key: str,
+        sm_region: str,
     ) -> None:
         log.info(
             f"Head not seeded yet — dropping systemd timer on {c.host} to join when it appears. "
@@ -132,8 +137,9 @@ EOF
         """)
 
         env_content = (
-            f'AWS_ACCESS_KEY_ID="{aws_access_key_id}"\n'
-            f'AWS_SECRET_ACCESS_KEY="{aws_secret_access_key}"\n'
+            f'SM_ACCESS_KEY_ID="{sm_access_key_id}"\n'
+            f'SM_SECRET_ACCESS_KEY="{sm_secret_access_key}"\n'
+            f'SM_REGION="{sm_region}"\n'
         )
 
         util.write_remote_file(c, env_content, util.JOIN_ENV_PATH, mode="600")

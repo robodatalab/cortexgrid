@@ -13,8 +13,8 @@ spec:
           route53:
             region: eu-west-2
             accessKeyIDSecretRef:
-              name: aws-creds
-              key: AWS_ACCESS_KEY_ID
+              name: route53-creds
+              key: ROUTE53_ACCESS_KEY_ID
             secretAccessKeySecretRef:
-              name: aws-creds
-              key: AWS_SECRET_ACCESS_KEY
+              name: route53-creds
+              key: ROUTE53_SECRET_ACCESS_KEY

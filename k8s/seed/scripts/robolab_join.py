@@ -10,7 +10,7 @@ Runtime deps (installed on the worker by JoinCluster._deferred_join):
   - python3 (pre-installed on Ubuntu)
   - python3-boto3 (apt)
 
-AWS creds are read from /etc/default/robolab-bootstrap (mode 0600), which
+SM creds are read from /etc/default/robolab-bootstrap (mode 0600), which
 JoinCluster._deferred_join writes at setup time.
 """
 
@@ -40,8 +40,16 @@ def _load_env() -> bool:
             continue
         key, value = line.split("=", 1)
         os.environ[key.strip()] = value.strip().strip('"')
-    os.environ.setdefault("AWS_DEFAULT_REGION", "eu-west-2")
     return True
+
+
+def _sm_client():
+    return boto3.client(
+        "secretsmanager",
+        aws_access_key_id=os.environ["SM_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["SM_SECRET_ACCESS_KEY"],
+        region_name=os.environ["SM_REGION"],
+    )
 
 
 def _get_secret(client, name: str) -> str | None:
@@ -67,7 +75,7 @@ def main() -> None:
     if not _load_env():
         sys.exit(0)
 
-    client = boto3.client("secretsmanager")
+    client = _sm_client()
     token = _get_secret(client, K3S_TOKEN_SECRET)
     head_ip = _get_secret(client, CONTROL_PLANE_IP_SECRET)
     if not token or not head_ip:

@@ -1,24 +1,21 @@
-"""PlatformConfig - mirrors .env AWS keys to S3-purposed SM keys.
+"""PlatformConfig - mirrors the .env real-AWS keys into per-purpose SM slots.
 
-The cluster's S3 access uses creds from `robolab/infra/S3_ACCESS_KEY_ID/SECRET`
-- separate from `AWS_ACCESS_KEY_ID/SECRET` which authenticate Secrets Manager
-itself. On the AWS profile the two are functionally identical (S3 IS real AWS,
-SM is real AWS), but they are kept separate so the on-prem profile can swap S3
-creds for MinIO admin without breaking SM access.
+The cluster splits AWS API access into three named identities, each with its
+own SM key prefix and (later) its own env-var namespace:
 
-This operator only handles the AWS profile mirror because that value depends
-on `.env`. Every other SM key is published by whoever owns the value:
+  SM_*       - AWS Secrets Manager access (real AWS on both profiles)
+  ROUTE53_*  - cert-manager Route53 access (real AWS on both profiles)
+  S3_*       - object storage (real AWS on AWS profile, MinIO on on-prem)
 
-  AWS profile
-    S3_BUCKET_NAME, AWS_S3_ENDPOINT_URL  -> terraform/platform/s3
-    MLFLOW_BACKEND_STORE_URI             -> terraform/platform/rds
+This operator runs after EnvSecrets has populated `robolab/infra/SM_*` from
+.env and mirrors that real-AWS value into the ROUTE53_* slot on both profiles,
+plus the S3_* slot on the AWS profile only (on on-prem S3_* are MinIO admin
+and come from MinioCredentials). The mirror means a user can keep just
+SM_ACCESS_KEY_ID/SECRET in .env and still have all three identities
+populated; replacing any SM key value later (e.g. rotating the Route53 user
+separately) does not require re-running this operator.
 
-  On-prem profile
-    S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
-    S3_BUCKET_NAME, AWS_S3_ENDPOINT_URL  -> minio/publish-config Job
-    MLFLOW_BACKEND_STORE_URI             -> postgres/publish-config Job
-
-Required deps (setup): profile, aws_access_key_id, aws_secret_access_key.
+Required deps (setup): profile, sm_access_key_id, sm_secret_access_key.
 """
 
 import logging
@@ -30,24 +27,35 @@ from k8s.seed.pipeline import Operator
 log = logging.getLogger("k8s.seed.operators.platform_config")
 
 
-_SECRET_S3_ACCESS_KEY_ID = "S3_ACCESS_KEY_ID"
-_SECRET_S3_SECRET_ACCESS_KEY = "S3_SECRET_ACCESS_KEY"
+_MIRROR_TARGETS_ALL_PROFILES = [
+    ("ROUTE53_ACCESS_KEY_ID", "ROUTE53_SECRET_ACCESS_KEY"),
+]
+_MIRROR_TARGETS_AWS_PROFILE_ONLY = [
+    ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"),
+]
 
 
 class PlatformConfig(Operator):
     def setup(self, deps: dict) -> None:
-        if deps["profile"] != "aws":
-            # On-prem: the minio + postgres publish-config Jobs handle every
-            # SM key. Nothing for this operator to do.
-            return
-        log.info("Mirroring real-AWS keys to S3_* SM keys...")
-        set_secret(_SECRET_S3_ACCESS_KEY_ID, deps["aws_access_key_id"])
-        set_secret(_SECRET_S3_SECRET_ACCESS_KEY, deps["aws_secret_access_key"])
+        access_key = deps["sm_access_key_id"]
+        secret_key = deps["sm_secret_access_key"]
+        targets = list(_MIRROR_TARGETS_ALL_PROFILES)
+        if deps["profile"] == "aws":
+            targets.extend(_MIRROR_TARGETS_AWS_PROFILE_ONLY)
+        log.info(
+            "Mirroring SM creds to %d additional identity slot(s)...", len(targets)
+        )
+        for access_key_name, secret_key_name in targets:
+            set_secret(access_key_name, access_key)
+            set_secret(secret_key_name, secret_key)
 
     def teardown(self, deps: dict) -> None:
-        # Tolerated if missing (delete_secret is idempotent). On the on-prem
-        # profile these keys may have been written by minio/publish-config
-        # rather than this operator, but deleting on teardown is still
-        # appropriate -- the cluster is going away.
-        delete_secret(_SECRET_S3_ACCESS_KEY_ID)
-        delete_secret(_SECRET_S3_SECRET_ACCESS_KEY)
+        # Idempotent. On on-prem the S3_* keys may have been written by
+        # MinioCredentials rather than this operator, but deleting on teardown
+        # is still appropriate -- the cluster is going away.
+        targets = (
+            _MIRROR_TARGETS_ALL_PROFILES + _MIRROR_TARGETS_AWS_PROFILE_ONLY
+        )
+        for access_key_name, secret_key_name in targets:
+            delete_secret(access_key_name)
+            delete_secret(secret_key_name)

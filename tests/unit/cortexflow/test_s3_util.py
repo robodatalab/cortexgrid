@@ -44,15 +44,14 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://canonical/app/run/output.parquet")
 
+    @patch.dict(os.environ, {"S3_REGION": "eu-west-2"})
     @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.get_aws_region", return_value="eu-west-2")
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
     def test_upload_creates_bucket_when_missing(
         self,
         mock_client_fn: MagicMock,
         _getsize: MagicMock,
-        _region: MagicMock,
         _bucket: MagicMock,
     ) -> None:
         mock_client = MagicMock()

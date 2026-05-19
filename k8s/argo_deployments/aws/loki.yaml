@@ -37,10 +37,10 @@ spec:
               # Loki expands ${VAR} in its config when -config.expand-env=true
               # is passed; the env vars come from the s3-creds Secret reflected
               # into this namespace by the existing reflector pattern.
-              endpoint: "${AWS_S3_ENDPOINT_URL}"
-              region: us-east-2
-              accessKeyId: "${AWS_ACCESS_KEY_ID}"
-              secretAccessKey: "${AWS_SECRET_ACCESS_KEY}"
+              endpoint: "${S3_ENDPOINT_URL}"
+              region: "${S3_REGION}"
+              accessKeyId: "${S3_ACCESS_KEY_ID}"
+              secretAccessKey: "${S3_SECRET_ACCESS_KEY}"
               s3ForcePathStyle: false
           limits_config:
             allow_structured_metadata: true

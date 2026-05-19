@@ -21,22 +21,19 @@ spec:
         - name: ghcr-pull
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexflow-ui-integration:111d788687963ac27e06100bda7e95870020754a
+          image: ghcr.io/robodatalab/cortexflow-ui-integration:1508769c4422119c5d2682664cc1e156ce54491f
           env:
             - name: CORTEXFLOW_UI_URL
               value: "http://$(CORTEXFLOW_UI_FRONTEND_SERVICE_HOST):$(CORTEXFLOW_UI_FRONTEND_SERVICE_PORT)"
+          envFrom:
+            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
+            - secretRef:
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
           volumeMounts:
             - name: test-results
               mountPath: /tmp
-            - name: aws-creds
-              mountPath: /root/.aws
-              readOnly: true
       volumes:
         - name: test-results
           emptyDir: {}
-        - name: aws-creds
-          secret:
-            secretName: aws-creds
-            items:
-              - key: credentials
-                path: credentials

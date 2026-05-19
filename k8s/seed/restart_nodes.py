@@ -124,8 +124,9 @@ def _setup_head(entry: dict) -> None:
                 "workers": workers,
                 "profile": entry["profile"],
                 "github_token": os.environ["GH_TOKEN"],
-                "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
-                "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+                "sm_access_key_id": os.environ["SM_ACCESS_KEY_ID"],
+                "sm_secret_access_key": os.environ["SM_SECRET_ACCESS_KEY"],
+                "sm_region": os.environ["SM_REGION"],
             },
             direction="setup",
             ip=ip,
@@ -148,8 +149,9 @@ def _setup_worker(entry: dict) -> None:
         deps["head_ip"] = get_secret(util.SECRET_CONTROL_PLANE_IP)
         deps["head_token"] = get_secret(util.SECRET_K3S_TOKEN)
     else:
-        deps["aws_access_key_id"] = os.environ["AWS_ACCESS_KEY_ID"]
-        deps["aws_secret_access_key"] = os.environ["AWS_SECRET_ACCESS_KEY"]
+        deps["sm_access_key_id"] = os.environ["SM_ACCESS_KEY_ID"]
+        deps["sm_secret_access_key"] = os.environ["SM_SECRET_ACCESS_KEY"]
+        deps["sm_region"] = os.environ["SM_REGION"]
     with util.connect(user, ip, ssh_pw, sudo_pw) as c:
         deps["connection"] = c
         _run(

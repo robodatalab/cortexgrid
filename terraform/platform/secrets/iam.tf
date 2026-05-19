@@ -175,3 +175,29 @@ resource "aws_secretsmanager_secret_version" "github_actions_role_arn" {
   secret_id     = aws_secretsmanager_secret.github_actions_role_arn.id
   secret_string = aws_iam_role.github_actions.arn
 }
+
+# Regions for the two distinct real-AWS identities used by the cluster:
+# SM_REGION targets AWS Secrets Manager; ROUTE53_REGION targets Route53 for
+# cert-manager's DNS-01 challenge. They share var.aws_region today but are
+# stored as separate SM entries so each can be retargeted without disturbing
+# the other.
+
+resource "aws_secretsmanager_secret" "sm_region" {
+  name                    = "robolab/infra/SM_REGION"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "sm_region" {
+  secret_id     = aws_secretsmanager_secret.sm_region.id
+  secret_string = var.aws_region
+}
+
+resource "aws_secretsmanager_secret" "route53_region" {
+  name                    = "robolab/infra/ROUTE53_REGION"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "route53_region" {
+  secret_id     = aws_secretsmanager_secret.route53_region.id
+  secret_string = var.aws_region
+}

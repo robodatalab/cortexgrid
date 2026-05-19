@@ -1,3 +1,5 @@
+import os
+
 from cortexflow.secrets import get_secret
 from mlflow.tracking import MlflowClient
 
@@ -21,21 +23,16 @@ def get_ray_serve_applications_uri() -> str:
 
 
 def get_s3_endpoint_url() -> str:
-    # SM holds an empty string on the AWS profile (boto3 then uses real S3),
-    # an in-cluster MinIO URL on the on-prem profile. Always written, never absent.
-    return get_secret("AWS_S3_ENDPOINT_URL")
-
-
-def get_aws_region() -> str:
-    # Hardcoded for now; mirrors cortexflow.secrets._SM_REGION. Move to SM
-    # once terraform writes robolab/infra/AWS_REGION.
-    return "eu-west-2"
+    # Sourced from the s3-creds Secret via the S3_ENDPOINT_URL env var.
+    # AWS profile: regional s3.amazonaws.com URL. On-prem: in-cluster MinIO URL.
+    return os.environ["S3_ENDPOINT_URL"]
 
 
 def get_s3_bucket() -> str:
-    # Provisioned by terraform/platform/s3 (aws_s3_bucket.main) on the AWS
-    # profile; created lazily on first upload against on-prem MinIO.
-    return get_secret("S3_BUCKET_NAME")
+    # Sourced from the s3-creds Secret via the S3_BUCKET_NAME env var.
+    # Provisioned by terraform/platform/s3 on AWS; created lazily on first
+    # upload against on-prem MinIO.
+    return os.environ["S3_BUCKET_NAME"]
 
 
 def get_mlflow_run_url(run_id: str) -> str:

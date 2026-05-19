@@ -32,12 +32,12 @@ def build() -> Pipeline:
         #
         # On-prem only because:
         #   - On AWS, terraform/platform/s3 already populates the same SM
-        #     keys (AWS_S3_ENDPOINT_URL = regional public S3 URL, S3_BUCKET_NAME
-        #     = the real S3 bucket) and PlatformConfig mirrors the real-AWS
-        #     keys to S3_ACCESS_KEY_ID/SECRET. Running this operator on AWS
-        #     would clobber those terraform-managed values with values that
-        #     point at a MinIO that isn't even deployed (the minio Argo App
-        #     is excluded from the AWS bootstrap).
+        #     keys (S3_ENDPOINT_URL = regional public S3 URL, S3_REGION,
+        #     S3_BUCKET_NAME = the real S3 bucket) and PlatformConfig mirrors
+        #     the real-AWS keys to S3_ACCESS_KEY_ID/SECRET. Running this
+        #     operator on AWS would clobber those terraform-managed values
+        #     with values that point at a MinIO that isn't even deployed
+        #     (the minio Argo App is excluded from the AWS bootstrap).
         #   - On-prem has no terraform layer; the seed pipeline IS the
         #     infrastructure layer. It's the only place that knows the head's
         #     tailscale IP, which is required to compose a NodePort URL that
