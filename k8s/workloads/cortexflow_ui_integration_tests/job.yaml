@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/part-of: cortexflow-ui
     app.kubernetes.io/component: integration-tests
 spec:
-  backoffLimit: 1
+  backoffLimit: 0
   ttlSecondsAfterFinished: 600
   template:
     spec:
