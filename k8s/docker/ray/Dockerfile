@@ -11,13 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-    --extra-index-url https://download.pytorch.org/whl/cu128 \
     "ray[default,serve]==2.9.3" \
     "smart_open[s3]==7.0.4" \
     mlflow==3.11.1 \
     python-dotenv==1.0.1 \
-    psutil==5.9.8 \
-    torch==2.10.0
+    psutil==5.9.8
 
 FROM python:3.11-slim
 
@@ -27,3 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Torch wheel (CUDA cu128) bundles nvidia-* and triton totaling several GB.
+# Kept in its own RUN layer so the resulting image blob stays separate from
+# the other deps; this avoids hitting per-blob limits in registry caches.
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
+    torch==2.10.0
