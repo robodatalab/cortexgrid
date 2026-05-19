@@ -38,10 +38,13 @@ spec:
             - --num-gpus=1
             - --block
           envFrom:
-            # Real AWS keys for cortexflow.secrets to call AWS Secrets Manager.
-            # S3 access goes through cortexflow.s3_util (explicit SM-fetched creds).
+            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
+            # User code shipped via cortexflow.remote runs in Ray actors here
+            # and uses both.
             - secretRef:
-                name: aws-creds
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
           livenessProbe:
             exec:
               command: ["ray", "status"]

@@ -34,18 +34,34 @@ spec:
               value: "*"
             - name: MLFLOW_SERVER_CORS_ALLOWED_ORIGINS
               value: "*"
-            # mlflow's S3ArtifactRepository reads MLFLOW_S3_ENDPOINT_URL, not
-            # the boto3 standard AWS_S3_ENDPOINT_URL. Alias the same s3-creds
-            # value so both profiles work: regional AWS S3 URL on AWS, the
-            # in-cluster MinIO Service URL on on-prem.
+            # mlflow uses boto3's default chain for artifact uploads and reads
+            # MLFLOW_S3_ENDPOINT_URL for the endpoint. Map the s3-creds S3_*
+            # keys onto the AWS_* env names boto3 expects, plus the mlflow-
+            # specific endpoint var. This is the explicit S3_* -> AWS_* bridge
+            # for a third-party server we can't reconfigure.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: S3_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: S3_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: s3-creds
+                  key: S3_REGION
             - name: MLFLOW_S3_ENDPOINT_URL
               valueFrom:
                 secretKeyRef:
                   name: s3-creds
-                  key: AWS_S3_ENDPOINT_URL
+                  key: S3_ENDPOINT_URL
           envFrom:
-            # S3-purposed AWS_ACCESS_KEY_ID/SECRET, AWS_S3_ENDPOINT_URL, S3_BUCKET_NAME.
-            # On AWS these target real S3; on on-prem they target in-cluster MinIO.
+            # S3_BUCKET_NAME is consumed by the --artifacts-destination flag
+            # below as $(S3_BUCKET_NAME).
             - secretRef:
                 name: s3-creds
             # MLFLOW_BACKEND_STORE_URI composed and stored as a single SM entry by

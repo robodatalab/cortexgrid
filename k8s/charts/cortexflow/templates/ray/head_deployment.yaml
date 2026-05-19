@@ -44,10 +44,12 @@ spec:
           envFrom:
             - secretRef:
                 name: ray-env
-            # Real AWS keys for cortexflow.secrets to call AWS Secrets Manager.
-            # S3 access goes through cortexflow.s3_util (explicit SM-fetched creds).
+            # SM_* for cortexflow.secrets (used by serve-app builders and any
+            # user code the head invokes). S3_* for cortexflow.s3_util.
             - secretRef:
-                name: aws-creds
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
           ports:
             - name: dashboard
               containerPort: 8265

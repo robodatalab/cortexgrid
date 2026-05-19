@@ -137,8 +137,9 @@ def _run_head(
             "workers": workers,
             "profile": args.profile,
             "github_token": os.environ["GH_TOKEN"],
-            "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
-            "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+            "sm_access_key_id": os.environ["SM_ACCESS_KEY_ID"],
+            "sm_secret_access_key": os.environ["SM_SECRET_ACCESS_KEY"],
+            "sm_region": os.environ["SM_REGION"],
         }
         pipeline.setup(deps)
     log.info(
@@ -176,8 +177,9 @@ def _run_worker(
             deps["head_ip"] = head_ip
             deps["head_token"] = head_token
         else:
-            deps["aws_access_key_id"] = os.environ["AWS_ACCESS_KEY_ID"]
-            deps["aws_secret_access_key"] = os.environ["AWS_SECRET_ACCESS_KEY"]
+            deps["sm_access_key_id"] = os.environ["SM_ACCESS_KEY_ID"]
+            deps["sm_secret_access_key"] = os.environ["SM_SECRET_ACCESS_KEY"]
+            deps["sm_region"] = os.environ["SM_REGION"]
         pipeline.setup(deps)
 
     if head_ready:

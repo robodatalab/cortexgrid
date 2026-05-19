@@ -1,12 +1,14 @@
 """S3/MinIO wrappers.
 
-Provides upload/download and a pre-configured boto3 client. AWS or MinIO is
-selected by what is in robolab/infra/AWS_S3_ENDPOINT_URL: empty means real S3,
-non-empty means MinIO at that URL.
+Builds an S3 boto3 client from S3_* env vars: S3_ACCESS_KEY_ID,
+S3_SECRET_ACCESS_KEY, S3_REGION, S3_ENDPOINT_URL. Pods get these from the
+s3-creds Secret. The S3_* namespace is deliberately separate from SM_* (AWS
+Secrets Manager) and ROUTE53_* (cert-manager) so the three identities can
+coexist in the same pod without colliding through boto3's default AWS_* chain.
 
-Credentials come from the standard boto3 chain (AWS env vars in pods,
-~/.aws/credentials on the laptop). All cortexflow config -- bucket name and
-S3 endpoint -- lives in AWS Secrets Manager, never in env vars.
+On the AWS profile S3_ENDPOINT_URL is the regional s3.amazonaws.com URL and
+S3_* are the real AWS keys; on the on-prem profile S3_ENDPOINT_URL is the
+in-cluster MinIO Service URL and S3_* are the MinIO admin creds.
 """
 
 from __future__ import annotations
@@ -17,30 +19,20 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.infra import get_aws_region, get_s3_bucket, get_s3_endpoint_url
-from cortexflow.secrets import get_secret
+from cortexflow.infra import get_s3_bucket, get_s3_endpoint_url
 
 
 def get_s3_client() -> Any:
-    """Return a boto3 S3 client built from SM-stored S3 creds + endpoint.
-
-    S3 access creds (S3_ACCESS_KEY_ID/SECRET in SM) are deliberately separate
-    from the AWS keys that boto3's default chain picks up from env. The env
-    creds (AWS_ACCESS_KEY_ID/SECRET in pod env from the aws-creds Secret) are
-    real AWS keys used only to reach AWS Secrets Manager. The S3 creds are
-    profile-specific: real-AWS on the AWS profile (mirrors AWS_*), MinIO admin
-    on the on-prem profile. Building the client explicitly avoids leaking the
-    AWS-SM keys into S3 calls (which on-prem MinIO would reject).
-    """
+    """Return a boto3 S3 client configured for the cluster's object store."""
     return boto3.client(
         "s3",
-        aws_access_key_id=get_secret("S3_ACCESS_KEY_ID"),
-        aws_secret_access_key=get_secret("S3_SECRET_ACCESS_KEY"),
+        aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
         endpoint_url=get_s3_endpoint_url(),
         # Required: without it boto3 picks the local default region for SigV4,
         # which mismatches the AWS endpoint and produces 301 Moved Permanently
         # against real AWS. MinIO ignores the value.
-        region_name=get_aws_region(),
+        region_name=os.environ["S3_REGION"],
     )
 
 
@@ -57,7 +49,7 @@ def _ensure_bucket(client: Any, bucket: str) -> None:
         # MinIO accepts it too.
         client.create_bucket(
             Bucket=bucket,
-            CreateBucketConfiguration={"LocationConstraint": get_aws_region()},
+            CreateBucketConfiguration={"LocationConstraint": os.environ["S3_REGION"]},
         )
 
 

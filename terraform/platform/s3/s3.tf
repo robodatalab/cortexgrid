@@ -82,11 +82,24 @@ resource "aws_secretsmanager_secret_version" "bucket_name" {
 # cortexflow can read a single SM key regardless of profile (on-prem
 # overwrites it with the in-cluster MinIO URL).
 resource "aws_secretsmanager_secret" "s3_endpoint_url" {
-  name                    = "robolab/infra/AWS_S3_ENDPOINT_URL"
+  name                    = "robolab/infra/S3_ENDPOINT_URL"
   recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "s3_endpoint_url" {
   secret_id     = aws_secretsmanager_secret.s3_endpoint_url.id
   secret_string = "https://s3.${var.aws_region}.amazonaws.com"
+}
+
+# Region for S3 signing. boto3's SigV4 needs the region to match the endpoint
+# host; storing it next to S3_ENDPOINT_URL keeps the pair coherent and lets
+# cortexflow.s3_util pick both up from S3_REGION in the s3-creds Secret.
+resource "aws_secretsmanager_secret" "s3_region" {
+  name                    = "robolab/infra/S3_REGION"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "s3_region" {
+  secret_id     = aws_secretsmanager_secret.s3_region.id
+  secret_string = var.aws_region
 }

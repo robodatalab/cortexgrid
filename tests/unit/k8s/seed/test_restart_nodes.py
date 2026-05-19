@@ -77,8 +77,9 @@ class RestartCallSequenceParityTest(unittest.TestCase):
             os.environ,
             {
                 "GH_TOKEN": "gh-token",
-                "AWS_ACCESS_KEY_ID": "aws-id",
-                "AWS_SECRET_ACCESS_KEY": "aws-key",
+                "SM_ACCESS_KEY_ID": "sm-id",
+                "SM_SECRET_ACCESS_KEY": "sm-key",
+                "SM_REGION": "eu-west-2",
             },
         )
         self._env_patch.start()

@@ -1,25 +1,48 @@
-"""Secrets API — thin wrapper around AWS Secrets Manager."""
+"""Secrets API - thin wrapper around AWS Secrets Manager.
+
+The boto3 client is built explicitly from SM_ACCESS_KEY_ID, SM_SECRET_ACCESS_KEY
+and SM_REGION env vars when present. Pods get those from the sm-creds Secret;
+laptops that haven't exported them fall back to boto3's default credential
+chain (~/.aws/credentials etc.). Keeping the SM creds in their own env-var
+namespace means S3_* and ROUTE53_* identities can coexist in the same pod
+without colliding through the default AWS_* chain.
+"""
 
 from __future__ import annotations
 
+import os
 import time
+from typing import Any
 
 import boto3  # type: ignore
 
 
 _SM_PREFIX = "robolab/infra"
-_SM_REGION = "eu-west-2"
 _CONSISTENCY_TIMEOUT_S = 15.0
 _CONSISTENCY_POLL_S = 0.25
 
 
+def _sm_client() -> Any:
+    access_key = os.environ.get("SM_ACCESS_KEY_ID")
+    secret_key = os.environ.get("SM_SECRET_ACCESS_KEY")
+    region = os.environ.get("SM_REGION")
+    if access_key and secret_key:
+        return boto3.client(
+            "secretsmanager",
+            region_name=region,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
+    return boto3.client("secretsmanager", region_name=region)
+
+
 def get_secret(id: str) -> str:
-    client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    client = _sm_client()
     return client.get_secret_value(SecretId=f"{_SM_PREFIX}/{id}")["SecretString"]
 
 
 def list_secrets() -> list[str]:
-    client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    client = _sm_client()
     ids: list[str] = []
     paginator = client.get_paginator("list_secrets")
     prefix = f"{_SM_PREFIX}/"
@@ -38,7 +61,7 @@ def list_secrets() -> list[str]:
 
 
 def set_secret(id: str, value: str) -> None:
-    client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    client = _sm_client()
     secret_id = f"{_SM_PREFIX}/{id}"
     try:
         client.describe_secret(SecretId=secret_id)
@@ -61,7 +84,7 @@ def set_secret(id: str, value: str) -> None:
 
 def delete_secret(id: str) -> None:
     """Idempotent: already-gone is treated as success, matching HTTP DELETE semantics."""
-    client = boto3.client("secretsmanager", region_name=_SM_REGION)
+    client = _sm_client()
     secret_id = f"{_SM_PREFIX}/{id}"
     try:
         client.delete_secret(SecretId=secret_id, ForceDeleteWithoutRecovery=True)

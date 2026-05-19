@@ -1,6 +1,6 @@
-"""BootstrapSecrets — seeds Argo repo creds + ESO AWS creds into k8s.
+"""BootstrapSecrets — seeds Argo repo creds + ESO SM creds into k8s.
 
-Required deps (setup): github_token, aws_access_key_id, aws_secret_access_key.
+Required deps (setup): github_token, sm_access_key_id, sm_secret_access_key.
 Required deps (teardown): (none — deletion is by name).
 
 Assumes the argocd namespace already exists — that's K3sServer's responsibility
@@ -20,8 +20,8 @@ log = logging.getLogger("k8s.seed.operators.bootstrap_secrets")
 class BootstrapSecrets(Operator):
     def setup(self, deps: dict) -> None:
         github_token = deps["github_token"]
-        aws_access_key_id = deps["aws_access_key_id"]
-        aws_secret_access_key = deps["aws_secret_access_key"]
+        sm_access_key_id = deps["sm_access_key_id"]
+        sm_secret_access_key = deps["sm_secret_access_key"]
 
         log.info("Bootstrap: GitHub repo credentials in argocd namespace...")
         github_secret = textwrap.dedent(f"""\
@@ -41,8 +41,8 @@ class BootstrapSecrets(Operator):
         """)
         util.kubectl("apply", "-f", "-", input=github_secret, capture=False)
 
-        log.info("Seeding AWS bootstrap credentials for ESO...")
-        aws_secret = textwrap.dedent(f"""\
+        log.info("Seeding SM bootstrap credentials for ESO...")
+        sm_bootstrap_secret = textwrap.dedent(f"""\
             apiVersion: v1
             kind: Namespace
             metadata:
@@ -51,14 +51,14 @@ class BootstrapSecrets(Operator):
             apiVersion: v1
             kind: Secret
             metadata:
-              name: aws-bootstrap-creds
+              name: sm-bootstrap-creds
               namespace: external-secrets
             type: Opaque
             stringData:
-              AWS_ACCESS_KEY_ID: "{aws_access_key_id}"
-              AWS_SECRET_ACCESS_KEY: "{aws_secret_access_key}"
+              SM_ACCESS_KEY_ID: "{sm_access_key_id}"
+              SM_SECRET_ACCESS_KEY: "{sm_secret_access_key}"
         """)
-        util.kubectl("apply", "-f", "-", input=aws_secret, capture=False)
+        util.kubectl("apply", "-f", "-", input=sm_bootstrap_secret, capture=False)
 
     def teardown(self, deps: dict) -> None:
         util.kubectl(
