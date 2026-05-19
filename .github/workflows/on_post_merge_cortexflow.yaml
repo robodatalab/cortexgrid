@@ -41,6 +41,7 @@ jobs:
         steps:
             - uses: actions/checkout@v4
             - run: |
+                  trap 'kubectl delete -n cortexflow job/cortexflow-integration-tests --ignore-not-found --wait=false' EXIT
                   kubectl delete -n cortexflow job/cortexflow-integration-tests --ignore-not-found --wait=true
                   kubectl apply -f k8s/workloads/cortexflow_integration_tests/job.yaml
                   until kubectl get pod -n cortexflow -l job-name=cortexflow-integration-tests --no-headers 2>/dev/null | grep -q .; do sleep 1; done
