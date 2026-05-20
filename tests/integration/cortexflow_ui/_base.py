@@ -4,10 +4,13 @@ import os
 import unittest
 
 import cortexflow
+from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
 
 
-UI_URL = os.environ["CORTEXFLOW_UI_URL"]
+def get_test_ui_url() -> str:
+    load_dotenv()
+    return os.environ["CORTEXFLOW_UI_URL"]
 
 
 class UITestCase(unittest.TestCase):

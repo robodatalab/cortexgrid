@@ -173,10 +173,14 @@ class TestRemote(unittest.TestCase):
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         requirements = project_root / "requirements.txt"
         self.assertTrue(requirements.exists())
-        # torch is reached transitively (cortexflow.checkpoint imports it).
-        self.assertIn("torch==2.5", requirements.read_text())
+        contents = requirements.read_text()
+        # mlflow is reached transitively (cortexflow.experiment imports it).
+        self.assertIn("mlflow @", contents)
         # numpy is NOT used by the bundle, so the filter drops it.
-        self.assertNotIn("numpy==1.26", requirements.read_text())
+        self.assertNotIn("numpy==1.26", contents)
+        # torch is baked into the ray image, so the bundler strips it from
+        # runtime_env.pip even when it appears in pip freeze.
+        self.assertNotIn("torch==2.5", contents)
 
     def test_remote_injects_github_token_into_git_urls(self) -> None:
         set_instance(_make_experiment())

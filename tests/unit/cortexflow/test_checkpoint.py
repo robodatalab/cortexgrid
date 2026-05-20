@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import torch
+
 from cortexflow.checkpoint import (
     Checkpoint,
     _checkpoint_prefix,
@@ -162,6 +164,25 @@ class TestCheckpointPrefix(unittest.TestCase):
         ckpt = Checkpoint("test")
         ckpt.x = 1
         self.assertTrue(ckpt)
+
+    def test_save_and_restore_torch_tensor(self) -> None:
+        tensor = torch.tensor([1.0, 2.0, 3.0])
+        with checkpoint() as ckpt:
+            ckpt.weights = tensor
+
+        loaded = resume()
+        assert loaded is not None
+        self.assertTrue(torch.equal(loaded.weights, tensor))
+
+    def test_save_and_restore_torch_state_dict(self) -> None:
+        state = {"w": torch.tensor([[1.0, 2.0]]), "b": torch.tensor([0.5])}
+        with checkpoint() as ckpt:
+            ckpt.state = state
+
+        loaded = resume()
+        assert loaded is not None
+        self.assertTrue(torch.equal(loaded.state["w"], state["w"]))
+        self.assertTrue(torch.equal(loaded.state["b"], state["b"]))
 
     def test_save_and_restore_training_state(self) -> None:
         model = MagicMock()

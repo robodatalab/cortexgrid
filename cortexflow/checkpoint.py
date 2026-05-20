@@ -20,7 +20,6 @@ Usage (resume)::
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import tempfile
@@ -28,7 +27,6 @@ from pathlib import Path
 from typing import Any
 
 import cloudpickle  # type: ignore
-import torch
 from mlflow.tracking import MlflowClient
 
 from cortexflow import s3_util
@@ -38,41 +36,11 @@ log = logging.getLogger(__name__)
 _CORTEXFLOW_JOB_ID: str | None = None
 
 
-def _is_torch_serializable(value: Any) -> bool:
-    """True if the value should be serialized with torch.save."""
-    if isinstance(value, torch.Tensor):
-        return True
-    if isinstance(value, dict) and value:
-        return any(isinstance(v, torch.Tensor) for v in value.values())
-    return False
-
-
-def _serialize(value: Any) -> tuple[bytes, str]:
-    """Serialize a value. Returns (bytes, format_name)."""
-    if _is_torch_serializable(value):
-        buf = io.BytesIO()
-        torch.save(value, buf)
-        return buf.getvalue(), "torch"
-    return cloudpickle.dumps(value), "cloudpickle"
-
-
-def _deserialize(data: bytes, fmt: str) -> Any:
-    """Deserialize bytes using the given format."""
-    if fmt == "torch":
-        buf = io.BytesIO(data)
-        return torch.load(buf, map_location="cpu", weights_only=False)
-    return cloudpickle.loads(data)
-
-
-def _ext_for(fmt: str) -> str:
-    return ".pt" if fmt == "torch" else ".pkl"
-
-
 class Checkpoint:
     """Attribute-based checkpoint persisted via MLflow artifacts.
 
-    Assign any cloudpickle-compatible or torch-serializable value to an
-    attribute and it will be saved when the context manager exits::
+    Assign any cloudpickle-compatible value to an attribute and it will be
+    saved when the context manager exits::
 
         with cortexflow.checkpoint() as ckpt:
             ckpt.epoch = 5
@@ -152,13 +120,12 @@ class Checkpoint:
         manifest: dict[str, Any] = {"attrs": {}}
 
         for name, value in self._data.items():
-            data, fmt = _serialize(value)
-            filename = f"{name}{_ext_for(fmt)}"
-            (tmpdir / filename).write_bytes(data)
+            filename = f"{name}.pkl"
+            (tmpdir / filename).write_bytes(cloudpickle.dumps(value))
             uri = s3_util.upload(
                 str(tmpdir / filename), dest_path=f"{self._prefix}/{filename}"
             )
-            manifest["attrs"][name] = {"uri": uri, "format": fmt}
+            manifest["attrs"][name] = {"uri": uri}
 
         (tmpdir / "manifest.json").write_text(json.dumps(manifest))
         client.log_artifact(
@@ -192,8 +159,7 @@ class Checkpoint:
                 file_path = s3_util.download(
                     src_path, local_path=str(tmpdir / Path(src_path).name)
                 )
-                raw = Path(file_path).read_bytes()
-                data[name] = _deserialize(raw, info["format"])
+                data[name] = cloudpickle.loads(Path(file_path).read_bytes())
             except Exception:
                 log.warning("Failed to load checkpoint attribute %r", name)
                 return None

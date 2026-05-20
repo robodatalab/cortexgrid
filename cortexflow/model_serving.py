@@ -15,6 +15,7 @@ the end-to-end design.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,9 @@ from cortexflow.ray_util import (
 )
 from cortexflow.s3_util import upload
 from cortexflow.secrets import get_secret
+
+
+log = logging.getLogger(__name__)
 
 
 # Torch wheels for the cluster GPUs. Kept in this module rather than shared
@@ -121,6 +125,10 @@ def _build_application_spec(
 
     with stage_bundle(underlying) as bundle:
         pip_list = _pip_requirements_for_serve(set(bundle.external_deps))
+        log.info(
+            "Serve runtime_env.pip for %s/%s/%s (%d entries):\n  %s",
+            family, suffix, run_name, len(pip_list), "\n  ".join(pip_list),
+        )
         with tempfile.TemporaryDirectory() as tmp:
             zip_base = Path(tmp) / f"{family}__{suffix}"
             shutil.make_archive(
