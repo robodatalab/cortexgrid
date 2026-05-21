@@ -624,7 +624,6 @@ dependencies = [
     { name = "ray", extra = ["default"] },
     { name = "requests" },
     { name = "setuptools" },
-    { name = "torch" },
     { name = "tqdm" },
 ]
 
@@ -637,6 +636,9 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "types-requests" },
     { name = "types-tqdm" },
+]
+test-torch = [
+    { name = "torch" },
 ]
 ui = [
     { name = "fastapi" },
@@ -662,7 +664,6 @@ requires-dist = [
     { name = "ray", extras = ["default"], specifier = ">=2.9,<3" },
     { name = "requests", specifier = ">=2.31" },
     { name = "setuptools", specifier = ">=82.0.1" },
-    { name = "torch", specifier = ">=2.0.0" },
     { name = "tqdm", specifier = ">=4.60" },
 ]
 
@@ -676,6 +677,7 @@ dev = [
     { name = "types-requests", specifier = ">=2.33.0.20260408" },
     { name = "types-tqdm", specifier = ">=4.67.3.20260408" },
 ]
+test-torch = [{ name = "torch", specifier = ">=2.0.0" }]
 ui = [
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "kubernetes", specifier = ">=31,<32" },

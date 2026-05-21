@@ -103,7 +103,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv run python -m unittest discover -s tests/unit/cortexflow -v
+      - run: uv run --group test-torch python -m unittest discover -s tests/unit/cortexflow -v
 
   bump-cortexflow-version:
     needs: test_cortexflow
