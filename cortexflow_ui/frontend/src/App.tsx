@@ -32,6 +32,8 @@ type ExperimentMeta = {
 type PendingDelete =
   | { kind: 'experiment'; experiment_name: string }
   | { kind: 'run'; run_id: string; run_name: string }
+  | { kind: 'model'; model: Model }
+  | { kind: 'model-family'; family: string }
 
 function App() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
@@ -56,15 +58,24 @@ function App() {
     (r) => r.run_name,
   )
 
+  function deleteUrl(target: PendingDelete): string {
+    switch (target.kind) {
+      case 'experiment':
+        return `/api/experiments/${encodeURIComponent(target.experiment_name)}`
+      case 'run':
+        return `/api/runs/${encodeURIComponent(target.run_id)}`
+      case 'model':
+        return `/api/models/${encodeURIComponent(target.model.family)}/${encodeURIComponent(target.model.suffix)}/${encodeURIComponent(target.model.run_name)}`
+      case 'model-family':
+        return `/api/models/${encodeURIComponent(target.family)}`
+    }
+  }
+
   async function handleConfirmDelete() {
     if (pendingDelete === null) return
     const target = pendingDelete
     setPendingDelete(null)
-    const url =
-      target.kind === 'experiment'
-        ? `/api/experiments/${encodeURIComponent(target.experiment_name)}`
-        : `/api/runs/${encodeURIComponent(target.run_id)}`
-    const res = await fetch(url, { method: 'DELETE' })
+    const res = await fetch(deleteUrl(target), { method: 'DELETE' })
     if (!res.ok) {
       alert(`Delete failed: HTTP ${res.status}\n${await res.text()}`)
       return
@@ -77,13 +88,28 @@ function App() {
       selection.run_id === target.run_id
     ) {
       setSelection(null)
+    } else if (target.kind === 'model' && modelSelection?.id === target.model.id) {
+      setModelSelection(null)
+    } else if (
+      target.kind === 'model-family' &&
+      modelSelection &&
+      modelsById[modelSelection.id]?.family === target.family
+    ) {
+      setModelSelection(null)
     }
   }
 
   function pendingDeleteMessage(target: PendingDelete): string {
-    return target.kind === 'experiment'
-      ? `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
-      : `Delete run "${target.run_name}"? This cannot be undone.`
+    switch (target.kind) {
+      case 'experiment':
+        return `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
+      case 'run':
+        return `Delete run "${target.run_name}"? This cannot be undone.`
+      case 'model':
+        return `Delete model "${target.model.family}/${target.model.suffix}" from run "${target.model.run_name}"? This cannot be undone.`
+      case 'model-family':
+        return `Delete every model in family "${target.family}"? This cannot be undone.`
+    }
   }
 
   const experimentNames = useMemo(
@@ -144,6 +170,12 @@ function App() {
                     models={models}
                     selection={modelSelection}
                     onSelect={setModelSelection}
+                    onDeleteModel={(model) =>
+                      setPendingDelete({ kind: 'model', model })
+                    }
+                    onDeleteFamily={(family) =>
+                      setPendingDelete({ kind: 'model-family', family })
+                    }
                   />
                 </LayoutPane>
               </Allotment.Pane>

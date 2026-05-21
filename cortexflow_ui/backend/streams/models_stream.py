@@ -30,14 +30,14 @@ class Model:
     size_bytes: int
 
 
-def _model_id(family: str, suffix: str, run_name: str) -> ModelId:
+def model_id(family: str, suffix: str, run_name: str) -> ModelId:
     return f"{family}/{suffix}/{run_name}"
 
 
 def poll_models(_: None) -> dict[ModelId, Model]:
     out: dict[ModelId, Model] = {}
     for m in list_models():
-        mid = _model_id(m.family, m.suffix, m.run_name)
+        mid = model_id(m.family, m.suffix, m.run_name)
         out[mid] = Model(
             id=mid,
             family=m.family,

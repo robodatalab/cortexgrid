@@ -14,6 +14,7 @@ from cortexflow.experiment import (
 )
 from cortexflow.infra import get_ray_job_server_uri
 from cortexflow.jobs import stop_experiment_run_jobs
+from cortexflow.model_storage import delete_model
 from cortexflow.ray_util import get_ray_logs
 from cortexflow.secrets import (
     delete_secret,
@@ -148,6 +149,29 @@ async def models_stream_endpoint(ws: WebSocket) -> None:
         ws,
         models_stream.META_TOPIC,
     )
+
+
+@app.delete("/api/models/{family}/{suffix}/{run_name}")
+async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str]:
+    delete_model(family, suffix, run_name)
+    await models_stream.models_refresher.remove(
+        models_stream.META_TOPIC,
+        models_stream.model_id(family, suffix, run_name),
+    )
+    return {"status": "ok"}
+
+
+@app.delete("/api/models/{family}")
+async def model_family_delete(family: str) -> dict[str, str]:
+    versions = list(models_stream.models_cache.get(models_stream.META_TOPIC).values())
+    for m in versions:
+        if m.family != family:
+            continue
+        delete_model(m.family, m.suffix, m.run_name)
+        await models_stream.models_refresher.remove(
+            models_stream.META_TOPIC, m.id
+        )
+    return {"status": "ok"}
 
 
 @app.websocket("/api/experiments/{experiment_name}/runs/stream")

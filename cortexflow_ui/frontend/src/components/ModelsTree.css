@@ -78,3 +78,23 @@
 .models-tree__drawer .models-tree__row {
     padding-left: 12px;
 }
+
+.models-tree__delete {
+    display: none;
+    margin-left: auto;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: #444;
+    align-items: center;
+    justify-content: center;
+}
+
+.models-tree__row:hover .models-tree__delete {
+    display: inline-flex;
+}
+
+.models-tree__delete:hover {
+    color: #000;
+}
