@@ -81,6 +81,19 @@ class TestServingStorage(unittest.TestCase):
             any(_matches(m, "ft-fake", "instruct", self.run_name) for m in models)
         )
 
+    def test_save_stamps_size_bytes_matching_uploaded_files(self) -> None:
+        weights = _make_weights_dir()
+        expected = sum(
+            p.stat().st_size for p in weights.rglob("*") if p.is_file()
+        )
+        saved = cortexflow.save_model(weights, suffix="instruct", family="ft-fake")
+        self.assertEqual(saved.size_bytes, expected)
+        listed = next(
+            m for m in cortexflow.list_models()
+            if _matches(m, "ft-fake", "instruct", self.run_name)
+        )
+        self.assertEqual(listed.size_bytes, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

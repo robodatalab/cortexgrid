@@ -13,7 +13,6 @@ dependencies = [
     "haikunator>=2.1.0",
     "pip>=23.0",
     "pydantic-settings>=2.13.1",
-    "torch>=2.0.0",
     "fabric>=3.2.3",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
@@ -45,4 +44,7 @@ ui = [
     "pydantic-settings>=2.6,<3",
     "kubernetes>=31,<32",
     "psycopg[binary]>=3.2",
+]
+test-torch = [
+    "torch>=2.0.0",
 ]

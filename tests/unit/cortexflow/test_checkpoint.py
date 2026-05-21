@@ -8,13 +8,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import torch
+try:
+    import torch
+
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 from cortexflow.checkpoint import (
     Checkpoint,
     _checkpoint_prefix,
     checkpoint,
-    get_cortexflow_job_id,
     resume,
     set_cortexflow_job_id,
 )
@@ -34,7 +38,9 @@ class FakeMLflow:
     def __init__(self) -> None:
         self.root = Path(tempfile.mkdtemp())
 
-    def log_artifact(self, run_id: str, local_path: str, artifact_path: str = "") -> None:
+    def log_artifact(
+        self, run_id: str, local_path: str, artifact_path: str = ""
+    ) -> None:
         dest = self.root / artifact_path
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copy2(local_path, dest / Path(local_path).name)
@@ -77,7 +83,6 @@ class FakeS3:
 
 
 class TestCheckpointPrefix(unittest.TestCase):
-    
     def setUp(self) -> None:
         clear_instance()
         set_instance(_make_experiment())
@@ -85,7 +90,10 @@ class TestCheckpointPrefix(unittest.TestCase):
         self.fake_s3 = FakeS3()
         patchers = [
             patch("cortexflow.checkpoint.MlflowClient", return_value=self.fake_mlflow),
-            patch("cortexflow.checkpoint.get_mlflow_tracking_uri", return_value="http://test:5000"),
+            patch(
+                "cortexflow.checkpoint.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
             patch("cortexflow.checkpoint.s3_util", self.fake_s3),
         ]
         for p in patchers:
@@ -128,7 +136,7 @@ class TestCheckpointPrefix(unittest.TestCase):
         loaded = resume()
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded.epoch if loaded else -1, 5)
-        self.assertEqual(loaded.lr if loaded else -1., 0.001)
+        self.assertEqual(loaded.lr if loaded else -1.0, 0.001)
 
     def test_load_returns_none_when_no_checkpoint(self) -> None:
         loaded = resume()
@@ -165,6 +173,7 @@ class TestCheckpointPrefix(unittest.TestCase):
         ckpt.x = 1
         self.assertTrue(ckpt)
 
+    @unittest.skipUnless(HAS_TORCH, "torch not installed")
     def test_save_and_restore_torch_tensor(self) -> None:
         tensor = torch.tensor([1.0, 2.0, 3.0])
         with checkpoint() as ckpt:
@@ -174,6 +183,7 @@ class TestCheckpointPrefix(unittest.TestCase):
         assert loaded is not None
         self.assertTrue(torch.equal(loaded.weights, tensor))
 
+    @unittest.skipUnless(HAS_TORCH, "torch not installed")
     def test_save_and_restore_torch_state_dict(self) -> None:
         state = {"w": torch.tensor([[1.0, 2.0]]), "b": torch.tensor([0.5])}
         with checkpoint() as ckpt:

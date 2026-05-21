@@ -1,0 +1,100 @@
+.models-tree {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.models-tree__title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 8px;
+    font-size: var(--font-lg);
+    font-weight: 500;
+    color: #000;
+    flex: 0 0 auto;
+}
+
+.models-tree__list {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.models-tree__status {
+    padding: 8px 16px;
+    font-size: var(--font-md);
+    color: #666;
+}
+
+.models-tree__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 8px 16px;
+    font-size: var(--font-md);
+    color: #000;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.models-tree__icon {
+    flex: 0 0 auto;
+}
+
+.models-tree__label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.models-tree__row:hover {
+    background: #f0f0f0;
+}
+
+.models-tree__row--ancestor {
+    border: 1px dashed #000;
+}
+
+.models-tree__row--leaf {
+    background: #dde7f1;
+}
+
+.models-tree__row--leaf:hover {
+    background: #cfdbe8;
+}
+
+.models-tree__drawer {
+    margin: 4px 8px 8px 24px;
+    padding: 6px 0;
+    border-left: 2px solid #d0d0d0;
+    background: #fafafa;
+}
+
+.models-tree__drawer .models-tree__row {
+    padding-left: 12px;
+}
+
+.models-tree__delete {
+    display: none;
+    margin-left: auto;
+    background: none;
+    border: none;
+    padding: 2px;
+    cursor: pointer;
+    color: #444;
+    align-items: center;
+    justify-content: center;
+}
+
+.models-tree__row:hover .models-tree__delete {
+    display: inline-flex;
+}
+
+.models-tree__delete:hover {
+    color: #000;
+}

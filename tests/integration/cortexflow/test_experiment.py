@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 import cortexflow
+from cortexflow.experiment import get_experiment_by_run_name
 from parameterized import parameterized  # type: ignore
 
 from tests.integration.cortexflow._ray_run import (
@@ -72,3 +73,30 @@ class TestExperiment(unittest.TestCase):
             [(p["step"], p["value"]) for p in points],
             [(0, 1.0), (1, 0.5), (2, 0.25)],
         )
+
+    def test_get_experiment_by_run_name_returns_matching_pair(self) -> None:
+        name = experiment_name(self)
+        self.addCleanup(cortexflow.delete_experiment, name)
+        exp = cortexflow.Experiment.init(name)
+        resolved = get_experiment_by_run_name(exp.run_name())
+        self.assertEqual(resolved.experiment_name, name)
+        self.assertEqual(resolved.run_id, exp.run_id)
+
+    def test_get_experiment_by_run_name_raises_on_unknown_name(self) -> None:
+        with self.assertRaises(ValueError):
+            get_experiment_by_run_name("nonexistent-run-name-zzz")
+
+    def test_get_experiment_by_run_name_picks_correct_experiment_when_multiple_exist(
+        self,
+    ) -> None:
+        name_a = experiment_name(self) + "-a"
+        name_b = experiment_name(self) + "-b"
+        self.addCleanup(cortexflow.delete_experiment, name_a)
+        self.addCleanup(cortexflow.delete_experiment, name_b)
+        exp_a = cortexflow.Experiment.init(name_a)
+        run_name_a = exp_a.run_name()
+        cortexflow.Experiment.close()
+        cortexflow.Experiment.init(name_b)
+        resolved = get_experiment_by_run_name(run_name_a)
+        self.assertEqual(resolved.experiment_name, name_a)
+        self.assertEqual(resolved.run_id, exp_a.run_id)

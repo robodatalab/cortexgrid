@@ -10,9 +10,13 @@ import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
 import type { Job } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
-import { InfraStatusIndicator } from './components/InfraStatusIndicator'
 import { InfraDashboard } from './components/InfraDashboard'
 import { SecretsDashboard } from './components/SecretsDashboard'
+import { IconRail } from './components/IconRail'
+import type { RailView } from './components/IconRail'
+import { ModelsTree } from './components/ModelsTree'
+import type { Model, ModelSelection } from './components/ModelsTree'
+import { ModelDashboard } from './components/ModelDashboard'
 import { useStreamList } from './useStreamList'
 
 type Dashboard = {
@@ -25,25 +29,26 @@ type ExperimentMeta = {
   created_at_ms: number | null
 }
 
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'ready'; dashboards: Dashboard[] }
-  | { status: 'error'; message: string }
-
 type PendingDelete =
   | { kind: 'experiment'; experiment_name: string }
   | { kind: 'run'; run_id: string; run_name: string }
+  | { kind: 'model'; model: Model }
+  | { kind: 'model-family'; family: string }
 
 function App() {
-  const [state, setState] = useState<LoadState>({ status: 'loading' })
+  const [dashboards, setDashboards] = useState<Dashboard[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
-  const [view, setView] = useState<'experiments' | 'infra' | 'secrets'>('experiments')
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null)
+  const [view, setView] = useState<RailView>('experiments')
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
 
   const experimentsByName = useStreamList<ExperimentMeta>(
     '/api/experiments/meta/stream',
     (e) => e.name,
   )
+
+  const modelsById = useStreamList<Model>('/api/models/stream', (m) => m.id)
+  const models = useMemo(() => Object.values(modelsById), [modelsById])
 
   const selectedExperimentName = selection?.experiment_name ?? null
   const runsByName = useStreamList<ExperimentRun>(
@@ -53,15 +58,24 @@ function App() {
     (r) => r.run_name,
   )
 
+  function deleteUrl(target: PendingDelete): string {
+    switch (target.kind) {
+      case 'experiment':
+        return `/api/experiments/${encodeURIComponent(target.experiment_name)}`
+      case 'run':
+        return `/api/runs/${encodeURIComponent(target.run_id)}`
+      case 'model':
+        return `/api/models/${encodeURIComponent(target.model.family)}/${encodeURIComponent(target.model.suffix)}/${encodeURIComponent(target.model.run_name)}`
+      case 'model-family':
+        return `/api/models/${encodeURIComponent(target.family)}`
+    }
+  }
+
   async function handleConfirmDelete() {
     if (pendingDelete === null) return
     const target = pendingDelete
     setPendingDelete(null)
-    const url =
-      target.kind === 'experiment'
-        ? `/api/experiments/${encodeURIComponent(target.experiment_name)}`
-        : `/api/runs/${encodeURIComponent(target.run_id)}`
-    const res = await fetch(url, { method: 'DELETE' })
+    const res = await fetch(deleteUrl(target), { method: 'DELETE' })
     if (!res.ok) {
       alert(`Delete failed: HTTP ${res.status}\n${await res.text()}`)
       return
@@ -74,13 +88,28 @@ function App() {
       selection.run_id === target.run_id
     ) {
       setSelection(null)
+    } else if (target.kind === 'model' && modelSelection?.id === target.model.id) {
+      setModelSelection(null)
+    } else if (
+      target.kind === 'model-family' &&
+      modelSelection &&
+      modelsById[modelSelection.id]?.family === target.family
+    ) {
+      setModelSelection(null)
     }
   }
 
   function pendingDeleteMessage(target: PendingDelete): string {
-    return target.kind === 'experiment'
-      ? `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
-      : `Delete run "${target.run_name}"? This cannot be undone.`
+    switch (target.kind) {
+      case 'experiment':
+        return `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
+      case 'run':
+        return `Delete run "${target.run_name}"? This cannot be undone.`
+      case 'model':
+        return `Delete model "${target.model.family}/${target.model.suffix}" from run "${target.model.run_name}"? This cannot be undone.`
+      case 'model-family':
+        return `Delete every model in family "${target.family}"? This cannot be undone.`
+    }
   }
 
   const experimentNames = useMemo(
@@ -106,6 +135,37 @@ function App() {
   )
   const activeRunJobs = activeRunId ? Object.values(activeRunJobsMap) : null
 
+  const selectedModel = modelSelection
+    ? (modelsById[modelSelection.id] ?? null)
+    : null
+
+  async function navigateToRun(runName: string) {
+    const res = await fetch(
+      `/api/runs/by-name/${encodeURIComponent(runName)}`,
+    )
+    if (!res.ok) {
+      alert(`Could not find run "${runName}": HTTP ${res.status}`)
+      return
+    }
+    const r = (await res.json()) as {
+      experiment_name: string
+      run_id: string
+      run_name: string
+    }
+    setSelection({
+      kind: 'run',
+      experiment_name: r.experiment_name,
+      run_id: r.run_id,
+      run_name: r.run_name,
+    })
+    setView('experiments')
+  }
+
+  function navigateToModel(modelId: string) {
+    setModelSelection({ kind: 'model', id: modelId })
+    setView('models')
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     fetch('/api/dashboards', { signal: controller.signal })
@@ -113,111 +173,101 @@ function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json() as Promise<Dashboard[]>
       })
-      .then((dashboards) => setState({ status: 'ready', dashboards }))
+      .then((d) => setDashboards(d))
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return
-        setState({
-          status: 'error',
-          message: err instanceof Error ? err.message : String(err),
-        })
       })
     return () => controller.abort()
   }, [])
 
   return (
     <>
-      <header className="navbar">
-        <button
-          type="button"
-          className="navbar__title"
-          onClick={() => setView('experiments')}
-        >
-          cortexflow
-        </button>
-        <nav className="navbar__links" aria-label="Dashboards">
-          {state.status === 'loading' && (
-            <span className="navbar__status">Loading...</span>
-          )}
-          {state.status === 'error' && (
-            <span className="navbar__status navbar__status--error">
-              Failed to load dashboards: {state.message}
-            </span>
-          )}
-          {state.status === 'ready' &&
-            state.dashboards.map((d) => (
-              <a
-                key={d.id}
-                className="navbar__link"
-                href={d.url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {d.id}
-              </a>
-            ))}
-          <button
-            type="button"
-            className="navbar__link"
-            onClick={() => setView(view === 'secrets' ? 'experiments' : 'secrets')}
-          >
-            secrets
-          </button>
-          <InfraStatusIndicator
-            onClick={() => setView(view === 'infra' ? 'experiments' : 'infra')}
-          />
-        </nav>
-      </header>
       <div className="layout">
-        {view === 'infra' ? (
-          <InfraDashboard />
-        ) : view === 'secrets' ? (
-          <SecretsDashboard />
-        ) : (
-          <Allotment>
-            <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
-              <LayoutPane>
-                <ExperimentTree
-                  experimentNames={experimentNames}
-                  runsByExperiment={runsByExperiment}
-                  selection={selection}
-                  onSelect={setSelection}
-                  onDeleteExperiment={(experiment_name) =>
-                    setPendingDelete({ kind: 'experiment', experiment_name })
-                  }
-                  onDeleteRun={(run_id, run_name) =>
-                    setPendingDelete({ kind: 'run', run_id, run_name })
-                  }
-                />
-              </LayoutPane>
-            </Allotment.Pane>
-            <Allotment.Pane>
-              <LayoutPane>
-                {selection?.kind === 'experiment' ? (
-                  <ExperimentDashboard
-                    experimentName={selection.experiment_name}
-                    createdAtMs={
-                      experimentsByName[selection.experiment_name]
-                        ?.created_at_ms ?? null
+        <IconRail view={view} onSelect={setView} dashboards={dashboards} />
+        <div className="layout__main">
+          {view === 'infra' ? (
+            <InfraDashboard />
+          ) : view === 'secrets' ? (
+            <SecretsDashboard />
+          ) : view === 'models' ? (
+            <Allotment>
+              <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
+                <LayoutPane>
+                  <ModelsTree
+                    models={models}
+                    selection={modelSelection}
+                    onSelect={setModelSelection}
+                    onDeleteModel={(model) =>
+                      setPendingDelete({ kind: 'model', model })
+                    }
+                    onDeleteFamily={(family) =>
+                      setPendingDelete({ kind: 'model-family', family })
                     }
                   />
-                ) : selection?.kind === 'run' ? (
-                  <RunDashboard
-                    runId={selection.run_id}
-                    runName={selection.run_name}
-                    experimentName={selection.experiment_name}
-                    jobs={activeRunJobs}
-                    startedAtMs={runsByName[selection.run_name]?.started_at_ms ?? null}
-                    endedAtMs={runsByName[selection.run_name]?.ended_at_ms ?? null}
+                </LayoutPane>
+              </Allotment.Pane>
+              <Allotment.Pane>
+                <LayoutPane>
+                  {selectedModel ? (
+                    <ModelDashboard
+                      model={selectedModel}
+                      onNavigateToRun={navigateToRun}
+                    />
+                  ) : (
+                    <main className="main" />
+                  )}
+                </LayoutPane>
+              </Allotment.Pane>
+            </Allotment>
+          ) : (
+            <Allotment>
+              <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
+                <LayoutPane>
+                  <ExperimentTree
+                    experimentNames={experimentNames}
+                    runsByExperiment={runsByExperiment}
+                    selection={selection}
+                    onSelect={setSelection}
+                    onDeleteExperiment={(experiment_name) =>
+                      setPendingDelete({ kind: 'experiment', experiment_name })
+                    }
+                    onDeleteRun={(run_id, run_name) =>
+                      setPendingDelete({ kind: 'run', run_id, run_name })
+                    }
                   />
-                ) : selection?.kind === 'job' ? (
-                  <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
-                ) : (
-                  <main className="main" />
-                )}
-              </LayoutPane>
-            </Allotment.Pane>
-          </Allotment>
-        )}
+                </LayoutPane>
+              </Allotment.Pane>
+              <Allotment.Pane>
+                <LayoutPane>
+                  {selection?.kind === 'experiment' ? (
+                    <ExperimentDashboard
+                      experimentName={selection.experiment_name}
+                      createdAtMs={
+                        experimentsByName[selection.experiment_name]
+                          ?.created_at_ms ?? null
+                      }
+                    />
+                  ) : selection?.kind === 'run' ? (
+                    <RunDashboard
+                      runId={selection.run_id}
+                      runName={selection.run_name}
+                      experimentName={selection.experiment_name}
+                      jobs={activeRunJobs}
+                      startedAtMs={runsByName[selection.run_name]?.started_at_ms ?? null}
+                      endedAtMs={runsByName[selection.run_name]?.ended_at_ms ?? null}
+                      models={models}
+                      onNavigateToModel={navigateToModel}
+                    />
+                  ) : selection?.kind === 'job' ? (
+                    <JobDashboard runId={selection.run_id} jobId={selection.job_id} />
+                  ) : (
+                    <main className="main" />
+                  )}
+                </LayoutPane>
+              </Allotment.Pane>
+            </Allotment>
+          )}
+        </div>
       </div>
       {pendingDelete !== null && (
         <ConfirmModal

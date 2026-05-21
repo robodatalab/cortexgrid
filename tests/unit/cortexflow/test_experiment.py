@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.experiment import Experiment, set_instance
+from cortexflow.experiment import (
+    Experiment,
+    get_experiment_by_run_name,
+    set_instance,
+)
 
 
 class TestExperiment(unittest.TestCase):
@@ -53,6 +57,40 @@ class TestExperiment(unittest.TestCase):
         Experiment.from_experiment("my-exp", "run-xyz")
         with self.assertRaises(ValueError):
             Experiment.from_experiment("other-exp", "other-run")
+
+    def test_get_experiment_by_run_name_returns_matching_experiment(self) -> None:
+        self.fake_mlflow.search_experiments.return_value = [
+            MagicMock(experiment_id="e1"),
+            MagicMock(experiment_id="e2"),
+        ]
+        self.fake_mlflow.search_runs.return_value = [
+            MagicMock(info=MagicMock(experiment_id="e2", run_id="r-7")),
+        ]
+        self.fake_mlflow.get_experiment.return_value = MagicMock(name=None)
+        self.fake_mlflow.get_experiment.return_value.name = "trainers"
+
+        result = get_experiment_by_run_name("boogey-46")
+
+        self.fake_mlflow.search_runs.assert_called_once_with(
+            experiment_ids=["e1", "e2"],
+            filter_string="attributes.run_name = 'boogey-46'",
+            max_results=1,
+        )
+        self.fake_mlflow.get_experiment.assert_called_once_with("e2")
+        self.assertEqual(result, Experiment("trainers", "r-7"))
+
+    def test_get_experiment_by_run_name_raises_when_no_runs_match(self) -> None:
+        self.fake_mlflow.search_experiments.return_value = [
+            MagicMock(experiment_id="e1"),
+        ]
+        self.fake_mlflow.search_runs.return_value = []
+        with self.assertRaises(ValueError):
+            get_experiment_by_run_name("missing")
+
+    def test_get_experiment_by_run_name_raises_when_no_experiments_exist(self) -> None:
+        self.fake_mlflow.search_experiments.return_value = []
+        with self.assertRaises(ValueError):
+            get_experiment_by_run_name("anything")
 
     def test_get_jobs_lists_cortexflow_job_ids(self) -> None:
         self.fake_mlflow.list_artifacts.return_value = [

@@ -164,7 +164,12 @@ def _seed_version(
         version="1",
         source=f"s3://b/models/{run_name}/{family}/{suffix}/weights/",
         run_id=run_id,
-        tags={"family": family, "suffix": suffix, "run_name": run_name},
+        tags={
+            "family": family,
+            "suffix": suffix,
+            "run_name": run_name,
+            "size_bytes": "0",
+        },
     )
     mlflow.versions.append(v)
     return v
@@ -232,6 +237,22 @@ class TestSaveModel(unittest.TestCase):
         self.assertEqual(v.tags["family"], "Qwen2")
         self.assertEqual(v.tags["suffix"], "instruct")
         self.assertEqual(v.tags["run_name"], "boogey-46")
+
+    def test_stamps_size_bytes_tag_from_uploaded_files(self) -> None:
+        save_model(
+            _make_weights_dir(), "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+        v = self.mlflow.versions[0]
+        # _make_weights_dir writes '{"x": 1}' (8 bytes) + b"weights" (7 bytes)
+        self.assertEqual(v.tags["size_bytes"], "15")
+
+    def test_returns_savedmodel_with_size_bytes(self) -> None:
+        result = save_model(
+            _make_weights_dir(), "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+        self.assertEqual(result.size_bytes, 15)
 
 
 class TestLoadModel(unittest.TestCase):

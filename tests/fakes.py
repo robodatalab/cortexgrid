@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
+from mlflow.exceptions import MlflowException
+
 
 @dataclass
 class FakeS3:
@@ -91,40 +93,71 @@ class FakeArtifact:
 
 
 @dataclass
+class FakeMlflowModelVersion:
+    name: str
+    version: str
+    source: str | None
+    run_id: str
+    tags: dict[str, str] = field(default_factory=dict)
+    creation_timestamp: int = 1700000000000
+
+
+@dataclass
 class FakeMlflowClient:
     """Tracks soft-delete state via lifecycle_stage like real mlflow does."""
 
     experiments: list[FakeMlflowExperiment] = field(default_factory=list)
     runs: list[FakeMlflowRun] = field(default_factory=list)
     artifacts: dict[str, list[FakeArtifact]] = field(default_factory=dict)
+    model_versions: list[FakeMlflowModelVersion] = field(default_factory=list)
+    registered_models: set[str] = field(default_factory=set)
 
     def __init__(self, *, tracking_uri: str = "", **_: Any) -> None:
         self.experiments = []
         self.runs = []
         self.artifacts = {}
+        self.model_versions = []
+        self.registered_models = set()
+        self._next_version = 1
 
     def seed(
         self,
         experiments: list[FakeMlflowExperiment] | None = None,
         runs: list[FakeMlflowRun] | None = None,
         artifacts: dict[str, list[FakeArtifact]] | None = None,
+        model_versions: list[FakeMlflowModelVersion] | None = None,
     ) -> "FakeMlflowClient":
         self.experiments = list(experiments or [])
         self.runs = list(runs or [])
         self.artifacts = dict(artifacts or {})
+        self.model_versions = list(model_versions or [])
+        self.registered_models = {v.name for v in self.model_versions}
         return self
 
     def search_experiments(self, **_: Any) -> list[FakeMlflowExperiment]:
         return [e for e in self.experiments if e.lifecycle_stage == "active"]
 
     def search_runs(
-        self, experiment_ids: list[str], **_: Any
+        self,
+        experiment_ids: list[str],
+        filter_string: str = "",
+        **_: Any,
     ) -> list[FakeMlflowRun]:
-        return [
+        result = [
             r
             for r in self.runs
             if r.experiment_id in experiment_ids and r.lifecycle_stage == "active"
         ]
+        if "attributes.run_name = '" in filter_string:
+            wanted = filter_string.split("attributes.run_name = '")[1].split("'")[0]
+            result = [r for r in result if r.run_name == wanted]
+        return result
+
+    def get_experiment(self, experiment_id: str) -> FakeMlflowExperiment:
+        for e in self.experiments:
+            if e.experiment_id == experiment_id:
+                return e
+        raise KeyError(experiment_id)
 
     def list_artifacts(self, run_id: str, path: str = "") -> list[FakeArtifact]:
         all_for_run = self.artifacts.get(run_id, [])
@@ -158,11 +191,55 @@ class FakeMlflowClient:
                 return
         raise KeyError(experiment_id)
 
-    def search_model_versions(self, filter_string: str = "") -> list[Any]:
-        return []
+    def search_model_versions(
+        self, filter_string: str = ""
+    ) -> list[FakeMlflowModelVersion]:
+        result = list(self.model_versions)
+        if "name='" in filter_string:
+            n = filter_string.split("name='")[1].split("'")[0]
+            result = [v for v in result if v.name == n]
+        if "tags.run_name='" in filter_string:
+            rn = filter_string.split("tags.run_name='")[1].split("'")[0]
+            result = [v for v in result if v.tags.get("run_name") == rn]
+        if "run_id='" in filter_string:
+            rid = filter_string.split("run_id='")[1].split("'")[0]
+            result = [v for v in result if v.run_id == rid]
+        return result
+
+    def create_registered_model(self, name: str) -> SimpleNamespace:
+        if name in self.registered_models:
+            raise MlflowException("RESOURCE_ALREADY_EXISTS")
+        self.registered_models.add(name)
+        return SimpleNamespace(name=name)
+
+    def get_registered_model(self, name: str) -> SimpleNamespace:
+        if name not in self.registered_models:
+            raise MlflowException("RESOURCE_DOES_NOT_EXIST")
+        return SimpleNamespace(name=name)
+
+    def create_model_version(
+        self,
+        name: str,
+        source: str,
+        run_id: str,
+        tags: dict[str, str] | None = None,
+    ) -> FakeMlflowModelVersion:
+        v = FakeMlflowModelVersion(
+            name=name,
+            version=str(self._next_version),
+            source=source,
+            run_id=run_id,
+            tags=dict(tags or {}),
+        )
+        self._next_version += 1
+        self.model_versions.append(v)
+        return v
 
     def delete_model_version(self, name: str, version: str) -> None:
-        return None
+        self.model_versions = [
+            v for v in self.model_versions
+            if not (v.name == name and v.version == version)
+        ]
 
 
 @dataclass
