@@ -5,7 +5,7 @@
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
 | cortexflow integration | - | <!--s:build_cortexflow_integration-->🟢 passing<!--/s--> | <!--s:test_cortexflow_integration-->🟢 passing<!--/s--> |
-| ui integration | - | <!--s:build_cortexflow_ui_integration-->🟢 passing<!--/s--> | <!--s:test_cortexflow_ui_integration-->🔴 failing<!--/s--> |
+| ui integration | - | <!--s:build_cortexflow_ui_integration-->🟢 passing<!--/s--> | <!--s:test_cortexflow_ui_integration-->🟢 passing<!--/s--> |
 | cortexflow | <!--s:test_cortexflow-->🟢 passing<!--/s--> | - | - |
 | jobs control plane | <!--s:test_jobs_control_plane-->🟢 passing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
