@@ -43,7 +43,7 @@ class TestModels(UITestCase):
         leaf.get_by_role(
             "button", name=f"Delete model instruct {run_name}"
         ).click()
-        self.page.get_by_role("button", name="Delete").click()
+        self.page.get_by_role("button", name="Delete", exact=True).click()
 
         expect(tree.get_by_text(f"instruct · {run_name}")).not_to_be_visible(
             timeout=30_000
@@ -74,7 +74,7 @@ class TestModels(UITestCase):
         family_row = tree.locator(".models-tree__row", has_text="ft-fake")
         family_row.hover()
         family_row.get_by_role("button", name="Delete family ft-fake").click()
-        self.page.get_by_role("button", name="Delete").click()
+        self.page.get_by_role("button", name="Delete", exact=True).click()
 
         expect(tree.get_by_text(f"instruct · {run_a}")).not_to_be_visible(
             timeout=30_000
