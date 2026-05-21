@@ -15,6 +15,7 @@ cortexflow/__init__.py.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +36,7 @@ class SavedModel:
     run_name: str
     created_at: str
     data_blob_path: str
+    size_bytes: int
 
 
 def _to_saved_model(version: Any) -> SavedModel:
@@ -46,7 +48,16 @@ def _to_saved_model(version: Any) -> SavedModel:
             version.creation_timestamp / 1000, tz=timezone.utc
         ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         data_blob_path=version.source,
+        size_bytes=int(version.tags.get("size_bytes", "0")),
     )
+
+
+def _dir_size_bytes(local_dir: str | Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(local_dir):
+        for filename in files:
+            total += os.path.getsize(os.path.join(root, filename))
+    return total
 
 
 def _ensure_registered_model(client: MlflowClient, name: str) -> None:
@@ -80,6 +91,7 @@ def save_model(
     """Upload weights to S3 and register a new MLflow ModelVersion."""
     bucket = get_s3_bucket()
     prefix = f"models/{run_name}/{family}/{suffix}"
+    size_bytes = _dir_size_bytes(model_dir)
     s3_util.upload_dir(str(model_dir), dest_path=f"{prefix}/weights")
     source = f"s3://{bucket}/{prefix}/weights/"
     name = f"{family}__{suffix}"
@@ -89,7 +101,12 @@ def save_model(
         name=name,
         source=source,
         run_id=run_id,
-        tags={"family": family, "suffix": suffix, "run_name": run_name},
+        tags={
+            "family": family,
+            "suffix": suffix,
+            "run_name": run_name,
+            "size_bytes": str(size_bytes),
+        },
     )
     return _to_saved_model(version)
 

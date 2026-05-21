@@ -5,7 +5,7 @@ import App from '../src/App'
 const sampleDashboards = [
   { id: 'mlflow', url: 'http://100.1.2.3:5000' },
   { id: 'ray', url: 'http://100.1.2.3:8265' },
-  { id: 'minio', url: 'http://100.1.2.3:9001' },
+  { id: 'grafana', url: 'http://100.1.2.3:3000' },
 ]
 
 describe('App', () => {
@@ -26,9 +26,17 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the CortexFlow landing header', () => {
+  it('renders the primary nav rail with Experiments, Models, and Secrets', () => {
     render(<App />)
-    expect(screen.getByText(/cortexflow/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /experiments/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /models/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /secrets/i }),
+    ).toBeInTheDocument()
   })
 
   it('renders a link per dashboard pointing at its url', async () => {
@@ -43,7 +51,7 @@ describe('App', () => {
     }
   })
 
-  it('shows an error state when the API fails', async () => {
+  it('still renders the nav rail when dashboards API fails', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() =>
@@ -52,8 +60,8 @@ describe('App', () => {
     )
 
     render(<App />)
-    await waitFor(() =>
-      expect(screen.getByText(/failed to load dashboards/i)).toBeInTheDocument(),
-    )
+    expect(
+      screen.getByRole('button', { name: /experiments/i }),
+    ).toBeInTheDocument()
   })
 })

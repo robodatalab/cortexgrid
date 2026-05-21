@@ -36,6 +36,7 @@ from cortexflow_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
     job_details_stream,
+    models_stream,
     run_dashboard_stream,
     run_jobs_stream,
     run_notes_stream,
@@ -89,9 +90,11 @@ async def _start_refreshers() -> None:
         job_details_stream.refresher,
         run_notes_stream.refresher,
         experiment_notes_stream.refresher,
+        models_stream.models_refresher,
     ):
         r.ensure_started()
     experiments_stream.experiments_meta_refresher.pin(experiments_stream.META_TOPIC)
+    models_stream.models_refresher.pin(models_stream.META_TOPIC)
 
 
 @app.get("/health")
@@ -135,6 +138,15 @@ async def experiments_meta_stream_endpoint(ws: WebSocket) -> None:
         experiments_stream.experiments_meta_refresher,
         ws,
         experiments_stream.META_TOPIC,
+    )
+
+
+@app.websocket("/api/models/stream")
+async def models_stream_endpoint(ws: WebSocket) -> None:
+    await serve_websocket(
+        models_stream.models_refresher,
+        ws,
+        models_stream.META_TOPIC,
     )
 
 

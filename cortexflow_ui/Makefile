@@ -19,6 +19,9 @@ install-frontend: check-dir
 .PHONY: dev
 dev: check-dir install-frontend ## Start backend + frontend dev servers (Ctrl+C stops both)
 	@trap 'kill 0' EXIT; \
+	export SM_ACCESS_KEY_ID="$$(kubectl get secret sm-creds -n external-secrets -o jsonpath='{.data.SM_ACCESS_KEY_ID}' | base64 -d)"; \
+	export SM_SECRET_ACCESS_KEY="$$(kubectl get secret sm-creds -n external-secrets -o jsonpath='{.data.SM_SECRET_ACCESS_KEY}' | base64 -d)"; \
+	export SM_REGION="$$(kubectl get secret sm-creds -n external-secrets -o jsonpath='{.data.SM_REGION}' | base64 -d)"; \
 	( cd backend && uv run --group ui uvicorn main:app --reload --host 0.0.0.0 --port 8000 ) & \
 	( cd frontend && npm run dev ) & \
 	wait

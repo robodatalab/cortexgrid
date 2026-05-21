@@ -1,0 +1,47 @@
+.model-dashboard {
+    padding: 24px 32px;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.model-dashboard__header {
+    margin-bottom: 24px;
+}
+
+.model-dashboard__title {
+    font-size: var(--font-lg);
+    font-weight: 500;
+    margin: 0;
+}
+
+.model-dashboard__subtitle {
+    font-size: var(--font-md);
+    color: #666;
+    margin-top: 4px;
+}
+
+.model-dashboard__fields {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    column-gap: 16px;
+    row-gap: 8px;
+    margin: 0;
+    font-size: var(--font-md);
+}
+
+.model-dashboard__fields dt {
+    color: #666;
+    font-weight: 500;
+}
+
+.model-dashboard__fields dd {
+    margin: 0;
+    color: #000;
+    overflow-wrap: anywhere;
+}
+
+.model-dashboard__path {
+    font-family: var(--mono);
+    font-size: var(--font-sm);
+}
