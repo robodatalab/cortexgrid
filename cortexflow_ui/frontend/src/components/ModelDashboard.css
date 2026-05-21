@@ -45,3 +45,17 @@
     font-family: var(--mono);
     font-size: var(--font-sm);
 }
+
+.model-dashboard__link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #000;
+    cursor: pointer;
+    font: inherit;
+    text-decoration: underline;
+}
+
+.model-dashboard__link:hover {
+    color: #444;
+}

@@ -139,6 +139,33 @@ function App() {
     ? (modelsById[modelSelection.id] ?? null)
     : null
 
+  async function navigateToRun(runName: string) {
+    const res = await fetch(
+      `/api/runs/by-name/${encodeURIComponent(runName)}`,
+    )
+    if (!res.ok) {
+      alert(`Could not find run "${runName}": HTTP ${res.status}`)
+      return
+    }
+    const r = (await res.json()) as {
+      experiment_name: string
+      run_id: string
+      run_name: string
+    }
+    setSelection({
+      kind: 'run',
+      experiment_name: r.experiment_name,
+      run_id: r.run_id,
+      run_name: r.run_name,
+    })
+    setView('experiments')
+  }
+
+  function navigateToModel(modelId: string) {
+    setModelSelection({ kind: 'model', id: modelId })
+    setView('models')
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     fetch('/api/dashboards', { signal: controller.signal })
@@ -182,7 +209,10 @@ function App() {
               <Allotment.Pane>
                 <LayoutPane>
                   {selectedModel ? (
-                    <ModelDashboard model={selectedModel} />
+                    <ModelDashboard
+                      model={selectedModel}
+                      onNavigateToRun={navigateToRun}
+                    />
                   ) : (
                     <main className="main" />
                   )}
@@ -225,6 +255,8 @@ function App() {
                       jobs={activeRunJobs}
                       startedAtMs={runsByName[selection.run_name]?.started_at_ms ?? null}
                       endedAtMs={runsByName[selection.run_name]?.ended_at_ms ?? null}
+                      models={models}
+                      onNavigateToModel={navigateToModel}
                     />
                   ) : selection?.kind === 'job' ? (
                     <JobDashboard runId={selection.run_id} jobId={selection.job_id} />

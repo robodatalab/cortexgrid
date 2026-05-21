@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from cortexflow.experiment import (
     delete_experiment,
     delete_run,
+    get_experiment_by_run_name,
     get_mlflow_tracking_uri,
     list_run_ids_in_experiment,
 )
@@ -79,6 +80,12 @@ class SecretValue(BaseModel):
 
 class NoteBody(BaseModel):
     body: str
+
+
+class RunByName(BaseModel):
+    experiment_name: str
+    run_id: str
+    run_name: str
 
 
 @app.on_event("startup")
@@ -194,6 +201,19 @@ async def run_dashboard_stream_endpoint(ws: WebSocket, run_name: str) -> None:
 @app.websocket("/api/runs/{run_id}/jobs/{job_id}/stream")
 async def job_details_stream_endpoint(ws: WebSocket, run_id: str, job_id: str) -> None:
     await serve_websocket(job_details_stream.refresher, ws, (run_id, job_id))
+
+
+@app.get("/api/runs/by-name/{run_name}")
+def run_by_name(run_name: str) -> RunByName:
+    try:
+        exp = get_experiment_by_run_name(run_name)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"No run named {run_name!r}")
+    return RunByName(
+        experiment_name=exp.experiment_name,
+        run_id=exp.run_id,
+        run_name=run_name,
+    )
 
 
 @app.get("/api/ray/jobs/{ray_job_id}/logs")

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Allotment } from 'allotment'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush } from 'recharts'
 import { RunNotesPanel } from './RunNotesPanel'
+import type { Model } from './ModelsTree'
 import { useStreamList } from '../useStreamList'
 import './RunDashboard.css'
 
@@ -32,9 +33,11 @@ type Props = {
   jobs: Job[] | null
   startedAtMs: number | null
   endedAtMs: number | null
+  models: Model[]
+  onNavigateToModel: (modelId: string) => void
 }
 
-export function RunDashboard({ runId, runName, experimentName, jobs, startedAtMs, endedAtMs }: Props) {
+export function RunDashboard({ runId, runName, experimentName, jobs, startedAtMs, endedAtMs, models, onNavigateToModel }: Props) {
   const items = useStreamList<DashboardItem>(
     `/api/runs/${runName}/stream`,
     (i) => i.id,
@@ -56,6 +59,12 @@ export function RunDashboard({ runId, runName, experimentName, jobs, startedAtMs
   const params = allItems.filter(isParam)
   const metrics = allItems.filter(isMetric)
   const url = allItems.find(isUrl)?.url
+  const runModels = models
+    .filter((m) => m.run_name === runName)
+    .sort((a, b) => {
+      const f = a.family.localeCompare(b.family)
+      return f !== 0 ? f : a.suffix.localeCompare(b.suffix)
+    })
 
   return (
     <Allotment>
@@ -104,6 +113,25 @@ export function RunDashboard({ runId, runName, experimentName, jobs, startedAtMs
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {runModels.length > 0 && (
+            <div className="run-dashboard__section">
+              <div className="run-dashboard__section-title">Models published</div>
+              <ul className="run-dashboard__model-list">
+                {runModels.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      className="run-dashboard__model-link"
+                      onClick={() => onNavigateToModel(m.id)}
+                    >
+                      {m.family} / {m.suffix}
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

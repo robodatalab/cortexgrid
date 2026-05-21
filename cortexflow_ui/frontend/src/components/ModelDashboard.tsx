@@ -3,6 +3,7 @@ import type { Model } from "./ModelsTree";
 
 type Props = {
     model: Model;
+    onNavigateToRun: (runName: string) => void;
 };
 
 function formatSize(bytes: number): string {
@@ -22,7 +23,7 @@ function formatCreatedAt(iso: string): string {
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-export function ModelDashboard({ model }: Props) {
+export function ModelDashboard({ model, onNavigateToRun }: Props) {
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
@@ -37,7 +38,15 @@ export function ModelDashboard({ model }: Props) {
                 <dt>Variant</dt>
                 <dd>{model.suffix}</dd>
                 <dt>Run</dt>
-                <dd>{model.run_name}</dd>
+                <dd>
+                    <button
+                        type="button"
+                        className="model-dashboard__link"
+                        onClick={() => onNavigateToRun(model.run_name)}
+                    >
+                        {model.run_name}
+                    </button>
+                </dd>
                 <dt>Created</dt>
                 <dd>{formatCreatedAt(model.created_at)}</dd>
                 <dt>Size</dt>

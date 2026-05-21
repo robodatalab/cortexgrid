@@ -203,3 +203,21 @@ def list_experiments() -> list[Experiment]:
         for run in runs:
             result.append(Experiment(exp.name, run_id=run.info.run_id))
     return result
+
+
+def get_experiment_by_run_name(run_name: str) -> Experiment:
+    """Resolve a run by its haikunator name back to its (experiment_name, run_id) pair."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    experiment_ids = [e.experiment_id for e in client.search_experiments()]
+    if not experiment_ids:
+        raise ValueError(f"No run named {run_name!r}")
+    runs = client.search_runs(
+        experiment_ids=experiment_ids,
+        filter_string=f"attributes.run_name = '{run_name}'",
+        max_results=1,
+    )
+    if not runs:
+        raise ValueError(f"No run named {run_name!r}")
+    run = runs[0]
+    exp = client.get_experiment(run.info.experiment_id)
+    return Experiment(experiment_name=exp.name, run_id=run.info.run_id)

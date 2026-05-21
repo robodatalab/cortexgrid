@@ -97,3 +97,28 @@
   font-family: monospace;
   font-size: var(--font-xs);
 }
+
+.run-dashboard__model-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.run-dashboard__model-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #000;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-sm);
+  text-decoration: underline;
+  text-align: left;
+}
+
+.run-dashboard__model-link:hover {
+  color: #444;
+}
