@@ -1,7 +1,16 @@
 {
     "python.testing.unittestEnabled": true,
     "python.testing.pytestEnabled": false,
-    "python.testing.unittestArgs": ["-v", "-s", "./tests", "-p", "test_*.py"],
+    "python.testing.cwd": "${workspaceFolder}",
+    "python.testing.unittestArgs": [
+        "-v",
+        "-t",
+        ".",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py"
+    ],
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "yaml.schemas": {
         "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/argoproj.io/application_v1alpha1.json": "k8s/argo-deployments/**/*.yaml"
