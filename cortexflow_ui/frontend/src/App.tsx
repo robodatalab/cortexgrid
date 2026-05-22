@@ -15,7 +15,7 @@ import { SecretsDashboard } from './components/SecretsDashboard'
 import { IconRail } from './components/IconRail'
 import type { RailView } from './components/IconRail'
 import { ModelsTree } from './components/ModelsTree'
-import type { Model, ModelSelection } from './components/ModelsTree'
+import type { Deployment, Model, ModelSelection } from './components/ModelsTree'
 import { ModelDashboard } from './components/ModelDashboard'
 import { useStreamList } from './useStreamList'
 
@@ -49,6 +49,11 @@ function App() {
 
   const modelsById = useStreamList<Model>('/api/models/stream', (m) => m.id)
   const models = useMemo(() => Object.values(modelsById), [modelsById])
+
+  const deploymentsById = useStreamList<Deployment>(
+    '/api/deployments/stream',
+    (d) => `${d.family}/${d.suffix}/${d.run_name}`,
+  )
 
   const selectedExperimentName = selection?.experiment_name ?? null
   const runsByName = useStreamList<ExperimentRun>(
@@ -166,6 +171,24 @@ function App() {
     setView('models')
   }
 
+  function deploymentPath(model: Model): string {
+    return `/api/deployments/${encodeURIComponent(model.family)}/${encodeURIComponent(model.suffix)}/${encodeURIComponent(model.run_name)}`
+  }
+
+  async function handleDeploy(model: Model) {
+    const res = await fetch(deploymentPath(model), { method: 'POST' })
+    if (!res.ok) {
+      alert(`Deploy failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
+  async function handleStop(model: Model) {
+    const res = await fetch(deploymentPath(model), { method: 'DELETE' })
+    if (!res.ok) {
+      alert(`Stop failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     fetch('/api/dashboards', { signal: controller.signal })
@@ -195,6 +218,7 @@ function App() {
                 <LayoutPane>
                   <ModelsTree
                     models={models}
+                    deploymentsById={deploymentsById}
                     selection={modelSelection}
                     onSelect={setModelSelection}
                     onDeleteModel={(model) =>
@@ -211,7 +235,10 @@ function App() {
                   {selectedModel ? (
                     <ModelDashboard
                       model={selectedModel}
+                      deployment={deploymentsById[selectedModel.id] ?? null}
                       onNavigateToRun={navigateToRun}
+                      onDeploy={handleDeploy}
+                      onStop={handleStop}
                     />
                   ) : (
                     <main className="main" />

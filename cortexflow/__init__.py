@@ -24,7 +24,6 @@ if ckpt:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Callable
 
 from cortexflow.checkpoint import checkpoint, resume
@@ -80,11 +79,11 @@ from cortexflow.model_storage import (
     load_model,
 )
 from cortexflow.model_storage import save_model as _save_model_storage
+from cortexflow.model import DeployedModel, Model
 from cortexflow.model_serving import (
     Deployment,
     deploy_model,
     list_deployed_models,
-    model_deployment,
     undeploy_model,
 )
 
@@ -111,11 +110,15 @@ def remote(
     )
 
 
-def save_model(model_dir: str | Path, suffix: str, family: str) -> SavedModel:
-    """Persist a trained model under the current Experiment's run."""
+def save_model(model: Model, family: str, suffix: str) -> SavedModel:
+    """Persist a `cortexflow.Model` under the current Experiment's run."""
+    if not isinstance(model, Model):
+        raise TypeError(
+            f"save_model expects a cortexflow.Model instance, got {type(model).__name__}"
+        )
     experiment = Experiment.get_instance()
     return _save_model_storage(
-        model_dir,
+        model,
         suffix,
         family,
         run_id=experiment.run_id,
@@ -177,11 +180,12 @@ __all__ = [
     "list_models",
     "delete_model",
     # Model serving
+    "Model",
+    "DeployedModel",
     "Deployment",
     "deploy_model",
     "undeploy_model",
     "list_deployed_models",
-    "model_deployment",
 ]
 
 # trigger: 315-trigger-tests-2026-05-16

@@ -15,6 +15,7 @@ from cortexflow.experiment import (
 )
 from cortexflow.infra import get_ray_job_server_uri
 from cortexflow.jobs import stop_experiment_run_jobs
+from cortexflow.model_serving import deploy_model, undeploy_model
 from cortexflow.model_storage import delete_model
 from cortexflow.ray_util import get_ray_logs
 from cortexflow.secrets import (
@@ -35,6 +36,7 @@ from cortexflow_ui.backend.models.notes import (
 )
 from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
 from cortexflow_ui.backend.streams import (
+    deployments_stream,
     experiment_notes_stream,
     experiments_stream,
     job_details_stream,
@@ -99,10 +101,12 @@ async def _start_refreshers() -> None:
         run_notes_stream.refresher,
         experiment_notes_stream.refresher,
         models_stream.models_refresher,
+        deployments_stream.deployments_refresher,
     ):
         r.ensure_started()
     experiments_stream.experiments_meta_refresher.pin(experiments_stream.META_TOPIC)
     models_stream.models_refresher.pin(models_stream.META_TOPIC)
+    deployments_stream.deployments_refresher.pin(deployments_stream.META_TOPIC)
 
 
 @app.get("/health")
@@ -158,6 +162,15 @@ async def models_stream_endpoint(ws: WebSocket) -> None:
     )
 
 
+@app.websocket("/api/deployments/stream")
+async def deployments_stream_endpoint(ws: WebSocket) -> None:
+    await serve_websocket(
+        deployments_stream.deployments_refresher,
+        ws,
+        deployments_stream.META_TOPIC,
+    )
+
+
 @app.delete("/api/models/{family}/{suffix}/{run_name}")
 async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str]:
     delete_model(family, suffix, run_name)
@@ -165,6 +178,18 @@ async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str
         models_stream.META_TOPIC,
         models_stream.model_id(family, suffix, run_name),
     )
+    return {"status": "ok"}
+
+
+@app.post("/api/deployments/{family}/{suffix}/{run_name}")
+def deployment_create(family: str, suffix: str, run_name: str) -> dict[str, str]:
+    deploy_model(family, suffix, run_name)
+    return {"status": "ok"}
+
+
+@app.delete("/api/deployments/{family}/{suffix}/{run_name}")
+def deployment_delete(family: str, suffix: str, run_name: str) -> dict[str, str]:
+    undeploy_model(family, suffix, run_name)
     return {"status": "ok"}
 
 

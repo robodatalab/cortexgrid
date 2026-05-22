@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,12 +9,38 @@ from unittest.mock import patch
 
 from mlflow.exceptions import MlflowException
 
+from cortexflow.model import Model
+from cortexflow.model_serving import BundleMetadata
 from cortexflow.model_storage import (
     delete_model,
     delete_models_for_run,
     list_models,
     load_model,
     save_model,
+)
+
+
+class _FakeModel(Model):
+    """`Model` subclass whose `.save(d)` writes the same fixture bytes the old
+    `_make_weights_dir` helper used to produce: `config.json` (8 bytes) +
+    `model.safetensors` (7 bytes), so the size-bytes assertion still holds."""
+
+    def infer(self, *args: Any, **kwargs: Any) -> Any:
+        return None
+
+    def save(self, d: Path) -> None:
+        (d / "config.json").write_text('{"x": 1}')
+        (d / "model.safetensors").write_bytes(b"weights")
+
+    @classmethod
+    def load(cls, d: Path) -> "_FakeModel":
+        return cls()
+
+
+_FAKE_BUNDLE = BundleMetadata(
+    bundle_url="s3://b/serve-bundles/x.zip",
+    class_import_path="fake.module:FakeClass",
+    pip_list=["--extra-index-url x", "fake==1.0"],
 )
 
 
@@ -142,14 +167,20 @@ def _patches(mlflow: FakeMLflow, s3: FakeS3) -> list:
             "cortexflow.model_storage.get_mlflow_tracking_uri",
             return_value="http://x",
         ),
+        # load_model goes through cortexflow.model_serving._load_bundle_metadata
+        # to find the class import path; that module has its own MlflowClient
+        # import, so it needs the same fake here.
+        patch("cortexflow.model_serving.MlflowClient", return_value=mlflow),
+        patch(
+            "cortexflow.model_serving.get_mlflow_tracking_uri",
+            return_value="http://x",
+        ),
+        # bundling does pip freeze + import-graph walk + secret read - not
+        # what these tests cover; the bundle behaviour is tested separately.
+        patch(
+            "cortexflow.model_storage.bundle_class", return_value=_FAKE_BUNDLE
+        ),
     ]
-
-
-def _make_weights_dir() -> Path:
-    d = Path(tempfile.mkdtemp())
-    (d / "config.json").write_text('{"x": 1}')
-    (d / "model.safetensors").write_bytes(b"weights")
-    return d
 
 
 def _seed_version(
@@ -185,7 +216,7 @@ class TestSaveModel(unittest.TestCase):
 
     def test_uploads_weights_to_s3_under_run_first_layout(self) -> None:
         save_model(
-            _make_weights_dir(),
+            _FakeModel(),
             "instruct",
             "Qwen2",
             run_id="r1",
@@ -200,23 +231,23 @@ class TestSaveModel(unittest.TestCase):
         )
 
     def test_creates_registered_model_when_missing(self) -> None:
-        save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         self.assertIn("Qwen2__instruct", self.mlflow.registered)
 
     def test_does_not_recreate_existing_registered_model(self) -> None:
         self.mlflow.registered.add("Qwen2__instruct")
-        save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         self.assertEqual(len(self.mlflow.versions), 1)
 
     def test_returns_savedmodel_with_correct_fields(self) -> None:
-        result = save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        result = save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         self.assertEqual(result.family, "Qwen2")
@@ -228,8 +259,8 @@ class TestSaveModel(unittest.TestCase):
         )
 
     def test_creates_version_with_run_id_and_tags(self) -> None:
-        save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         v = self.mlflow.versions[0]
@@ -239,8 +270,8 @@ class TestSaveModel(unittest.TestCase):
         self.assertEqual(v.tags["run_name"], "boogey-46")
 
     def test_stamps_size_bytes_tag_from_uploaded_files(self) -> None:
-        save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         v = self.mlflow.versions[0]
@@ -248,8 +279,8 @@ class TestSaveModel(unittest.TestCase):
         self.assertEqual(v.tags["size_bytes"], "15")
 
     def test_returns_savedmodel_with_size_bytes(self) -> None:
-        result = save_model(
-            _make_weights_dir(), "instruct", "Qwen2",
+        result = save_model(_FakeModel(),
+            "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
         self.assertEqual(result.size_bytes, 15)
@@ -263,15 +294,21 @@ class TestLoadModel(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def test_downloads_weights_to_returned_path(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+    def test_returns_model_instance_reconstructed_via_cls_load(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        # load_model needs to find the class import path on the ModelVersion
+        # tags so it can re-import and call cls.load(...). Derive the path
+        # from the actual class object so the test works under any discovery
+        # root (e.g. "tests.unit..." vs "unit...").
+        v.tags["class_import_path"] = f"{_FakeModel.__module__}:{_FakeModel.__qualname__}"
+        v.tags["serve_bundle_url"] = _FAKE_BUNDLE.bundle_url
+        v.tags["serve_pip_list_json"] = "[]"
         self.s3.objects[
             "models/boogey-46/Qwen2/instruct/weights/config.json"
         ] = b'{"x":1}'
 
         result = load_model("Qwen2", "instruct", "boogey-46")
-        self.assertTrue((result / "config.json").exists())
-        self.assertEqual((result / "config.json").read_bytes(), b'{"x":1}')
+        self.assertIsInstance(result, _FakeModel)
 
     def test_raises_when_no_matching_version(self) -> None:
         with self.assertRaises(ValueError):
