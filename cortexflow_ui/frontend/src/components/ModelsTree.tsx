@@ -12,15 +12,41 @@ export type Model = {
     size_bytes: number;
 };
 
+export type Deployment = {
+    family: string;
+    suffix: string;
+    run_name: string;
+    url: string;
+    status: string;
+};
+
 export type ModelSelection = { kind: "model"; id: string };
 
 type Props = {
     models: Model[];
+    deploymentsById: Record<string, Deployment>;
     selection: ModelSelection | null;
     onSelect: (selection: ModelSelection) => void;
     onDeleteModel: (model: Model) => void;
     onDeleteFamily: (family: string) => void;
 };
+
+// Ray Serve ApplicationStatus → severity tier. Higher = worse, used for
+// family-row rollup.
+type DotTier = "ok" | "warn" | "error";
+
+function statusTier(status: string): DotTier {
+    if (status === "DEPLOY_FAILED" || status === "UNHEALTHY") return "error";
+    if (status === "RUNNING") return "ok";
+    return "warn";
+}
+
+function worstTier(tiers: DotTier[]): DotTier | null {
+    if (tiers.includes("error")) return "error";
+    if (tiers.includes("warn")) return "warn";
+    if (tiers.includes("ok")) return "ok";
+    return null;
+}
 
 function rowClass(isAncestor: boolean, isLeaf: boolean): string {
     const parts = ["models-tree__row"];
@@ -31,6 +57,7 @@ function rowClass(isAncestor: boolean, isLeaf: boolean): string {
 
 export function ModelsTree({
     models,
+    deploymentsById,
     selection,
     onSelect,
     onDeleteModel,
@@ -66,6 +93,12 @@ export function ModelsTree({
                 )}
                 {families.map((family) => {
                     const isFamilyAncestor = selectedFamily === family;
+                    const familyTier = worstTier(
+                        byFamily[family]
+                            .map((m) => deploymentsById[m.id])
+                            .filter((d): d is Deployment => d !== undefined)
+                            .map((d) => statusTier(d.status)),
+                    );
                     return (
                         <Fragment key={family}>
                             <div
@@ -78,6 +111,12 @@ export function ModelsTree({
                                 <span className="models-tree__label">
                                     {family}
                                 </span>
+                                {familyTier && (
+                                    <span
+                                        className={`models-tree__dot models-tree__dot--${familyTier}`}
+                                        aria-label={`Family ${family} deployment status: ${familyTier}`}
+                                    />
+                                )}
                                 <button
                                     type="button"
                                     className="models-tree__delete"
@@ -93,6 +132,10 @@ export function ModelsTree({
                             <div className="models-tree__drawer">
                                 {byFamily[family].map((m) => {
                                     const isLeaf = selection?.id === m.id;
+                                    const deployment = deploymentsById[m.id];
+                                    const leafTier = deployment
+                                        ? statusTier(deployment.status)
+                                        : null;
                                     return (
                                         <div
                                             key={m.id}
@@ -111,6 +154,12 @@ export function ModelsTree({
                                             <span className="models-tree__label">
                                                 {m.suffix} · {m.run_name}
                                             </span>
+                                            {leafTier && (
+                                                <span
+                                                    className={`models-tree__dot models-tree__dot--${leafTier}`}
+                                                    aria-label={`Deployment status: ${deployment?.status}`}
+                                                />
+                                            )}
                                             <button
                                                 type="button"
                                                 className="models-tree__delete"

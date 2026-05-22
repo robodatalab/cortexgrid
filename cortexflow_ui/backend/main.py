@@ -35,6 +35,7 @@ from cortexflow_ui.backend.models.notes import (
 )
 from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
 from cortexflow_ui.backend.streams import (
+    deployments_stream,
     experiment_notes_stream,
     experiments_stream,
     job_details_stream,
@@ -99,10 +100,12 @@ async def _start_refreshers() -> None:
         run_notes_stream.refresher,
         experiment_notes_stream.refresher,
         models_stream.models_refresher,
+        deployments_stream.deployments_refresher,
     ):
         r.ensure_started()
     experiments_stream.experiments_meta_refresher.pin(experiments_stream.META_TOPIC)
     models_stream.models_refresher.pin(models_stream.META_TOPIC)
+    deployments_stream.deployments_refresher.pin(deployments_stream.META_TOPIC)
 
 
 @app.get("/health")
@@ -155,6 +158,15 @@ async def models_stream_endpoint(ws: WebSocket) -> None:
         models_stream.models_refresher,
         ws,
         models_stream.META_TOPIC,
+    )
+
+
+@app.websocket("/api/deployments/stream")
+async def deployments_stream_endpoint(ws: WebSocket) -> None:
+    await serve_websocket(
+        deployments_stream.deployments_refresher,
+        ws,
+        deployments_stream.META_TOPIC,
     )
 
 

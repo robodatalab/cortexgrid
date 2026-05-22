@@ -15,7 +15,7 @@ import { SecretsDashboard } from './components/SecretsDashboard'
 import { IconRail } from './components/IconRail'
 import type { RailView } from './components/IconRail'
 import { ModelsTree } from './components/ModelsTree'
-import type { Model, ModelSelection } from './components/ModelsTree'
+import type { Deployment, Model, ModelSelection } from './components/ModelsTree'
 import { ModelDashboard } from './components/ModelDashboard'
 import { useStreamList } from './useStreamList'
 
@@ -49,6 +49,11 @@ function App() {
 
   const modelsById = useStreamList<Model>('/api/models/stream', (m) => m.id)
   const models = useMemo(() => Object.values(modelsById), [modelsById])
+
+  const deploymentsById = useStreamList<Deployment>(
+    '/api/deployments/stream',
+    (d) => `${d.family}/${d.suffix}/${d.run_name}`,
+  )
 
   const selectedExperimentName = selection?.experiment_name ?? null
   const runsByName = useStreamList<ExperimentRun>(
@@ -195,6 +200,7 @@ function App() {
                 <LayoutPane>
                   <ModelsTree
                     models={models}
+                    deploymentsById={deploymentsById}
                     selection={modelSelection}
                     onSelect={setModelSelection}
                     onDeleteModel={(model) =>
@@ -211,6 +217,7 @@ function App() {
                   {selectedModel ? (
                     <ModelDashboard
                       model={selectedModel}
+                      deployment={deploymentsById[selectedModel.id] ?? null}
                       onNavigateToRun={navigateToRun}
                     />
                   ) : (

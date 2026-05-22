@@ -79,6 +79,30 @@
     padding-left: 12px;
 }
 
+.models-tree__dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: auto;
+}
+
+.models-tree__dot + .models-tree__delete {
+    margin-left: 6px;
+}
+
+.models-tree__dot--ok {
+    background: #2ea44f;
+}
+
+.models-tree__dot--warn {
+    background: #d4a017;
+}
+
+.models-tree__dot--error {
+    background: #cb2431;
+}
+
 .models-tree__delete {
     display: none;
     margin-left: auto;
