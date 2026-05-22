@@ -5,6 +5,8 @@ type Props = {
     model: Model;
     deployment: Deployment | null;
     onNavigateToRun: (runName: string) => void;
+    onDeploy: (model: Model) => void;
+    onStop: (model: Model) => void;
 };
 
 // Public ingress hosts on the Tailscale network. Both are also configured in
@@ -52,15 +54,41 @@ function formatCreatedAt(iso: string): string {
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
-export function ModelDashboard({ model, deployment, onNavigateToRun }: Props) {
+export function ModelDashboard({
+    model,
+    deployment,
+    onNavigateToRun,
+    onDeploy,
+    onStop,
+}: Props) {
     const tier: DotTier | null = deployment ? statusTier(deployment.status) : null;
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
-                <h1 className="model-dashboard__title">
-                    {model.family} / {model.suffix}
-                </h1>
-                <div className="model-dashboard__subtitle">{model.run_name}</div>
+                <div className="model-dashboard__title-block">
+                    <h1 className="model-dashboard__title">
+                        {model.family} / {model.suffix}
+                    </h1>
+                    <div className="model-dashboard__subtitle">{model.run_name}</div>
+                </div>
+                <div className="model-dashboard__actions">
+                    <button
+                        type="button"
+                        className="btn"
+                        onClick={() => onDeploy(model)}
+                        disabled={deployment !== null}
+                    >
+                        Deploy
+                    </button>
+                    <button
+                        type="button"
+                        className="btn"
+                        onClick={() => onStop(model)}
+                        disabled={deployment === null}
+                    >
+                        Stop
+                    </button>
+                </div>
             </header>
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">

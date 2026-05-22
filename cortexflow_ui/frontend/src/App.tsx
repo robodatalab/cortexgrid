@@ -171,6 +171,24 @@ function App() {
     setView('models')
   }
 
+  function deploymentPath(model: Model): string {
+    return `/api/deployments/${encodeURIComponent(model.family)}/${encodeURIComponent(model.suffix)}/${encodeURIComponent(model.run_name)}`
+  }
+
+  async function handleDeploy(model: Model) {
+    const res = await fetch(deploymentPath(model), { method: 'POST' })
+    if (!res.ok) {
+      alert(`Deploy failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
+  async function handleStop(model: Model) {
+    const res = await fetch(deploymentPath(model), { method: 'DELETE' })
+    if (!res.ok) {
+      alert(`Stop failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
   useEffect(() => {
     const controller = new AbortController()
     fetch('/api/dashboards', { signal: controller.signal })
@@ -219,6 +237,8 @@ function App() {
                       model={selectedModel}
                       deployment={deploymentsById[selectedModel.id] ?? null}
                       onNavigateToRun={navigateToRun}
+                      onDeploy={handleDeploy}
+                      onStop={handleStop}
                     />
                   ) : (
                     <main className="main" />

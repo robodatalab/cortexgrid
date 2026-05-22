@@ -6,7 +6,23 @@
 }
 
 .model-dashboard__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
     margin-bottom: 24px;
+}
+
+.model-dashboard__title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.model-dashboard__actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .model-dashboard__title {
