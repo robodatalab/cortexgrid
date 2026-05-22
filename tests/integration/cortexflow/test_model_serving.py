@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-import uuid
-from pathlib import Path
 
 import cortexflow
 
@@ -14,9 +10,8 @@ from tests.integration.cortexflow._ray_run import (
     run,
 )
 from tests.integration.cortexflow._serving_stub import (
-    CheckpointReadingStub,
+    AddConstantModel,
     contact_deployment,
-    wait_for_endpoint,
 )
 
 
@@ -32,49 +27,52 @@ class TestModelServing(unittest.TestCase):
         self.exp = cortexflow.Experiment.init(self.name)
         self.run_name = self.exp.run_name()
 
-    def _save_marker_model(self, family: str, suffix: str) -> str:
-        marker = uuid.uuid4().hex
-        with tempfile.TemporaryDirectory() as d:
-            (Path(d) / "marker.json").write_text(json.dumps({"marker": marker}))
-            cortexflow.save_model(d, suffix=suffix, family=family)
-        return marker
-
-    def test_deployed_model_can_be_contacted_locally(self) -> None:
+    def test_deployed_model_returns_inference_result(self) -> None:
         family, suffix = "it-deploy", "stub"
-        marker = self._save_marker_model(family, suffix)
+        cortexflow.save_model(
+            AddConstantModel(constant=15), family=family, suffix=suffix
+        )
 
         with self.assertLogs("cortexflow.model_serving", level="INFO") as captured:
-            deployment = cortexflow.deploy_model(
-                CheckpointReadingStub, family, suffix, self.run_name, wait=True
+            deployed = cortexflow.deploy_model(
+                family, suffix, self.run_name, wait=True
             )
         pip_log = next(
-            (r.getMessage() for r in captured.records if "runtime_env.pip" in r.getMessage()),
+            (
+                r.getMessage()
+                for r in captured.records
+                if "runtime_env.pip" in r.getMessage()
+            ),
             "",
         )
         self.assertTrue(pip_log, "deploy_model must log runtime_env.pip")
         offending = [
-            line for line in pip_log.splitlines()
+            line
+            for line in pip_log.splitlines()
             if line.strip().startswith("torch==") or line.strip() == "torch"
         ]
         self.assertEqual(
-            offending, [],
+            offending,
+            [],
             f"torch must not be in runtime_env.pip (baked into ray image); log was:\n{pip_log}",
         )
         try:
-            response = wait_for_endpoint(f"{deployment.url}/marker")
-            self.assertEqual(response.json(), {"marker": marker})
+            self.assertEqual(deployed.infer(27), 42)
         finally:
             cortexflow.undeploy_model(family, suffix, self.run_name)
 
     def test_deployed_model_can_be_contacted_from_a_job(self) -> None:
         family, suffix = "it-deploy-from-job", "stub"
-        marker = self._save_marker_model(family, suffix)
-
-        deployment = cortexflow.deploy_model(
-            CheckpointReadingStub, family, suffix, self.run_name, wait=True
+        cortexflow.save_model(
+            AddConstantModel(constant=10), family=family, suffix=suffix
         )
+
+        cortexflow.deploy_model(family, suffix, self.run_name, wait=True)
         try:
-            run("remote", log, contact_deployment, deployment.url, marker)
+            run(
+                "remote", log, contact_deployment,
+                family, suffix, self.run_name, 5, 15,
+            )
         finally:
             cortexflow.undeploy_model(family, suffix, self.run_name)
 

@@ -15,10 +15,9 @@ from cortexflow.experiment import (
 )
 from cortexflow.infra import get_ray_job_server_uri
 from cortexflow.jobs import stop_experiment_run_jobs
-from cortexflow.model_serving import undeploy_model
+from cortexflow.model_serving import deploy_model, undeploy_model
 from cortexflow.model_storage import delete_model
 from cortexflow.ray_util import get_ray_logs
-from model_gateway import deploy_model
 from cortexflow.secrets import (
     delete_secret,
     get_secret,
@@ -184,7 +183,7 @@ async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str
 
 @app.post("/api/deployments/{family}/{suffix}/{run_name}")
 def deployment_create(family: str, suffix: str, run_name: str) -> dict[str, str]:
-    deploy_model(f"cf/{family}/{suffix}/{run_name}")
+    deploy_model(family, suffix, run_name)
     return {"status": "ok"}
 
 

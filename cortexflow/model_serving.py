@@ -2,9 +2,12 @@
 
 Caller stays HTTP-only: deploy/undeploy/list talk to the Ray dashboard's
 declarative `/api/serve/applications/` endpoint via [cortexflow.ray_util],
-never `ray.init`. Code is bundled at deploy time, zipped, uploaded to MinIO
-under `serve-bundles/<run_name>/<family>__<suffix>.zip`, and referenced via
-`runtime_env.working_dir` so Ray workers fetch it from there.
+never `ray.init`. The deployment class is bundled at `save_model` time, zipped,
+uploaded to MinIO under `serve-bundles/<run_name>/<family>__<suffix>.zip`, and
+referenced via `runtime_env.working_dir` so Ray workers fetch it from there.
+The bundle URL, class import path, and pip list are persisted as MLflow tags
+on the ModelVersion so `deploy_model` can find them later without the caller
+holding the class object.
 
 Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
 This relies on family/suffix/run_name not containing the literal "__".
@@ -15,6 +18,7 @@ the end-to-end design.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -23,14 +27,14 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from ray import serve
-from ray.serve.deployment import Deployment as RayDeployment
+from mlflow.tracking import MlflowClient
 from ray.serve.schema import ApplicationStatus
 
 from cortexflow._bundle import filter_pip_freeze, stage_bundle
-from cortexflow.infra import get_ray_serve_uri
+from cortexflow.infra import get_mlflow_tracking_uri, get_ray_serve_uri
+from cortexflow.model import DeployedModel
 from cortexflow.ray_util import (
     get_serve_details,
     put_serve_applications,
@@ -65,31 +69,6 @@ def _route_prefix(family: str, suffix: str, run_name: str) -> str:
     return f"/r/{family}/{suffix}/{run_name}"
 
 
-def model_deployment(
-    num_gpus: int = 1,
-    num_replicas: int = 1,
-    **kw: Any,
-) -> Callable[[Callable], RayDeployment]:
-    """serve.deployment configured for cortexflow infra."""
-    actor_options = {"num_gpus": num_gpus, **kw.pop("ray_actor_options", {})}
-    return serve.deployment(
-        num_replicas=num_replicas,
-        ray_actor_options=actor_options,
-        **kw,
-    )
-
-
-def _underlying_class(cls: type | RayDeployment) -> Any:
-    # @cortexflow.model_deployment wraps the class as a RayDeployment; the
-    # original class is reachable via func_or_class. import_path resolution on
-    # the Ray worker hits the *decorated* symbol, so the bound `RayDeployment`
-    # is what Ray Serve actually wants - but bundling and introspection need
-    # the underlying source-defining object.
-    if isinstance(cls, RayDeployment):
-        return cls.func_or_class
-    return cls
-
-
 def _pip_requirements_for_serve(external_deps: set[str]) -> list[str]:
     """Build runtime_env.pip for a Serve app: freeze + filter + drop ray +
     inject the GH token into git URLs + prepend the torch CUDA index.
@@ -116,14 +95,26 @@ def _pip_requirements_for_serve(external_deps: set[str]) -> list[str]:
     return [f"--extra-index-url {_CUDA_INDEX_URL}", *lines]
 
 
-def _build_application_spec(
-    cls: type | RayDeployment, family: str, suffix: str, run_name: str
-) -> dict[str, Any]:
-    """Stage code, upload to MinIO, return a Ray Serve application schema."""
-    underlying = _underlying_class(cls)
-    import_path = f"{underlying.__module__}:{underlying.__name__}"
+@dataclass
+class BundleMetadata:
+    """What `bundle_class` produces and `deploy_model` needs to PUT the app."""
 
-    with stage_bundle(underlying) as bundle:
+    bundle_url: str
+    class_import_path: str
+    pip_list: list[str]
+
+
+def bundle_class(
+    cls: type, family: str, suffix: str, run_name: str
+) -> BundleMetadata:
+    """Stage code, capture pip deps, upload bundle to MinIO.
+
+    Returns the metadata `deploy_model` needs later; callers (typically
+    `save_model`) persist it on the ModelVersion so the deploy step can run
+    without holding the class object."""
+    import_path = f"{cls.__module__}:{cls.__name__}"
+
+    with stage_bundle(cls) as bundle:
         pip_list = _pip_requirements_for_serve(set(bundle.external_deps))
         log.info(
             "Serve runtime_env.pip for %s/%s/%s (%d entries):\n  %s",
@@ -135,11 +126,26 @@ def _build_application_spec(
                 str(zip_base), "zip", root_dir=str(bundle.staging_dir)
             )
             zip_path = zip_base.with_suffix(".zip")
-            working_dir = upload(
+            bundle_url = upload(
                 str(zip_path),
                 dest_path=f"serve-bundles/{run_name}/{family}__{suffix}.zip",
             )
 
+    return BundleMetadata(
+        bundle_url=bundle_url,
+        class_import_path=import_path,
+        pip_list=pip_list,
+    )
+
+
+def _build_application_spec(
+    family: str, suffix: str, run_name: str, meta: BundleMetadata
+) -> dict[str, Any]:
+    """Assemble a Ray Serve application schema from pre-bundled metadata."""
+    log.info(
+        "Serve runtime_env.pip for %s/%s/%s (%d entries):\n  %s",
+        family, suffix, run_name, len(meta.pip_list), "\n  ".join(meta.pip_list),
+    )
     return {
         "name": _app_name(family, suffix, run_name),
         "route_prefix": _route_prefix(family, suffix, run_name),
@@ -149,13 +155,58 @@ def _build_application_spec(
         # a generic builder that re-imports the user's class and binds it.
         "import_path": "cortexflow._serve_entry:build",
         "args": {
-            "class_import_path": import_path,
+            "class_import_path": meta.class_import_path,
             "family": family,
             "suffix": suffix,
             "run_name": run_name,
         },
-        "runtime_env": {"working_dir": working_dir, "pip": pip_list},
+        "runtime_env": {"working_dir": meta.bundle_url, "pip": meta.pip_list},
     }
+
+
+# MLflow tag keys for the bundle metadata `save_model` writes and
+# `deploy_model` reads back.
+_CLASS_IMPORT_PATH_TAG = "class_import_path"
+_BUNDLE_URL_TAG = "serve_bundle_url"
+_PIP_LIST_TAG = "serve_pip_list_json"
+
+
+def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
+    """Serialise BundleMetadata to MLflow tags. The inverse of
+    `_load_bundle_metadata`; lives here next to the consumer so the tag schema
+    stays in one place."""
+    return {
+        _CLASS_IMPORT_PATH_TAG: meta.class_import_path,
+        _BUNDLE_URL_TAG: meta.bundle_url,
+        _PIP_LIST_TAG: json.dumps(meta.pip_list),
+    }
+
+
+def _load_bundle_metadata(
+    family: str, suffix: str, run_name: str
+) -> BundleMetadata:
+    """Read the bundle metadata `save_model` persisted on the ModelVersion."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    name = f"{family}__{suffix}"
+    versions = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{run_name}'"
+    )
+    if not versions:
+        raise ValueError(
+            f"No saved model for {family}/{suffix}/{run_name}; cannot deploy."
+        )
+    tags = versions[0].tags or {}
+    try:
+        return BundleMetadata(
+            bundle_url=tags[_BUNDLE_URL_TAG],
+            class_import_path=tags[_CLASS_IMPORT_PATH_TAG],
+            pip_list=json.loads(tags[_PIP_LIST_TAG]),
+        )
+    except KeyError as exc:
+        raise ValueError(
+            f"Saved model {family}/{suffix}/{run_name} is missing the deployment "
+            f"bundle tag {exc.args[0]!r}; re-save with `cortexflow.save_model`."
+        ) from exc
 
 
 def _current_application_specs() -> list[dict[str, Any]]:
@@ -207,32 +258,29 @@ def _wait_for_application_running(
 
 
 def deploy_model(
-    cls: type | RayDeployment,
     family: str,
     suffix: str,
     run_name: str,
     wait: bool = False,
-) -> Deployment:
-    """Schedule a Ray Serve app bound to (family, suffix, run_name).
+) -> DeployedModel:
+    """Schedule a Ray Serve app for a previously-saved model and return a
+    client proxy. The proxy's `.infer(*args, **kwargs)` POSTs to the cluster.
 
-    `cls` must be a class decorated with @model_deployment (or @serve.deployment).
-    The union accepts both views of the decorated value: pyright tracks the
-    transformation and sees a Deployment, mypy keeps the original `type`.
+    The deployment class is pulled from the MLflow ModelVersion tags
+    `save_model` wrote at save time; the caller does not need to hold the
+    class object.
 
     With `wait=True`, blocks until the Serve controller reports the app
     RUNNING (5 min cap). DEPLOY_FAILED raises; timing out raises.
     """
-    spec = _build_application_spec(cls, family, suffix, run_name)
+    meta = _load_bundle_metadata(family, suffix, run_name)
+    spec = _build_application_spec(family, suffix, run_name, meta)
     existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
     put_serve_applications([*existing, spec])
     if wait:
         _wait_for_application_running(spec["name"])
-    return Deployment(
-        family=family,
-        suffix=suffix,
-        run_name=run_name,
+    return DeployedModel(
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
-        status="running" if wait else "deploying",
     )
 
 
