@@ -1,4 +1,6 @@
-.PHONY: head-setup worker-setup node-teardown restart head-aws-apply head-aws-destroy tailnet-dns-apply tailnet-dns-destroy
+SHELL := /bin/bash
+
+.PHONY: head-setup worker-setup node-teardown restart head-aws-apply head-aws-destroy tailnet-dns-apply tailnet-dns-destroy env dev install-frontend dev-frontend-against help
 
 # Optional SSH_USER; defaults to the laptop user if not passed.
 SSH_USER_FLAG = $(if $(SSH_USER),--ssh-user=$(SSH_USER))
@@ -39,3 +41,31 @@ tailnet-dns-apply:
 
 tailnet-dns-destroy:
 	cd terraform/tailnet-dns && terraform destroy -auto-approve
+
+env:
+	uv run python scripts/refresh_env.py
+
+install-frontend:
+	@if [ ! -d cortexflow_ui/frontend/node_modules ]; then \
+		echo "Installing frontend dependencies..."; \
+		cd cortexflow_ui/frontend && npm install; \
+	fi
+
+dev: env install-frontend ## Start backend + frontend dev servers (Ctrl+C stops both)
+	@trap 'kill 0' EXIT; \
+	set -a; . ./.env; set +a; \
+	( cd cortexflow_ui/backend && uv run --group ui uvicorn main:app --reload --host 0.0.0.0 --port 8000 ) & \
+	( cd cortexflow_ui/frontend && npm run dev ) & \
+	wait
+
+dev-frontend-against: install-frontend ## Start frontend dev server against a remote backend (BACKEND=http://host:port required)
+	@[ -n "$(BACKEND)" ] || { echo "Error: BACKEND=http://host:port required"; exit 1; }
+	cd cortexflow_ui/frontend && VITE_API_TARGET=$(BACKEND) npm run dev
+
+help:
+	@echo ""
+	@echo "Usage: make <target>"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-25s %s\n", $$1, $$2}'
+	@echo ""
