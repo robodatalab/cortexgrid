@@ -20,6 +20,8 @@
 
 .infra-dashboard__namespace {
   margin-bottom: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e5e5;
 }
 
 .infra-dashboard__namespace h2 {

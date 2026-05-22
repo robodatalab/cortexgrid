@@ -41,6 +41,8 @@
 
 .job-dashboard__section {
   margin-bottom: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e5e5;
 }
 
 .job-dashboard__section-title {
@@ -96,6 +98,8 @@
   font-size: var(--font-sm);
   font-family: monospace;
   margin-bottom: 16px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e5e5;
   color: #444;
 }
 
@@ -182,6 +186,8 @@
 
 .job-dashboard__readiness {
   margin-bottom: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e5e5;
 }
 
 .job-dashboard__readiness-row {
