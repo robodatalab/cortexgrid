@@ -5,7 +5,7 @@ import uuid
 import cortexflow
 from playwright.sync_api import expect
 
-from tests.integration.cortexflow._serving_stub import AddConstantModel
+from tests.integration.stubs.serving import AddConstantModel
 from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
 
 

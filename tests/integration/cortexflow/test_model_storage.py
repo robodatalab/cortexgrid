@@ -6,7 +6,7 @@ import unittest
 import cortexflow
 
 from tests.integration.cortexflow._ray_run import experiment_name, get_logger
-from tests.integration.cortexflow._serving_stub import AddConstantModel
+from tests.integration.stubs.serving import AddConstantModel
 
 log = get_logger(__name__)
 

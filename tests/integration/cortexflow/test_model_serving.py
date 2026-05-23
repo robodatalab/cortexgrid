@@ -9,7 +9,7 @@ from tests.integration.cortexflow._ray_run import (
     get_logger,
     run,
 )
-from tests.integration.cortexflow._serving_stub import (
+from tests.integration.stubs.serving import (
     AddConstantModel,
     contact_deployment,
 )
