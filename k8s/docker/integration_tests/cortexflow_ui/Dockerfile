@@ -16,6 +16,7 @@ COPY pyproject.toml ./
 COPY cortexflow/ ./cortexflow/
 COPY tests/__init__.py ./tests/
 COPY tests/integration/__init__.py ./tests/integration/
+COPY tests/integration/stubs/ ./tests/integration/stubs/
 COPY tests/integration/cortexflow_ui/ ./tests/integration/cortexflow_ui/
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \

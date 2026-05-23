@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexflow-integration:cd3bb15d5b1de8bde39cb4afc211f16bd14d712c
+          image: ghcr.io/robodatalab/cortexflow-integration:dc8bdfc9897b38ad7f38629eb2f7a8f5e7dfb7cf
           envFrom:
             # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
             - secretRef:
