@@ -1,24 +1,16 @@
 from __future__ import annotations
 
-import tempfile
 import uuid
-from pathlib import Path
 
 import cortexflow
 from playwright.sync_api import expect
 
+from tests.integration.cortexflow._serving_stub import AddConstantModel
 from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
 
 
 def _experiment_name(test: UITestCase) -> str:
     return f"it-{test._testMethodName}-{uuid.uuid4().hex[:8]}"
-
-
-def _make_weights_dir() -> Path:
-    d = Path(tempfile.mkdtemp())
-    (d / "config.json").write_text('{"x": 1}')
-    (d / "model.safetensors").write_bytes(b"weights")
-    return d
 
 
 class TestModels(UITestCase):
@@ -27,7 +19,7 @@ class TestModels(UITestCase):
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
-        cortexflow.save_model(_make_weights_dir(), suffix="instruct", family="ft-fake")
+        cortexflow.save_model(AddConstantModel(constant=15), suffix="instruct", family="ft-fake")
 
         self.page.goto(get_test_ui_url())
         self.page.get_by_role("button", name="Models").click()
@@ -55,12 +47,12 @@ class TestModels(UITestCase):
 
         exp_a = cortexflow.Experiment.init(name)
         run_a = exp_a.run_name()
-        cortexflow.save_model(_make_weights_dir(), suffix="instruct", family="ft-fake")
+        cortexflow.save_model(AddConstantModel(constant=15), suffix="instruct", family="ft-fake")
         cortexflow.Experiment.close()
 
         exp_b = cortexflow.Experiment.init(name)
         run_b = exp_b.run_name()
-        cortexflow.save_model(_make_weights_dir(), suffix="chat", family="ft-fake")
+        cortexflow.save_model(AddConstantModel(constant=20), suffix="chat", family="ft-fake")
 
         self.page.goto(get_test_ui_url())
         self.page.get_by_role("button", name="Models").click()
@@ -88,7 +80,7 @@ class TestModels(UITestCase):
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
-        cortexflow.save_model(_make_weights_dir(), suffix="instruct", family="ft-fake")
+        cortexflow.save_model(AddConstantModel(constant=15), suffix="instruct", family="ft-fake")
 
         self.page.goto(get_test_ui_url())
         self.page.get_by_role("button", name="Models").click()
@@ -113,7 +105,7 @@ class TestModels(UITestCase):
         self.addCleanup(cortexflow.delete_experiment, name)
         exp = cortexflow.Experiment.init(name)
         run_name = exp.run_name()
-        cortexflow.save_model(_make_weights_dir(), suffix="instruct", family="ft-fake")
+        cortexflow.save_model(AddConstantModel(constant=15), suffix="instruct", family="ft-fake")
 
         self.page.goto(get_test_ui_url())
         tree = self.page.locator(".experiment-tree__list")
