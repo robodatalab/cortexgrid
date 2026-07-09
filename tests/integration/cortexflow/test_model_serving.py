@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+
+import requests
 
 import cortexflow
 
@@ -10,8 +14,9 @@ from tests.integration.cortexflow._ray_run import (
     run,
 )
 from tests.integration.stubs.serving import (
-    AddConstantModel,
+    AddConstantServeApp,
     contact_deployment,
+    write_weights,
 )
 
 
@@ -27,11 +32,16 @@ class TestModelServing(unittest.TestCase):
         self.exp = cortexflow.Experiment.init(self.name)
         self.run_name = self.exp.run_name()
 
+    def _save_stub(self, family: str, suffix: str, constant: int) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            write_weights(Path(d), constant)
+            cortexflow.save_model(
+                Path(d), AddConstantServeApp, family=family, suffix=suffix
+            )
+
     def test_deployed_model_returns_inference_result(self) -> None:
         family, suffix = "it-deploy", "stub"
-        cortexflow.save_model(
-            AddConstantModel(constant=15), family=family, suffix=suffix
-        )
+        self._save_stub(family, suffix, constant=15)
 
         with self.assertLogs("cortexflow.model_serving", level="INFO") as captured:
             deployed = cortexflow.deploy_model(
@@ -57,15 +67,17 @@ class TestModelServing(unittest.TestCase):
             f"torch must not be in runtime_env.pip (baked into ray image); log was:\n{pip_log}",
         )
         try:
-            self.assertEqual(deployed.infer(27), 42)
+            response = requests.post(
+                f"{deployed.url}/add", json={"x": 27}, timeout=60
+            )
+            response.raise_for_status()
+            self.assertEqual(response.json()["result"], 42)
         finally:
             cortexflow.undeploy_model(family, suffix, self.run_name)
 
     def test_deployed_model_can_be_contacted_from_a_job(self) -> None:
         family, suffix = "it-deploy-from-job", "stub"
-        cortexflow.save_model(
-            AddConstantModel(constant=10), family=family, suffix=suffix
-        )
+        self._save_stub(family, suffix, constant=10)
 
         cortexflow.deploy_model(family, suffix, self.run_name, wait=True)
         try:
