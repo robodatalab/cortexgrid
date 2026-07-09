@@ -227,18 +227,20 @@ def _current_application_specs() -> list[dict[str, Any]]:
 
 
 def _wait_for_application_running(
-    name: str, timeout_s: float = 300.0, interval_s: float = 2.0
+    name: str, timeout_s: float | None = 300.0, interval_s: float = 2.0
 ) -> None:
     """Poll the Serve controller until the named application is RUNNING.
 
     Raises immediately on DEPLOY_FAILED with the controller's message. Other
     non-RUNNING statuses (NOT_STARTED, DEPLOYING, UNHEALTHY) are treated as
-    transient until the timeout fires.
+    transient until the timeout fires. With `timeout_s=None` there is no
+    deadline: the loop blocks until a terminal status (RUNNING or
+    DEPLOY_FAILED) is reached.
     """
-    deadline = time.monotonic() + timeout_s
+    deadline = None if timeout_s is None else time.monotonic() + timeout_s
     last_status: str = "(missing)"
     last_message: str = ""
-    while time.monotonic() < deadline:
+    while deadline is None or time.monotonic() < deadline:
         app = get_serve_details().get("applications", {}).get(name)
         if app is not None:
             last_status = str(app.get("status", "(missing)"))
@@ -261,6 +263,7 @@ def deploy_model(
     suffix: str,
     run_name: str,
     wait: bool = False,
+    timeout: float | None = 300.0,
 ) -> Deployment:
     """Schedule a Ray Serve app for a previously-saved model and return a
     handle carrying its base URL. The caller (e.g. model-gateway) builds
@@ -271,14 +274,18 @@ def deploy_model(
     wrote at save time; the caller does not need to hold the class object.
 
     With `wait=True`, blocks until the Serve controller reports the app
-    RUNNING (5 min cap). DEPLOY_FAILED raises; timing out raises.
+    RUNNING, capped at `timeout` seconds (default 300). DEPLOY_FAILED raises;
+    exceeding a finite `timeout` raises TimeoutError. With `timeout=None` the
+    wait is unbounded: it blocks until a terminal status (RUNNING or
+    DEPLOY_FAILED) is reached. Tradeoff: an app that never reaches a terminal
+    state (e.g. GPU-starved, stuck in DEPLOYING) will hang forever.
     """
     meta = _load_bundle_metadata(family, suffix, run_name)
     spec = _build_application_spec(family, suffix, run_name, meta)
     existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
     put_serve_applications([*existing, spec])
     if wait:
-        _wait_for_application_running(spec["name"])
+        _wait_for_application_running(spec["name"], timeout_s=timeout)
     app = get_serve_details().get("applications", {}).get(spec["name"], {})
     return Deployment(
         family=family,

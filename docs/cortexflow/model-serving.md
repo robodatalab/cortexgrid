@@ -152,7 +152,7 @@ All exported from `cortexflow.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `deploy_model(family, suffix, run_name, wait=False) -> Deployment` | Read bundle metadata from MLflow, PUT the Serve app spec. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. With `wait=True`, blocks until the controller reports the app `RUNNING` (5 min cap). `DEPLOY_FAILED` raises; timing out raises. Returns a `Deployment` carrying the app URL. |
+| `deploy_model(family, suffix, run_name, wait=False, timeout=300.0) -> Deployment` | Read bundle metadata from MLflow, PUT the Serve app spec. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. With `wait=True`, blocks until the controller reports the app `RUNNING`, capped at `timeout` seconds (default 300). `DEPLOY_FAILED` raises; exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded, until a terminal status (`RUNNING` or `DEPLOY_FAILED`); an app that never reaches a terminal state hangs forever. Returns a `Deployment` carrying the app URL. |
 | `undeploy_model(family, suffix, run_name)` | Re-PUT the applications list with this app removed. |
 | `list_deployed_models() -> list[Deployment]` | GET `/api/serve/applications/` and return records whose name matches `<family>__<suffix>__<run_name>`. |
 
