@@ -124,7 +124,7 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(len(self.state.apps), 1)
 
-    def test_deploy_model_with_wait_returns_proxy_pointing_at_app_url(self) -> None:
+    def test_deploy_model_with_wait_returns_deployment_pointing_at_app_url(self) -> None:
         self.state.status = "RUNNING"
 
         d = deploy_model("Qwen2", "instruct", "boogey-46", wait=True)

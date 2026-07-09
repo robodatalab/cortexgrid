@@ -34,7 +34,6 @@ from ray.serve.schema import ApplicationStatus
 
 from cortexflow._bundle import filter_pip_freeze, stage_bundle
 from cortexflow.infra import get_mlflow_tracking_uri, get_ray_serve_uri
-from cortexflow.model import DeployedModel
 from cortexflow.ray_util import (
     get_serve_details,
     put_serve_applications,
@@ -262,13 +261,14 @@ def deploy_model(
     suffix: str,
     run_name: str,
     wait: bool = False,
-) -> DeployedModel:
+) -> Deployment:
     """Schedule a Ray Serve app for a previously-saved model and return a
-    client proxy. The proxy's `.infer(*args, **kwargs)` POSTs to the cluster.
+    handle carrying its base URL. The caller (e.g. model-gateway) builds
+    whatever client the app's routes need - streaming, long timeouts, custom
+    request schemas - against that URL; cortexflow imposes no traffic contract.
 
-    The deployment class is pulled from the MLflow ModelVersion tags
-    `save_model` wrote at save time; the caller does not need to hold the
-    class object.
+    The serve-app class is pulled from the MLflow ModelVersion tags `save_model`
+    wrote at save time; the caller does not need to hold the class object.
 
     With `wait=True`, blocks until the Serve controller reports the app
     RUNNING (5 min cap). DEPLOY_FAILED raises; timing out raises.
@@ -279,8 +279,13 @@ def deploy_model(
     put_serve_applications([*existing, spec])
     if wait:
         _wait_for_application_running(spec["name"])
-    return DeployedModel(
+    app = get_serve_details().get("applications", {}).get(spec["name"], {})
+    return Deployment(
+        family=family,
+        suffix=suffix,
+        run_name=run_name,
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
+        status=str(app.get("status", "unknown")),
     )
 
 

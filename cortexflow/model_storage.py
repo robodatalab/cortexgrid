@@ -15,7 +15,6 @@ cortexflow/__init__.py.
 
 from __future__ import annotations
 
-import importlib
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,9 +27,7 @@ from mlflow.tracking import MlflowClient
 
 from cortexflow import s3_util
 from cortexflow.infra import get_mlflow_tracking_uri, get_s3_bucket
-from cortexflow.model import Model
 from cortexflow.model_serving import (
-    _load_bundle_metadata,
     bundle_class,
     metadata_to_tags,
 )
@@ -89,27 +86,32 @@ def _download_s3_uri(uri: str, dest_dir: str | Path | None) -> Path:
 
 
 def save_model(
-    model: Model,
+    weights_dir: str | Path,
+    serve_app: type,
     suffix: str,
     family: str,
     run_id: str,
     run_name: str,
 ) -> SavedModel:
-    """Drive the model's `.save(d)` into a tempdir, upload to S3, bundle the
-    class, register the result as a new MLflow ModelVersion.
+    """Upload a weights directory to S3 and register a new MLflow ModelVersion
+    paired with the serve-app that fronts it.
 
-    The cluster reloads the model via `cls.load(weights_dir)` when
-    `cortexflow.deploy_model` runs later; the bundle's S3 URL, the class
-    import path, and the captured pip freeze are stored as tags on the
-    ModelVersion so deploy_model doesn't need the class object."""
+    cortexflow stores the weights as an opaque directory: it never inspects,
+    serializes, or reconstructs their contents, so the on-disk format
+    (HuggingFace `save_pretrained`, `torch.save`, ONNX, anything) is entirely
+    the caller's concern. That directory boundary is the open-closed extension
+    point - new model kinds need no change here.
+
+    `serve_app` is the Ray Serve ingress class that will front these weights.
+    Its code is bundled and its import path, bundle URL, and pip list are
+    stored as tags on the ModelVersion so `deploy_model` can bind it later
+    without the caller holding the class object."""
     bucket = get_s3_bucket()
     prefix = f"models/{run_name}/{family}/{suffix}"
-    with tempfile.TemporaryDirectory() as d:
-        model.save(Path(d))
-        size_bytes = _dir_size_bytes(d)
-        s3_util.upload_dir(d, dest_path=f"{prefix}/weights")
+    size_bytes = _dir_size_bytes(weights_dir)
+    s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
     source = f"s3://{bucket}/{prefix}/weights/"
-    bundle_meta = bundle_class(type(model), family, suffix, run_name)
+    bundle_meta = bundle_class(serve_app, family, suffix, run_name)
     name = f"{family}__{suffix}"
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     _ensure_registered_model(client, name)
@@ -128,13 +130,14 @@ def save_model(
     return _to_saved_model(version)
 
 
-def load_model(family: str, suffix: str, run_name: str) -> Model:
-    """Reconstruct a saved model: read its class import path from MLflow,
-    download its weights to a tempdir, and return `cls.load(tempdir)`.
+def load_model(family: str, suffix: str, run_name: str) -> Path:
+    """Download a saved model's weights to a local directory and return its Path.
 
-    The tempdir is removed once `cls.load` returns, so the user's `load`
-    implementation must read everything it needs during that call (do not
-    hold paths into the dir)."""
+    cortexflow moves an opaque directory of bytes and never interprets its
+    contents; the serve-app reconstructs the model from it however it likes
+    (`from_pretrained`, `torch.load`, ...). The returned directory persists
+    after this call - the caller (typically a serve-app loading weights at
+    startup) owns its lifetime."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     name = f"{family}__{suffix}"
     versions = client.search_model_versions(
@@ -142,12 +145,7 @@ def load_model(family: str, suffix: str, run_name: str) -> Model:
     )
     if not versions or not versions[0].source:
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    meta = _load_bundle_metadata(family, suffix, run_name)
-    module_name, class_name = meta.class_import_path.split(":")
-    cls = getattr(importlib.import_module(module_name), class_name)
-    with tempfile.TemporaryDirectory() as d:
-        _download_s3_uri(versions[0].source, d)
-        return cls.load(Path(d))
+    return _download_s3_uri(versions[0].source, None)
 
 
 def list_models() -> list[SavedModel]:

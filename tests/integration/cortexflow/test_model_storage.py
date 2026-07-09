@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from typing import cast
+import tempfile
 import unittest
+from pathlib import Path
 
 import cortexflow
 
 from tests.integration.cortexflow._ray_run import experiment_name, get_logger
-from tests.integration.stubs.serving import AddConstantModel
+from tests.integration.stubs.serving import (
+    AddConstantServeApp,
+    read_constant,
+    write_weights,
+)
 
 log = get_logger(__name__)
 
@@ -28,22 +33,22 @@ class TestServingStorage(unittest.TestCase):
         self.exp = cortexflow.Experiment.init(self.name)
         self.run_name = self.exp.run_name()
 
+    def _save_stub(self, family: str, suffix: str, constant: int = 15) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            write_weights(Path(d), constant)
+            cortexflow.save_model(
+                Path(d), AddConstantServeApp, family=family, suffix=suffix
+            )
+
     def test_save_load_roundtrip(self) -> None:
-        cortexflow.save_model(
-            AddConstantModel(constant=15), family="ft-fake", suffix="instruct"
-        )
+        self._save_stub("ft-fake", "instruct", constant=15)
 
         restored = cortexflow.load_model("ft-fake", "instruct", self.run_name)
-        self.assertIsInstance(restored, AddConstantModel)
-
-        restored_typed = cast(AddConstantModel, restored)
-        self.assertEqual(restored_typed.constant, 15)
-        self.assertEqual(restored_typed.infer(27), 42)
+        self.assertIsInstance(restored, Path)
+        self.assertEqual(read_constant(restored), 15)
 
     def test_list_includes_saved_model(self) -> None:
-        cortexflow.save_model(
-            AddConstantModel(constant=15), family="ft-fake", suffix="instruct"
-        )
+        self._save_stub("ft-fake", "instruct")
 
         models = cortexflow.list_models()
         self.assertTrue(
@@ -51,9 +56,7 @@ class TestServingStorage(unittest.TestCase):
         )
 
     def test_delete_model_removes_it(self) -> None:
-        cortexflow.save_model(
-            AddConstantModel(constant=15), family="ft-fake", suffix="instruct"
-        )
+        self._save_stub("ft-fake", "instruct")
 
         cortexflow.delete_model("ft-fake", "instruct", self.run_name)
         models = cortexflow.list_models()
@@ -62,9 +65,7 @@ class TestServingStorage(unittest.TestCase):
         )
 
     def test_delete_experiment_cascades_models(self) -> None:
-        cortexflow.save_model(
-            AddConstantModel(constant=15), family="ft-fake", suffix="instruct"
-        )
+        self._save_stub("ft-fake", "instruct")
 
         cortexflow.delete_experiment(self.name)
         models = cortexflow.list_models()
