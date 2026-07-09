@@ -180,6 +180,41 @@ class TestWaitForApplicationRunning(unittest.TestCase):
                 "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
             )
 
+    def test_finite_timeout_elapsing_raises_timeout_error(self) -> None:
+        self.state.status = "DEPLOYING"
+
+        with self.assertRaises(TimeoutError):
+            _wait_for_application_running(
+                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
+            )
+
+    def test_unbounded_timeout_returns_once_status_reaches_running(self) -> None:
+        statuses = ["DEPLOYING", "DEPLOYING", "RUNNING"]
+
+        def get_details() -> dict[str, Any]:
+            self.state.status = statuses.pop(0)
+            return self.state.get_details()
+
+        with patch(
+            "cortexflow.model_serving.get_serve_details", side_effect=get_details
+        ):
+            _wait_for_application_running(
+                "Qwen2__instruct__boogey-46", timeout_s=None, interval_s=0.0
+            )
+
+        self.assertEqual(statuses, [])
+
+    def test_deploy_failed_raises_regardless_of_unbounded_timeout(self) -> None:
+        self.state.status = "DEPLOY_FAILED"
+        self.state.message = "replica died on import"
+
+        with self.assertRaises(RuntimeError) as ctx:
+            _wait_for_application_running(
+                "Qwen2__instruct__boogey-46", timeout_s=None, interval_s=0.0
+            )
+
+        self.assertIn("DEPLOY_FAILED", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
