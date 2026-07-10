@@ -1,0 +1,61 @@
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, it, expect, vi } from 'vitest'
+import { DeploymentsTree } from '../src/components/DeploymentsTree'
+import type { Deployment } from '../src/components/ModelsTree'
+
+const deployments: Deployment[] = [
+  {
+    family: 'Qwen2',
+    suffix: 'instruct',
+    run_name: 'boogey-46',
+    url: 'http://ray/r/Qwen2/instruct/boogey-46',
+    phase: 'running',
+  },
+  {
+    family: 'DeepSeek3',
+    suffix: 'chat',
+    run_name: 'snake-12',
+    url: 'http://ray/r/DeepSeek3/chat/snake-12',
+    phase: 'failed',
+  },
+]
+
+describe('DeploymentsTree', () => {
+  it('renders a row per deployment', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Qwen2/instruct')).toBeInTheDocument()
+    expect(screen.getByText('boogey-46')).toBeInTheDocument()
+    expect(screen.getByText('DeepSeek3/chat')).toBeInTheDocument()
+    expect(screen.getByText('snake-12')).toBeInTheDocument()
+  })
+
+  it('shows an empty state when there are no deployments', () => {
+    render(
+      <DeploymentsTree deployments={[]} selection={null} onSelect={vi.fn()} />,
+    )
+    expect(screen.getByText('No deployments')).toBeInTheDocument()
+  })
+
+  it('selects a deployment by its shared id when clicked', async () => {
+    const onSelect = vi.fn()
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        selection={null}
+        onSelect={onSelect}
+      />,
+    )
+    await userEvent.click(screen.getByText('Qwen2/instruct'))
+    expect(onSelect).toHaveBeenCalledWith({
+      kind: 'deployment',
+      id: 'Qwen2/instruct/boogey-46',
+    })
+  })
+})

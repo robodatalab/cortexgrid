@@ -2,15 +2,10 @@ import { useMemo } from "react";
 import { Box } from "lucide-react";
 import "./DeploymentsTree.css";
 import { servingTier } from "../phases";
+import { deploymentId } from "../ids";
 import type { Deployment } from "./ModelsTree";
 
 export type DeploymentSelection = { kind: "deployment"; id: string };
-
-// Same id space as Model.id, so a deployment and its registry model cross-link
-// by a shared key.
-export function deploymentId(d: Deployment): string {
-    return `${d.family}/${d.suffix}/${d.run_name}`;
-}
 
 type Props = {
     deployments: Deployment[];

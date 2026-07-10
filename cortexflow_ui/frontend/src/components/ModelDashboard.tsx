@@ -11,6 +11,7 @@ type Props = {
     model: Model;
     deployment: Deployment | null;
     onNavigateToRun: (runName: string) => void;
+    onNavigateToDeployment: (id: string) => void;
     onDeploy: (model: Model) => void;
 };
 
@@ -35,6 +36,7 @@ export function ModelDashboard({
     model,
     deployment,
     onNavigateToRun,
+    onNavigateToDeployment,
     onDeploy,
 }: Props) {
     const servingTierValue = deployment ? servingTier(deployment.phase) : null;
@@ -80,6 +82,15 @@ export function ModelDashboard({
                     <span className="model-dashboard__deployment-label">
                         {deployment ? servingLabel(deployment.phase) : "Not deployed"}
                     </span>
+                    {deployment && (
+                        <button
+                            type="button"
+                            className="model-dashboard__link"
+                            onClick={() => onNavigateToDeployment(model.id)}
+                        >
+                            View deployment
+                        </button>
+                    )}
                 </div>
             </section>
             <dl className="model-dashboard__fields">

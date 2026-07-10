@@ -18,6 +18,7 @@ import { ModelsTree } from './components/ModelsTree'
 import type { Deployment, Model, ModelSelection } from './components/ModelsTree'
 import { DeploymentsTree } from './components/DeploymentsTree'
 import type { DeploymentSelection } from './components/DeploymentsTree'
+import { deploymentId } from './ids'
 import { ModelDashboard } from './components/ModelDashboard'
 import { DeploymentDashboard } from './components/DeploymentDashboard'
 import { useStreamList } from './useStreamList'
@@ -280,11 +281,18 @@ function App() {
                       model={selectedModel}
                       deployment={deploymentsById[selectedModel.id] ?? null}
                       onNavigateToRun={navigateToRun}
+                      onNavigateToDeployment={(id) =>
+                        setModelsSelection({ kind: 'deployment', id })
+                      }
                       onDeploy={handleDeploy}
                     />
                   ) : selectedDeployment ? (
                     <DeploymentDashboard
                       deployment={selectedDeployment}
+                      modelInRepository={
+                        modelsById[deploymentId(selectedDeployment)] !== undefined
+                      }
+                      onNavigateToModel={navigateToModel}
                       onStop={handleStopDeployment}
                     />
                   ) : (

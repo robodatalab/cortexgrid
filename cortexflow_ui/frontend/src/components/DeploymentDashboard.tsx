@@ -2,6 +2,7 @@
 // visual language as the registry card) but is driven purely by a Deployment.
 import "./ModelDashboard.css";
 import type { Deployment } from "./ModelsTree";
+import { deploymentId } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
 // Public ingress hosts on the Tailscale network. Both are also configured in
@@ -13,6 +14,10 @@ const GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID = "rayServeDeploymentDashboard";
 
 type Props = {
     deployment: Deployment;
+    // The registry model may have been deleted while still deployed, so the
+    // back-link only renders when the model is actually in the repository.
+    modelInRepository: boolean;
+    onNavigateToModel: (id: string) => void;
     onStop: (deployment: Deployment) => void;
 };
 
@@ -29,7 +34,12 @@ function grafanaUrl(d: Deployment): string {
     return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
 }
 
-export function DeploymentDashboard({ deployment, onStop }: Props) {
+export function DeploymentDashboard({
+    deployment,
+    modelInRepository,
+    onNavigateToModel,
+    onStop,
+}: Props) {
     const tier = servingTier(deployment.phase);
     return (
         <div className="model-dashboard">
@@ -82,6 +92,22 @@ export function DeploymentDashboard({ deployment, onStop }: Props) {
                 </div>
             </section>
             <dl className="model-dashboard__fields">
+                <dt>Registry</dt>
+                <dd>
+                    {modelInRepository ? (
+                        <button
+                            type="button"
+                            className="model-dashboard__link"
+                            onClick={() =>
+                                onNavigateToModel(deploymentId(deployment))
+                            }
+                        >
+                            View in repository
+                        </button>
+                    ) : (
+                        "Not in repository"
+                    )}
+                </dd>
                 <dt>Family</dt>
                 <dd>{deployment.family}</dd>
                 <dt>Variant</dt>
