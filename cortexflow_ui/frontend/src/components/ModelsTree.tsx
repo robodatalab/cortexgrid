@@ -1,7 +1,7 @@
 import { Fragment, useMemo } from "react";
 import { Layers, Box, Trash2 } from "lucide-react";
 import "./ModelsTree.css";
-import { servingTier, worstTier } from "../phases";
+import { registryTier, worstTier } from "../phases";
 
 export type Model = {
     id: string;
@@ -28,12 +28,17 @@ export type ModelSelection = { kind: "model"; id: string };
 
 type Props = {
     models: Model[];
-    deploymentsById: Record<string, Deployment>;
     selection: ModelSelection | null;
     onSelect: (selection: ModelSelection) => void;
     onDeleteModel: (model: Model) => void;
     onDeleteFamily: (family: string) => void;
 };
+
+// Registry dots highlight attention-worthy phases only; a "ready" model shows no
+// dot so a large, healthy repository stays quiet.
+function registryLeafTier(phase: string) {
+    return phase === "ready" ? null : registryTier(phase);
+}
 
 function rowClass(isAncestor: boolean, isLeaf: boolean): string {
     const parts = ["models-tree__row"];
@@ -44,7 +49,6 @@ function rowClass(isAncestor: boolean, isLeaf: boolean): string {
 
 export function ModelsTree({
     models,
-    deploymentsById,
     selection,
     onSelect,
     onDeleteModel,
@@ -72,7 +76,7 @@ export function ModelsTree({
     return (
         <div className="models-tree">
             <div className="models-tree__title">
-                <span>Models</span>
+                <span>Repository</span>
             </div>
             <div className="models-tree__list">
                 {families.length === 0 && (
@@ -82,9 +86,8 @@ export function ModelsTree({
                     const isFamilyAncestor = selectedFamily === family;
                     const familyTier = worstTier(
                         byFamily[family]
-                            .map((m) => deploymentsById[m.id])
-                            .filter((d): d is Deployment => d !== undefined)
-                            .map((d) => servingTier(d.phase)),
+                            .map((m) => registryLeafTier(m.phase))
+                            .filter((t): t is Exclude<typeof t, null> => t !== null),
                     );
                     return (
                         <Fragment key={family}>
@@ -119,10 +122,7 @@ export function ModelsTree({
                             <div className="models-tree__drawer">
                                 {byFamily[family].map((m) => {
                                     const isLeaf = selection?.id === m.id;
-                                    const deployment = deploymentsById[m.id];
-                                    const leafTier = deployment
-                                        ? servingTier(deployment.phase)
-                                        : null;
+                                    const leafTier = registryLeafTier(m.phase);
                                     return (
                                         <div
                                             key={m.id}
@@ -144,7 +144,7 @@ export function ModelsTree({
                                             {leafTier && (
                                                 <span
                                                     className={`models-tree__dot models-tree__dot--${leafTier}`}
-                                                    aria-label={`Deployment status: ${deployment?.phase}`}
+                                                    aria-label={`Registry status: ${m.phase}`}
                                                 />
                                             )}
                                             <button

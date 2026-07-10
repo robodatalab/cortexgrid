@@ -12,28 +12,7 @@ type Props = {
     deployment: Deployment | null;
     onNavigateToRun: (runName: string) => void;
     onDeploy: (model: Model) => void;
-    onStop: (model: Model) => void;
 };
-
-// Public ingress hosts on the Tailscale network. Both are also configured in
-// k8s/charts/cortexflow/values.yaml (ray) and k8s/argo_deployments/base/monitoring.yaml
-// (grafana); keep these in sync if either host changes.
-const RAY_DASHBOARD_HOST = "ray.robodatalab.com";
-const GRAFANA_HOST = "grafana.robodatalab.com";
-const GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID = "rayServeDeploymentDashboard";
-
-function appName(model: Model): string {
-    return `${model.family}__${model.suffix}__${model.run_name}`;
-}
-
-function rayDashboardUrl(model: Model): string {
-    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(appName(model))}`;
-}
-
-function grafanaUrl(model: Model): string {
-    const params = new URLSearchParams({ "var-Application": appName(model) });
-    return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
-}
 
 function formatSize(bytes: number): string {
     if (bytes <= 0) return "—";
@@ -57,7 +36,6 @@ export function ModelDashboard({
     deployment,
     onNavigateToRun,
     onDeploy,
-    onStop,
 }: Props) {
     const servingTierValue = deployment ? servingTier(deployment.phase) : null;
     const regTier = registryTier(model.phase);
@@ -89,14 +67,6 @@ export function ModelDashboard({
                     >
                         Deploy
                     </button>
-                    <button
-                        type="button"
-                        className="btn"
-                        onClick={() => onStop(model)}
-                        disabled={deployment === null}
-                    >
-                        Stop
-                    </button>
                 </div>
             </header>
             <section className="model-dashboard__deployment">
@@ -111,26 +81,6 @@ export function ModelDashboard({
                         {deployment ? servingLabel(deployment.phase) : "Not deployed"}
                     </span>
                 </div>
-                {deployment && (
-                    <div className="model-dashboard__deployment-links">
-                        <a
-                            className="model-dashboard__button"
-                            href={rayDashboardUrl(model)}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            Open in Ray dashboard
-                        </a>
-                        <a
-                            className="model-dashboard__button"
-                            href={grafanaUrl(model)}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            Open in Grafana
-                        </a>
-                    </div>
-                )}
             </section>
             <dl className="model-dashboard__fields">
                 <dt>Family</dt>

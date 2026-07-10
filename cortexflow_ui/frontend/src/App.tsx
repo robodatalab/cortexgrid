@@ -16,7 +16,10 @@ import { IconRail } from './components/IconRail'
 import type { RailView } from './components/IconRail'
 import { ModelsTree } from './components/ModelsTree'
 import type { Deployment, Model, ModelSelection } from './components/ModelsTree'
+import { DeploymentsTree } from './components/DeploymentsTree'
+import type { DeploymentSelection } from './components/DeploymentsTree'
 import { ModelDashboard } from './components/ModelDashboard'
+import { DeploymentDashboard } from './components/DeploymentDashboard'
 import { useStreamList } from './useStreamList'
 
 type Dashboard = {
@@ -38,7 +41,9 @@ type PendingDelete =
 function App() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([])
   const [selection, setSelection] = useState<Selection | null>(null)
-  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null)
+  const [modelsSelection, setModelsSelection] = useState<
+    ModelSelection | DeploymentSelection | null
+  >(null)
   const [view, setView] = useState<RailView>('experiments')
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
 
@@ -93,14 +98,18 @@ function App() {
       selection.run_id === target.run_id
     ) {
       setSelection(null)
-    } else if (target.kind === 'model' && modelSelection?.id === target.model.id) {
-      setModelSelection(null)
+    } else if (
+      target.kind === 'model' &&
+      modelsSelection?.kind === 'model' &&
+      modelsSelection.id === target.model.id
+    ) {
+      setModelsSelection(null)
     } else if (
       target.kind === 'model-family' &&
-      modelSelection &&
-      modelsById[modelSelection.id]?.family === target.family
+      modelsSelection?.kind === 'model' &&
+      modelsById[modelsSelection.id]?.family === target.family
     ) {
-      setModelSelection(null)
+      setModelsSelection(null)
     }
   }
 
@@ -140,9 +149,19 @@ function App() {
   )
   const activeRunJobs = activeRunId ? Object.values(activeRunJobsMap) : null
 
-  const selectedModel = modelSelection
-    ? (modelsById[modelSelection.id] ?? null)
-    : null
+  const deployments = useMemo(
+    () => Object.values(deploymentsById),
+    [deploymentsById],
+  )
+
+  const selectedModel =
+    modelsSelection?.kind === 'model'
+      ? (modelsById[modelsSelection.id] ?? null)
+      : null
+  const selectedDeployment =
+    modelsSelection?.kind === 'deployment'
+      ? (deploymentsById[modelsSelection.id] ?? null)
+      : null
 
   async function navigateToRun(runName: string) {
     const res = await fetch(
@@ -167,12 +186,16 @@ function App() {
   }
 
   function navigateToModel(modelId: string) {
-    setModelSelection({ kind: 'model', id: modelId })
+    setModelsSelection({ kind: 'model', id: modelId })
     setView('models')
   }
 
-  function deploymentPath(model: Model): string {
-    return `/api/deployments/${encodeURIComponent(model.family)}/${encodeURIComponent(model.suffix)}/${encodeURIComponent(model.run_name)}`
+  function deploymentPath(t: {
+    family: string
+    suffix: string
+    run_name: string
+  }): string {
+    return `/api/deployments/${encodeURIComponent(t.family)}/${encodeURIComponent(t.suffix)}/${encodeURIComponent(t.run_name)}`
   }
 
   async function handleDeploy(model: Model) {
@@ -182,8 +205,8 @@ function App() {
     }
   }
 
-  async function handleStop(model: Model) {
-    const res = await fetch(deploymentPath(model), { method: 'DELETE' })
+  async function handleStopDeployment(deployment: Deployment) {
+    const res = await fetch(deploymentPath(deployment), { method: 'DELETE' })
     if (!res.ok) {
       alert(`Stop failed: HTTP ${res.status}\n${await res.text()}`)
     }
@@ -215,20 +238,40 @@ function App() {
           ) : view === 'models' ? (
             <Allotment>
               <Allotment.Pane preferredSize={280} minSize={180} maxSize={500}>
-                <LayoutPane>
-                  <ModelsTree
-                    models={models}
-                    deploymentsById={deploymentsById}
-                    selection={modelSelection}
-                    onSelect={setModelSelection}
-                    onDeleteModel={(model) =>
-                      setPendingDelete({ kind: 'model', model })
-                    }
-                    onDeleteFamily={(family) =>
-                      setPendingDelete({ kind: 'model-family', family })
-                    }
-                  />
-                </LayoutPane>
+                <Allotment vertical>
+                  <Allotment.Pane>
+                    <LayoutPane>
+                      <ModelsTree
+                        models={models}
+                        selection={
+                          modelsSelection?.kind === 'model'
+                            ? modelsSelection
+                            : null
+                        }
+                        onSelect={setModelsSelection}
+                        onDeleteModel={(model) =>
+                          setPendingDelete({ kind: 'model', model })
+                        }
+                        onDeleteFamily={(family) =>
+                          setPendingDelete({ kind: 'model-family', family })
+                        }
+                      />
+                    </LayoutPane>
+                  </Allotment.Pane>
+                  <Allotment.Pane preferredSize={220} minSize={100}>
+                    <LayoutPane>
+                      <DeploymentsTree
+                        deployments={deployments}
+                        selection={
+                          modelsSelection?.kind === 'deployment'
+                            ? modelsSelection
+                            : null
+                        }
+                        onSelect={setModelsSelection}
+                      />
+                    </LayoutPane>
+                  </Allotment.Pane>
+                </Allotment>
               </Allotment.Pane>
               <Allotment.Pane>
                 <LayoutPane>
@@ -238,7 +281,11 @@ function App() {
                       deployment={deploymentsById[selectedModel.id] ?? null}
                       onNavigateToRun={navigateToRun}
                       onDeploy={handleDeploy}
-                      onStop={handleStop}
+                    />
+                  ) : selectedDeployment ? (
+                    <DeploymentDashboard
+                      deployment={selectedDeployment}
+                      onStop={handleStopDeployment}
                     />
                   ) : (
                     <main className="main" />
