@@ -1,5 +1,3 @@
-import os
-
 from cortexflow.secrets import get_secret
 from mlflow.tracking import MlflowClient
 
@@ -23,16 +21,15 @@ def get_ray_serve_applications_uri() -> str:
 
 
 def get_s3_endpoint_url() -> str:
-    # Sourced from the s3-creds Secret via the S3_ENDPOINT_URL env var.
-    # AWS profile: regional s3.amazonaws.com URL. On-prem: in-cluster MinIO URL.
-    return os.environ["S3_ENDPOINT_URL"]
+    # AWS profile: regional s3.amazonaws.com URL (stored as "" = no override).
+    # On-prem: tailnet-reachable MinIO NodePort URL.
+    return get_secret("S3_ENDPOINT_URL")
 
 
 def get_s3_bucket() -> str:
-    # Sourced from the s3-creds Secret via the S3_BUCKET_NAME env var.
     # Provisioned by terraform/platform/s3 on AWS; created lazily on first
     # upload against on-prem MinIO.
-    return os.environ["S3_BUCKET_NAME"]
+    return get_secret("S3_BUCKET_NAME")
 
 
 def get_mlflow_run_url(run_id: str) -> str:

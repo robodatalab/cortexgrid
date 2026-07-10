@@ -44,7 +44,7 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://canonical/app/run/output.parquet")
 
-    @patch.dict(os.environ, {"S3_REGION": "eu-west-2"})
+    @patch("cortexflow.s3_util.get_secret", return_value="eu-west-2")
     @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
     @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
     @patch("cortexflow.s3_util.get_s3_client")
@@ -53,6 +53,7 @@ class TestS3Client(unittest.TestCase):
         mock_client_fn: MagicMock,
         _getsize: MagicMock,
         _bucket: MagicMock,
+        _get_secret: MagicMock,
     ) -> None:
         mock_client = MagicMock()
         mock_client_fn.return_value = mock_client
