@@ -4,14 +4,14 @@
 
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
-| cortexflow integration | - | <!--s:build_cortexflow_integration-->🟢 passing<!--/s--> | <!--s:test_cortexflow_integration-->🟢 passing<!--/s--> |
-| ui integration | - | <!--s:build_cortexflow_ui_integration-->🟢 passing<!--/s--> | <!--s:test_cortexflow_ui_integration-->🟢 passing<!--/s--> |
-| cortexflow | <!--s:test_cortexflow-->🟢 passing<!--/s--> | - | - |
-| jobs control plane | <!--s:test_jobs_control_plane-->🟢 passing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
+| cortexflow integration | - | <!--s:build_cortexflow_integration-->🔴 failing<!--/s--> | <!--s:test_cortexflow_integration-->🟢 passing<!--/s--> |
+| ui integration | - | <!--s:build_cortexflow_ui_integration-->🔴 failing<!--/s--> | <!--s:test_cortexflow_ui_integration-->🟢 passing<!--/s--> |
+| cortexflow | <!--s:test_cortexflow-->🔴 failing<!--/s--> | - | - |
+| jobs control plane | <!--s:test_jobs_control_plane-->🔴 failing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
 | ray | - | <!--s:build_ray-->🟢 passing<!--/s--> | - |
 | arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
-| ui backend | <!--s:test_cortexflow_ui_backend-->🟢 passing<!--/s--> | <!--s:build_cortexflow_ui_backend-->🟢 passing<!--/s--> | - |
+| ui backend | <!--s:test_cortexflow_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexflow_ui_backend-->🟢 passing<!--/s--> | - |
 | ui frontend | <!--s:test_cortexflow_ui_frontend-->🟢 passing<!--/s--> | <!--s:build_cortexflow_ui_frontend-->🟢 passing<!--/s--> | - |
 | k8s seed | <!--s:test_k8s_seed-->🟢 passing<!--/s--> | - | - |
 
