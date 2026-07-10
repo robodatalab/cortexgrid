@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 from typing import Any
@@ -40,6 +40,14 @@ _LIFECYCLE_TAG = "lifecycle"
 _PHASE_UPLOADING = "uploading"
 _PHASE_READY = "ready"
 _PHASE_UPLOAD_FAILED = "upload_failed"
+_PHASE_BROKEN = "broken"
+
+# An upload still marked "uploading" this long after the version was created is
+# treated as broken: save_model creates the version immediately before the
+# upload begins, so creation_timestamp is the upload start, and a process that
+# dies mid-upload never flips the tag to "ready"/"upload_failed". Expiry is
+# derived lazily on read (see `_phase_for`); nothing is written back.
+_UPLOAD_DEADLINE = timedelta(hours=3)
 
 
 @dataclass
@@ -52,8 +60,27 @@ class SavedModel:
     size_bytes: int
     # Registry lifecycle phase: "uploading" while save_model streams the weights
     # and serve bundle to storage, "ready" once that finishes, "upload_failed"
-    # if it errored. Versions written before this tag existed report "ready".
+    # if it errored, "broken" if an upload has stayed in progress past
+    # _UPLOAD_DEADLINE (writer presumed dead). Versions written before this tag
+    # existed report "ready".
     phase: str
+
+
+def _phase_for(version: Any) -> str:
+    """Registry lifecycle phase of a version, expiring stale uploads to "broken".
+
+    Reads the lifecycle tag, but an upload that has stayed "uploading" longer
+    than _UPLOAD_DEADLINE (measured from creation_timestamp, i.e. the upload
+    start) is reported as "broken" instead."""
+    phase = version.tags.get(_LIFECYCLE_TAG, _PHASE_READY)
+    if phase != _PHASE_UPLOADING:
+        return phase
+    started = datetime.fromtimestamp(
+        version.creation_timestamp / 1000, tz=timezone.utc
+    )
+    if datetime.now(timezone.utc) - started > _UPLOAD_DEADLINE:
+        return _PHASE_BROKEN
+    return phase
 
 
 def _to_saved_model(version: Any) -> SavedModel:
@@ -66,7 +93,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         data_blob_path=version.source,
         size_bytes=int(version.tags.get("size_bytes", "0")),
-        phase=version.tags.get(_LIFECYCLE_TAG, _PHASE_READY),
+        phase=_phase_for(version),
     )
 
 
@@ -192,8 +219,9 @@ def model_registry_status(
 
     The registry lifecycle is owned here: it begins when `save_model` creates
     the ModelVersion (`phase="uploading"`), becomes `"ready"` once the weights
-    and serve bundle finish uploading, or `"upload_failed"` if the upload
-    errored. Serving is a separate lifecycle; see
+    and serve bundle finish uploading, `"upload_failed"` if the upload errored,
+    or `"broken"` if an upload has stayed in progress past _UPLOAD_DEADLINE
+    (the writer is presumed dead). Serving is a separate lifecycle; see
     `cortexflow.model_serving.model_serving_status`.
     """
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
