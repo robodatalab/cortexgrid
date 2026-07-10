@@ -82,7 +82,9 @@ from cortexflow.model_storage import (
 from cortexflow.model_storage import save_model as _save_model_storage
 from cortexflow.model_serving import (
     Deployment,
+    DeploymentStatus,
     deploy_model,
+    deployment_status,
     list_deployed_models,
     undeploy_model,
 )
@@ -181,7 +183,9 @@ __all__ = [
     "delete_model",
     # Model serving
     "Deployment",
+    "DeploymentStatus",
     "deploy_model",
+    "deployment_status",
     "undeploy_model",
     "list_deployed_models",
 ]
