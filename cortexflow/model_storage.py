@@ -33,6 +33,15 @@ from cortexflow.model_serving import (
 )
 
 
+# MLflow ModelVersion tag holding the registry lifecycle phase, and its
+# values. This is a separate lifecycle from serving (Ray Serve); see
+# cortexflow.model_serving for that vocabulary.
+_LIFECYCLE_TAG = "lifecycle"
+_PHASE_UPLOADING = "uploading"
+_PHASE_READY = "ready"
+_PHASE_UPLOAD_FAILED = "upload_failed"
+
+
 @dataclass
 class SavedModel:
     family: str
@@ -41,6 +50,10 @@ class SavedModel:
     created_at: str
     data_blob_path: str
     size_bytes: int
+    # Registry lifecycle phase: "uploading" while save_model streams the weights
+    # and serve bundle to storage, "ready" once that finishes, "upload_failed"
+    # if it errored. Versions written before this tag existed report "ready".
+    phase: str
 
 
 def _to_saved_model(version: Any) -> SavedModel:
@@ -53,6 +66,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         ).strftime("%Y-%m-%dT%H:%M:%SZ"),
         data_blob_path=version.source,
         size_bytes=int(version.tags.get("size_bytes", "0")),
+        phase=version.tags.get(_LIFECYCLE_TAG, _PHASE_READY),
     )
 
 
@@ -109,12 +123,13 @@ def save_model(
     bucket = get_s3_bucket()
     prefix = f"models/{run_name}/{family}/{suffix}"
     size_bytes = _dir_size_bytes(weights_dir)
-    s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
     source = f"s3://{bucket}/{prefix}/weights/"
-    bundle_meta = bundle_class(serve_app, family, suffix, run_name)
     name = f"{family}__{suffix}"
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     _ensure_registered_model(client, name)
+    # Register the version up front in the "uploading" phase so the dashboard
+    # can surface a model while its weights are still streaming to storage. The
+    # bundle tags and the flip to "ready" happen only after the upload lands.
     version = client.create_model_version(
         name=name,
         source=source,
@@ -124,10 +139,23 @@ def save_model(
             "suffix": suffix,
             "run_name": run_name,
             "size_bytes": str(size_bytes),
-            **metadata_to_tags(bundle_meta),
+            _LIFECYCLE_TAG: _PHASE_UPLOADING,
         },
     )
-    return _to_saved_model(version)
+    try:
+        s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
+        bundle_meta = bundle_class(serve_app, family, suffix, run_name)
+        for key, value in metadata_to_tags(bundle_meta).items():
+            client.set_model_version_tag(name, version.version, key, value)
+        client.set_model_version_tag(
+            name, version.version, _LIFECYCLE_TAG, _PHASE_READY
+        )
+    except Exception:
+        client.set_model_version_tag(
+            name, version.version, _LIFECYCLE_TAG, _PHASE_UPLOAD_FAILED
+        )
+        raise
+    return _to_saved_model(client.get_model_version(name, version.version))
 
 
 def load_model(family: str, suffix: str, run_name: str) -> Path:
@@ -149,9 +177,30 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
 
 
 def list_models() -> list[SavedModel]:
-    """Return SavedModel records for every ModelVersion in the registry."""
+    """Return SavedModel records for every ModelVersion in the registry,
+    including versions still uploading or whose upload failed (see
+    `SavedModel.phase`)."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     return [_to_saved_model(v) for v in client.search_model_versions("")]
+
+
+def model_registry_status(
+    family: str, suffix: str, run_name: str
+) -> SavedModel | None:
+    """Report the registry lifecycle of one model, or None if it was never
+    registered (no upload ever started).
+
+    The registry lifecycle is owned here: it begins when `save_model` creates
+    the ModelVersion (`phase="uploading"`), becomes `"ready"` once the weights
+    and serve bundle finish uploading, or `"upload_failed"` if the upload
+    errored. Serving is a separate lifecycle; see
+    `cortexflow.model_serving.model_serving_status`.
+    """
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    versions = client.search_model_versions(
+        f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
+    )
+    return _to_saved_model(versions[0]) if versions else None
 
 
 def delete_model(family: str, suffix: str, run_name: str) -> None:

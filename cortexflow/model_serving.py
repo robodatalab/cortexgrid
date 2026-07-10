@@ -326,19 +326,23 @@ def list_deployed_models() -> list[Deployment]:
 
 
 @dataclass
-class DeploymentStatus:
-    """Normalized lifecycle status of one model, spanning registry + serving.
+class ServingStatus:
+    """Serving lifecycle of one model, owned by the Ray Serve controller.
+
+    This is the serving half of a model's life. The registry half (uploading /
+    ready in MLflow) is a separate lifecycle reported by
+    `cortexflow.model_storage.model_registry_status`.
 
     `phase` is one of:
-      - "absent"     no registered ModelVersion yet — weights are still being staged
-                     (downloaded + uploaded to the registry by the caller)
-      - "saved"      registered in the model registry, but no Serve app scheduled
-      - "deploying"  Serve app scheduling/starting; the replica pulls the weights and
-                     builds the model on the worker (NOT_STARTED / DEPLOYING)
-      - "running"    serving traffic
-      - "unhealthy"  Serve app reports UNHEALTHY
-      - "failed"     Serve app DEPLOY_FAILED
-      - "deleting"   Serve app being torn down
+      - "not_deployed"  no Serve app: never deployed, or already undeployed
+      - "not_started"   controller accepted the app but has not started it yet
+                        (NOT_STARTED)
+      - "deploying"     replicas starting; the replica pulls the weights and
+                        builds the model on the worker (DEPLOYING)
+      - "running"       serving traffic (RUNNING)
+      - "unhealthy"     Serve app reports UNHEALTHY
+      - "failed"        Serve app DEPLOY_FAILED
+      - "deleting"      Serve app being torn down (DELETING)
     """
 
     family: str
@@ -349,54 +353,45 @@ class DeploymentStatus:
     url: str | None
 
 
+_PHASE_NOT_DEPLOYED = "not_deployed"
+
 _PHASE_BY_SERVE_STATUS = {
     ApplicationStatus.RUNNING.value: "running",
     ApplicationStatus.DEPLOYING.value: "deploying",
-    ApplicationStatus.NOT_STARTED.value: "deploying",
+    ApplicationStatus.NOT_STARTED.value: "not_started",
     ApplicationStatus.UNHEALTHY.value: "unhealthy",
     ApplicationStatus.DEPLOY_FAILED.value: "failed",
     ApplicationStatus.DELETING.value: "deleting",
 }
 
 
-def _is_registered(family: str, suffix: str, run_name: str) -> bool:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    return bool(
-        client.search_model_versions(
-            f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
-        )
-    )
+def model_serving_status(
+    family: str, suffix: str, run_name: str
+) -> ServingStatus:
+    """Report the serving lifecycle phase of a model from the Ray Serve
+    controller, HTTP-only.
 
-
-def deployment_status(family: str, suffix: str, run_name: str) -> DeploymentStatus:
-    """Report the lifecycle phase of a model, HTTP-only, composed from the Ray Serve
-    controller and the model registry.
-
-    Covers the whole path a caller cares about: before a Serve app exists it reports
-    whether the weights have been registered yet ("absent" while they're still being
-    staged, "saved" once registered); once an app exists it reflects the controller's
-    status ("deploying" while the replica downloads weights + builds on the worker,
-    then "running"). See `DeploymentStatus` for the phase vocabulary.
+    The serving lifecycle begins when `deploy_model` schedules the app and ends
+    when `undeploy_model` tears it down; outside that window the phase is
+    "not_deployed". While an app exists the phase reflects the controller's
+    status ("deploying" while the replica pulls weights and builds the model on
+    the worker, then "running"). See `ServingStatus` for the full vocabulary.
+    The registry lifecycle is reported separately by
+    `cortexflow.model_storage.model_registry_status`.
     """
     app = get_serve_details().get("applications", {}).get(
         _app_name(family, suffix, run_name)
     )
-    if app is not None:
-        raw = str(app.get("status", ""))
-        return DeploymentStatus(
-            family=family,
-            suffix=suffix,
-            run_name=run_name,
-            phase=_PHASE_BY_SERVE_STATUS.get(raw, "deploying"),
-            message=str(app.get("message", "")) or raw,
-            url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
+    if app is None:
+        return ServingStatus(
+            family, suffix, run_name, _PHASE_NOT_DEPLOYED, "", None
         )
-    if _is_registered(family, suffix, run_name):
-        return DeploymentStatus(
-            family, suffix, run_name, "saved",
-            "registered in the model registry; not deployed", None,
-        )
-    return DeploymentStatus(
-        family, suffix, run_name, "absent",
-        "no registered model version yet (weights still being staged)", None,
+    raw = str(app.get("status", ""))
+    return ServingStatus(
+        family=family,
+        suffix=suffix,
+        run_name=run_name,
+        phase=_PHASE_BY_SERVE_STATUS.get(raw, "deploying"),
+        message=str(app.get("message", "")) or raw,
+        url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
     )

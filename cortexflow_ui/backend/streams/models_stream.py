@@ -28,6 +28,10 @@ class Model:
     created_at: str
     data_blob_path: str
     size_bytes: int
+    # Registry lifecycle phase: "uploading" while the weights stream to storage,
+    # "ready" once registered, "upload_failed" on error. Lets the dashboard show
+    # a model that is still uploading and not yet deployable.
+    phase: str
 
 
 def model_id(family: str, suffix: str, run_name: str) -> ModelId:
@@ -46,6 +50,7 @@ def poll_models(_: None) -> dict[ModelId, Model]:
             created_at=m.created_at,
             data_blob_path=m.data_blob_path,
             size_bytes=m.size_bytes,
+            phase=m.phase,
         )
     return out
 
