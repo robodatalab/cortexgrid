@@ -1,41 +1,19 @@
 import "./ModelDashboard.css";
 import type { Deployment, Model } from "./ModelsTree";
+import {
+    registryLabel,
+    registryTier,
+    servingLabel,
+    servingTier,
+} from "../phases";
 
 type Props = {
     model: Model;
     deployment: Deployment | null;
     onNavigateToRun: (runName: string) => void;
+    onNavigateToDeployment: (id: string) => void;
     onDeploy: (model: Model) => void;
-    onStop: (model: Model) => void;
 };
-
-// Public ingress hosts on the Tailscale network. Both are also configured in
-// k8s/charts/cortexflow/values.yaml (ray) and k8s/argo_deployments/base/monitoring.yaml
-// (grafana); keep these in sync if either host changes.
-const RAY_DASHBOARD_HOST = "ray.robodatalab.com";
-const GRAFANA_HOST = "grafana.robodatalab.com";
-const GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID = "rayServeDeploymentDashboard";
-
-type DotTier = "ok" | "warn" | "error";
-
-function statusTier(status: string): DotTier {
-    if (status === "DEPLOY_FAILED" || status === "UNHEALTHY") return "error";
-    if (status === "RUNNING") return "ok";
-    return "warn";
-}
-
-function appName(model: Model): string {
-    return `${model.family}__${model.suffix}__${model.run_name}`;
-}
-
-function rayDashboardUrl(model: Model): string {
-    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(appName(model))}`;
-}
-
-function grafanaUrl(model: Model): string {
-    const params = new URLSearchParams({ "var-Application": appName(model) });
-    return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
-}
 
 function formatSize(bytes: number): string {
     if (bytes <= 0) return "—";
@@ -58,10 +36,12 @@ export function ModelDashboard({
     model,
     deployment,
     onNavigateToRun,
+    onNavigateToDeployment,
     onDeploy,
-    onStop,
 }: Props) {
-    const tier: DotTier | null = deployment ? statusTier(deployment.status) : null;
+    const servingTierValue = deployment ? servingTier(deployment.phase) : null;
+    const regTier = registryTier(model.phase);
+    const canDeploy = model.phase === "ready" && deployment === null;
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
@@ -70,58 +50,48 @@ export function ModelDashboard({
                         {model.family} / {model.suffix}
                     </h1>
                     <div className="model-dashboard__subtitle">{model.run_name}</div>
+                    <div className="model-dashboard__registry">
+                        <span
+                            className={`model-dashboard__dot model-dashboard__dot--${regTier}`}
+                            aria-label={`Registry status: ${registryLabel(model.phase)}`}
+                        />
+                        <span className="model-dashboard__registry-label">
+                            {registryLabel(model.phase)}
+                        </span>
+                    </div>
                 </div>
                 <div className="model-dashboard__actions">
                     <button
                         type="button"
                         className="btn"
                         onClick={() => onDeploy(model)}
-                        disabled={deployment !== null}
+                        disabled={!canDeploy}
                     >
                         Deploy
-                    </button>
-                    <button
-                        type="button"
-                        className="btn"
-                        onClick={() => onStop(model)}
-                        disabled={deployment === null}
-                    >
-                        Stop
                     </button>
                 </div>
             </header>
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">
-                    {tier && (
+                    {servingTierValue && (
                         <span
-                            className={`model-dashboard__dot model-dashboard__dot--${tier}`}
-                            aria-label={`Deployment status: ${deployment?.status}`}
+                            className={`model-dashboard__dot model-dashboard__dot--${servingTierValue}`}
+                            aria-label={`Deployment status: ${deployment ? servingLabel(deployment.phase) : "Not deployed"}`}
                         />
                     )}
                     <span className="model-dashboard__deployment-label">
-                        {deployment ? deployment.status : "Not deployed"}
+                        {deployment ? servingLabel(deployment.phase) : "Not deployed"}
                     </span>
+                    {deployment && (
+                        <button
+                            type="button"
+                            className="model-dashboard__link"
+                            onClick={() => onNavigateToDeployment(model.id)}
+                        >
+                            View deployment
+                        </button>
+                    )}
                 </div>
-                {deployment && (
-                    <div className="model-dashboard__deployment-links">
-                        <a
-                            className="model-dashboard__button"
-                            href={rayDashboardUrl(model)}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            Open in Ray dashboard
-                        </a>
-                        <a
-                            className="model-dashboard__button"
-                            href={grafanaUrl(model)}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            Open in Grafana
-                        </a>
-                    </div>
-                )}
             </section>
             <dl className="model-dashboard__fields">
                 <dt>Family</dt>

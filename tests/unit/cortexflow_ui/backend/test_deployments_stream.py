@@ -22,7 +22,7 @@ class TestPollDeployments(unittest.TestCase):
             suffix="instruct",
             run_name="boogey-46",
             url="http://ray/r/Qwen2/instruct/boogey-46",
-            status="RUNNING",
+            phase="running",
         )
         with patch(
             "cortexflow_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -40,14 +40,14 @@ class TestPollDeployments(unittest.TestCase):
                 suffix="instruct",
                 run_name="boogey-46",
                 url="http://ray/r/Qwen2/instruct/boogey-46",
-                status="RUNNING",
+                phase="running",
             ),
             Deployment(
                 family="DeepSeek3",
                 suffix="chat",
                 run_name="snake-12",
                 url="http://ray/r/DeepSeek3/chat/snake-12",
-                status="DEPLOY_FAILED",
+                phase="failed",
             ),
         ]
         with patch(
@@ -60,8 +60,8 @@ class TestPollDeployments(unittest.TestCase):
             sorted(result.keys()),
             ["DeepSeek3/chat/snake-12", "Qwen2/instruct/boogey-46"],
         )
-        self.assertEqual(result["DeepSeek3/chat/snake-12"].status, "DEPLOY_FAILED")
-        self.assertEqual(result["Qwen2/instruct/boogey-46"].status, "RUNNING")
+        self.assertEqual(result["DeepSeek3/chat/snake-12"].phase, "failed")
+        self.assertEqual(result["Qwen2/instruct/boogey-46"].phase, "running")
 
 
 if __name__ == "__main__":

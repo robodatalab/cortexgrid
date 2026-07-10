@@ -53,6 +53,7 @@ def _make_model(family: str, suffix: str, run_name: str) -> Model:
         created_at="2026-05-21T00:00:00Z",
         data_blob_path=f"s3://test-bucket/models/{run_name}/{family}/{suffix}/weights/",
         size_bytes=100,
+        phase="ready",
     )
 
 

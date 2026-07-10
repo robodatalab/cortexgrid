@@ -37,6 +37,18 @@
     margin-top: 4px;
 }
 
+.model-dashboard__registry {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.model-dashboard__registry-label {
+    font-size: var(--font-sm);
+    color: #000;
+}
+
 .model-dashboard__fields {
     display: grid;
     grid-template-columns: 140px 1fr;

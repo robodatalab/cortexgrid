@@ -53,11 +53,15 @@ _CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 
 @dataclass
 class Deployment:
+    """A scheduled Ray Serve app fronting a model. `phase` is the normalized
+    serving lifecycle phase (see `ServingStatus`); an app that appears in a
+    listing always exists, so its phase is never "not_deployed"."""
+
     family: str
     suffix: str
     run_name: str
     url: str
-    status: str
+    phase: str
 
 
 def _app_name(family: str, suffix: str, run_name: str) -> str:
@@ -66,6 +70,27 @@ def _app_name(family: str, suffix: str, run_name: str) -> str:
 
 def _route_prefix(family: str, suffix: str, run_name: str) -> str:
     return f"/r/{family}/{suffix}/{run_name}"
+
+
+_PHASE_NOT_DEPLOYED = "not_deployed"
+
+# Ray Serve ApplicationStatus -> normalized serving phase. The single source of
+# the serving vocabulary, shared by Deployment, list_deployed_models, and
+# model_serving_status.
+_PHASE_BY_SERVE_STATUS = {
+    ApplicationStatus.RUNNING.value: "running",
+    ApplicationStatus.DEPLOYING.value: "deploying",
+    ApplicationStatus.NOT_STARTED.value: "not_started",
+    ApplicationStatus.UNHEALTHY.value: "unhealthy",
+    ApplicationStatus.DEPLOY_FAILED.value: "failed",
+    ApplicationStatus.DELETING.value: "deleting",
+}
+
+
+def _serve_phase(raw_status: str) -> str:
+    """Map a Ray Serve app status to the normalized serving phase, defaulting to
+    "deploying" for an app that exists but has no recognized status yet."""
+    return _PHASE_BY_SERVE_STATUS.get(raw_status, "deploying")
 
 
 def _pip_requirements_for_serve(external_deps: set[str]) -> list[str]:
@@ -292,7 +317,7 @@ def deploy_model(
         suffix=suffix,
         run_name=run_name,
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
-        status=str(app.get("status", "unknown")),
+        phase=_serve_phase(str(app.get("status", ""))),
     )
 
 
@@ -319,7 +344,67 @@ def list_deployed_models() -> list[Deployment]:
                 suffix=suffix,
                 run_name=run_name,
                 url=f"{base}{_route_prefix(family, suffix, run_name)}",
-                status=str(app.get("status", "unknown")),
+                phase=_serve_phase(str(app.get("status", ""))),
             )
         )
     return result
+
+
+@dataclass
+class ServingStatus:
+    """Serving lifecycle of one model, owned by the Ray Serve controller.
+
+    This is the serving half of a model's life. The registry half (uploading /
+    ready in MLflow) is a separate lifecycle reported by
+    `cortexflow.model_storage.model_registry_status`.
+
+    `phase` is one of:
+      - "not_deployed"  no Serve app: never deployed, or already undeployed
+      - "not_started"   controller accepted the app but has not started it yet
+                        (NOT_STARTED)
+      - "deploying"     replicas starting; the replica pulls the weights and
+                        builds the model on the worker (DEPLOYING)
+      - "running"       serving traffic (RUNNING)
+      - "unhealthy"     Serve app reports UNHEALTHY
+      - "failed"        Serve app DEPLOY_FAILED
+      - "deleting"      Serve app being torn down (DELETING)
+    """
+
+    family: str
+    suffix: str
+    run_name: str
+    phase: str
+    message: str
+    url: str | None
+
+
+def model_serving_status(
+    family: str, suffix: str, run_name: str
+) -> ServingStatus:
+    """Report the serving lifecycle phase of a model from the Ray Serve
+    controller, HTTP-only.
+
+    The serving lifecycle begins when `deploy_model` schedules the app and ends
+    when `undeploy_model` tears it down; outside that window the phase is
+    "not_deployed". While an app exists the phase reflects the controller's
+    status ("deploying" while the replica pulls weights and builds the model on
+    the worker, then "running"). See `ServingStatus` for the full vocabulary.
+    The registry lifecycle is reported separately by
+    `cortexflow.model_storage.model_registry_status`.
+    """
+    app = get_serve_details().get("applications", {}).get(
+        _app_name(family, suffix, run_name)
+    )
+    if app is None:
+        return ServingStatus(
+            family, suffix, run_name, _PHASE_NOT_DEPLOYED, "", None
+        )
+    raw = str(app.get("status", ""))
+    return ServingStatus(
+        family=family,
+        suffix=suffix,
+        run_name=run_name,
+        phase=_serve_phase(raw),
+        message=str(app.get("message", "")) or raw,
+        url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
+    )

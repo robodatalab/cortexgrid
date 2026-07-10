@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from cortexflow.model_storage import (
     delete_models_for_run,
     list_models,
     load_model,
+    model_registry_status,
     save_model,
 )
 
@@ -25,6 +27,12 @@ class _FakeServeApp:
     """Stand-in for the Ray Serve ingress class paired with the weights at save
     time. `bundle_class` is mocked in these tests, so this only needs to be a
     type that `save_model` can hand to the (mocked) bundler."""
+
+
+def _recent_ms() -> int:
+    """Epoch-ms for a version created just now (well within the upload deadline),
+    so a still-"uploading" version does not read as a stale/broken upload."""
+    return int(time.time() * 1000)
 
 
 def _make_weights_dir() -> Path:
@@ -114,6 +122,21 @@ class FakeMLflow:
             rid = filter_string.split("run_id='")[1].split("'")[0]
             result = [v for v in result if v.run_id == rid]
         return result
+
+    def set_model_version_tag(
+        self, name: str, version: str, key: str, value: str
+    ) -> None:
+        for v in self.versions:
+            if v.name == name and v.version == version:
+                v.tags[key] = value
+                return
+        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
+
+    def get_model_version(self, name: str, version: str) -> FakeModelVersion:
+        for v in self.versions:
+            if v.name == name and v.version == version:
+                return v
+        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
 
     def delete_model_version(self, name: str, version: str) -> None:
         self.versions = [
@@ -286,6 +309,41 @@ class TestSaveModel(unittest.TestCase):
         )
         self.assertEqual(result.size_bytes, 15)
 
+    def test_returns_savedmodel_in_ready_phase(self) -> None:
+        result = save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+        self.assertEqual(result.phase, "ready")
+
+    def test_marks_version_ready_after_upload(self) -> None:
+        save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+        self.assertEqual(self.mlflow.versions[0].tags["lifecycle"], "ready")
+
+    def test_registers_version_before_upload_and_marks_failed_on_error(
+        self,
+    ) -> None:
+        with patch.object(
+            self.s3, "upload_dir", side_effect=RuntimeError("network died")
+        ), self.assertRaises(RuntimeError):
+            save_model(
+                self.weights_dir, _FakeServeApp,
+                "instruct", "Qwen2",
+                run_id="r1", run_name="boogey-46",
+            )
+
+        # The version exists (was registered before the upload, so the dashboard
+        # can surface it) and is marked upload_failed rather than left dangling.
+        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(
+            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
+        )
+
 
 class TestLoadModel(unittest.TestCase):
     def setUp(self) -> None:
@@ -336,6 +394,65 @@ class TestListModels(unittest.TestCase):
 
     def test_returns_empty_when_registry_is_empty(self) -> None:
         self.assertEqual(list_models(), [])
+
+    def test_surfaces_uploading_version_with_phase(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        v.tags["lifecycle"] = "uploading"
+        v.creation_timestamp = _recent_ms()
+
+        result = list_models()
+
+        self.assertEqual(result[0].phase, "uploading")
+
+    def test_defaults_phase_to_ready_for_untagged_version(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        result = list_models()
+
+        self.assertEqual(result[0].phase, "ready")
+
+
+class TestModelRegistryStatus(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        for p in _patches(self.mlflow, self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_returns_none_when_never_registered(self) -> None:
+        self.assertIsNone(
+            model_registry_status("Qwen2", "instruct", "missing")
+        )
+
+    def test_reports_ready_for_registered_model(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        status = model_registry_status("Qwen2", "instruct", "boogey-46")
+
+        assert status is not None
+        self.assertEqual(status.phase, "ready")
+
+    def test_reports_uploading_phase(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        v.tags["lifecycle"] = "uploading"
+        v.creation_timestamp = _recent_ms()
+
+        status = model_registry_status("Qwen2", "instruct", "boogey-46")
+
+        assert status is not None
+        self.assertEqual(status.phase, "uploading")
+
+    def test_reports_broken_when_upload_exceeds_deadline(self) -> None:
+        # _seed_version's default creation_timestamp is years in the past, well
+        # beyond the 3h deadline, so a still-"uploading" version reads as stale.
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        v.tags["lifecycle"] = "uploading"
+
+        status = model_registry_status("Qwen2", "instruct", "boogey-46")
+
+        assert status is not None
+        self.assertEqual(status.phase, "broken")
 
 
 class TestDeleteModel(unittest.TestCase):

@@ -126,6 +126,18 @@ mlflow_client = cortexflow.get_mlflow_client()   # mlflow.tracking.MlflowClient
 s3_client = cortexflow.get_s3_client()           # boto3 S3 client
 ```
 
+#### Model registry and serving
+
+Save a trained model's weights together with the serve-app that fronts it, then deploy it as a Ray Serve application:
+
+```python
+saved = cortexflow.save_model(weights_dir, MyServeApp, family="qwen", suffix="instruct")
+deployed = cortexflow.deploy_model("qwen", "instruct", saved.run_name, wait=True)
+print(deployed.url)
+```
+
+`save_model` is synchronous (registry lifecycle: `uploading` -> `ready`); `deploy_model` schedules the serving lifecycle (`deploying` -> `running`). See [model-serving.md](model-serving.md) for both lifecycles end to end - upload/deploy/undeploy/delete, status queries (`model_registry_status`, `model_serving_status`), and error handling.
+
 ### API reference
 
 | Function | Description |

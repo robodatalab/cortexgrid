@@ -9,6 +9,7 @@ from cortexflow.model_serving import (
     _wait_for_application_running,
     deploy_model,
     list_deployed_models,
+    model_serving_status,
     undeploy_model,
 )
 
@@ -214,6 +215,70 @@ class TestWaitForApplicationRunning(unittest.TestCase):
             )
 
         self.assertIn("DEPLOY_FAILED", str(ctx.exception))
+
+
+class TestModelServingStatus(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = FakeServeState()
+        patches = [
+            patch(
+                "cortexflow.model_serving.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch(
+                "cortexflow.model_serving.get_ray_serve_uri",
+                return_value="http://ray:30000",
+            ),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _serve_app(self, status: str, message: str = "") -> None:
+        self.state.apps["fam__suf__run"] = {"name": "fam__suf__run"}
+        self.state.status = status
+        self.state.message = message
+
+    def test_not_deployed_when_no_serve_app(self) -> None:
+        s = model_serving_status("fam", "suf", "run")
+        self.assertEqual(s.phase, "not_deployed")
+        self.assertIsNone(s.url)
+
+    def test_not_started_is_reported_distinctly(self) -> None:
+        self._serve_app("NOT_STARTED")
+        self.assertEqual(
+            model_serving_status("fam", "suf", "run").phase, "not_started"
+        )
+
+    def test_deploying_reflects_controller_status_and_message(self) -> None:
+        self._serve_app("DEPLOYING", "pulling weights")
+        s = model_serving_status("fam", "suf", "run")
+        self.assertEqual(s.phase, "deploying")
+        self.assertEqual(s.message, "pulling weights")
+
+    def test_running_carries_the_route_url(self) -> None:
+        self._serve_app("RUNNING")
+        s = model_serving_status("fam", "suf", "run")
+        self.assertEqual(s.phase, "running")
+        self.assertEqual(s.url, "http://ray:30000/r/fam/suf/run")
+
+    def test_unhealthy_maps_to_unhealthy(self) -> None:
+        self._serve_app("UNHEALTHY")
+        self.assertEqual(
+            model_serving_status("fam", "suf", "run").phase, "unhealthy"
+        )
+
+    def test_deleting_maps_to_deleting(self) -> None:
+        self._serve_app("DELETING")
+        self.assertEqual(
+            model_serving_status("fam", "suf", "run").phase, "deleting"
+        )
+
+    def test_deploy_failed_maps_to_failed(self) -> None:
+        self._serve_app("DEPLOY_FAILED", "oom")
+        self.assertEqual(
+            model_serving_status("fam", "suf", "run").phase, "failed"
+        )
 
 
 if __name__ == "__main__":
