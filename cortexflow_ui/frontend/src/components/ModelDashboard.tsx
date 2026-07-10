@@ -1,5 +1,11 @@
 import "./ModelDashboard.css";
 import type { Deployment, Model } from "./ModelsTree";
+import {
+    registryLabel,
+    registryTier,
+    servingLabel,
+    servingTier,
+} from "../phases";
 
 type Props = {
     model: Model;
@@ -15,14 +21,6 @@ type Props = {
 const RAY_DASHBOARD_HOST = "ray.robodatalab.com";
 const GRAFANA_HOST = "grafana.robodatalab.com";
 const GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID = "rayServeDeploymentDashboard";
-
-type DotTier = "ok" | "warn" | "error";
-
-function statusTier(status: string): DotTier {
-    if (status === "DEPLOY_FAILED" || status === "UNHEALTHY") return "error";
-    if (status === "RUNNING") return "ok";
-    return "warn";
-}
 
 function appName(model: Model): string {
     return `${model.family}__${model.suffix}__${model.run_name}`;
@@ -61,7 +59,9 @@ export function ModelDashboard({
     onDeploy,
     onStop,
 }: Props) {
-    const tier: DotTier | null = deployment ? statusTier(deployment.status) : null;
+    const servingTierValue = deployment ? servingTier(deployment.phase) : null;
+    const regTier = registryTier(model.phase);
+    const canDeploy = model.phase === "ready" && deployment === null;
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
@@ -70,13 +70,22 @@ export function ModelDashboard({
                         {model.family} / {model.suffix}
                     </h1>
                     <div className="model-dashboard__subtitle">{model.run_name}</div>
+                    <div className="model-dashboard__registry">
+                        <span
+                            className={`model-dashboard__dot model-dashboard__dot--${regTier}`}
+                            aria-label={`Registry status: ${registryLabel(model.phase)}`}
+                        />
+                        <span className="model-dashboard__registry-label">
+                            {registryLabel(model.phase)}
+                        </span>
+                    </div>
                 </div>
                 <div className="model-dashboard__actions">
                     <button
                         type="button"
                         className="btn"
                         onClick={() => onDeploy(model)}
-                        disabled={deployment !== null}
+                        disabled={!canDeploy}
                     >
                         Deploy
                     </button>
@@ -92,14 +101,14 @@ export function ModelDashboard({
             </header>
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">
-                    {tier && (
+                    {servingTierValue && (
                         <span
-                            className={`model-dashboard__dot model-dashboard__dot--${tier}`}
-                            aria-label={`Deployment status: ${deployment?.status}`}
+                            className={`model-dashboard__dot model-dashboard__dot--${servingTierValue}`}
+                            aria-label={`Deployment status: ${deployment ? servingLabel(deployment.phase) : "Not deployed"}`}
                         />
                     )}
                     <span className="model-dashboard__deployment-label">
-                        {deployment ? deployment.status : "Not deployed"}
+                        {deployment ? servingLabel(deployment.phase) : "Not deployed"}
                     </span>
                 </div>
                 {deployment && (

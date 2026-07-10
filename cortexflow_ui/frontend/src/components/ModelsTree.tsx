@@ -1,6 +1,7 @@
 import { Fragment, useMemo } from "react";
 import { Layers, Box, Trash2 } from "lucide-react";
 import "./ModelsTree.css";
+import { servingTier, worstTier } from "../phases";
 
 export type Model = {
     id: string;
@@ -10,6 +11,8 @@ export type Model = {
     created_at: string;
     data_blob_path: string;
     size_bytes: number;
+    // Registry lifecycle phase: uploading | ready | upload_failed | broken.
+    phase: string;
 };
 
 export type Deployment = {
@@ -17,7 +20,8 @@ export type Deployment = {
     suffix: string;
     run_name: string;
     url: string;
-    status: string;
+    // Normalized serving lifecycle phase (see ServingStatus).
+    phase: string;
 };
 
 export type ModelSelection = { kind: "model"; id: string };
@@ -30,23 +34,6 @@ type Props = {
     onDeleteModel: (model: Model) => void;
     onDeleteFamily: (family: string) => void;
 };
-
-// Ray Serve ApplicationStatus → severity tier. Higher = worse, used for
-// family-row rollup.
-type DotTier = "ok" | "warn" | "error";
-
-function statusTier(status: string): DotTier {
-    if (status === "DEPLOY_FAILED" || status === "UNHEALTHY") return "error";
-    if (status === "RUNNING") return "ok";
-    return "warn";
-}
-
-function worstTier(tiers: DotTier[]): DotTier | null {
-    if (tiers.includes("error")) return "error";
-    if (tiers.includes("warn")) return "warn";
-    if (tiers.includes("ok")) return "ok";
-    return null;
-}
 
 function rowClass(isAncestor: boolean, isLeaf: boolean): string {
     const parts = ["models-tree__row"];
@@ -97,7 +84,7 @@ export function ModelsTree({
                         byFamily[family]
                             .map((m) => deploymentsById[m.id])
                             .filter((d): d is Deployment => d !== undefined)
-                            .map((d) => statusTier(d.status)),
+                            .map((d) => servingTier(d.phase)),
                     );
                     return (
                         <Fragment key={family}>
@@ -134,7 +121,7 @@ export function ModelsTree({
                                     const isLeaf = selection?.id === m.id;
                                     const deployment = deploymentsById[m.id];
                                     const leafTier = deployment
-                                        ? statusTier(deployment.status)
+                                        ? servingTier(deployment.phase)
                                         : null;
                                     return (
                                         <div
@@ -157,7 +144,7 @@ export function ModelsTree({
                                             {leafTier && (
                                                 <span
                                                     className={`models-tree__dot models-tree__dot--${leafTier}`}
-                                                    aria-label={`Deployment status: ${deployment?.status}`}
+                                                    aria-label={`Deployment status: ${deployment?.phase}`}
                                                 />
                                             )}
                                             <button
