@@ -12,7 +12,7 @@ component | unit test | docker image | integration test |
 | ray | - | <!--s:build_ray-->🟢 passing<!--/s--> | - |
 | arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
 | ui backend | <!--s:test_cortexflow_ui_backend-->🟢 passing<!--/s--> | <!--s:build_cortexflow_ui_backend-->🟢 passing<!--/s--> | - |
-| ui frontend | <!--s:test_cortexflow_ui_frontend-->🟢 passing<!--/s--> | <!--s:build_cortexflow_ui_frontend-->🟢 passing<!--/s--> | - |
+| ui frontend | <!--s:test_cortexflow_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexflow_ui_frontend-->🟢 passing<!--/s--> | - |
 | k8s seed | <!--s:test_k8s_seed-->🟢 passing<!--/s--> | - | - |
 
 
