@@ -89,6 +89,13 @@ def collect_workspace(
         if file in visited:
             continue
         visited.add(file)
+        # Ship AND trace the parent-package __init__.py chain: importing any
+        # submodule executes these, so the modules they import are real deps.
+        _, root = infer_module_path(file)
+        cur = file.parent
+        while cur != root and (cur / "__init__.py").exists():
+            queue.append((cur / "__init__.py").resolve())
+            cur = cur.parent
         for name in parse_imports(file):
             top = name.split(".")[0]
             if top in sys.stdlib_module_names:
@@ -98,14 +105,7 @@ def collect_workspace(
                 queue.append(ws_file)
             else:
                 external.add(top)
-    chain: set[Path] = set()
-    for file in visited:
-        _, root = infer_module_path(file)
-        cur = file.parent
-        while cur != root and (cur / "__init__.py").exists():
-            chain.add((cur / "__init__.py").resolve())
-            cur = cur.parent
-    return visited | chain, external
+    return visited, external
 
 
 def find_ship_root(files: set[Path]) -> Path:
