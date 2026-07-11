@@ -251,6 +251,25 @@ CASES: list[Case] = [
         expected_filtered_pip_freeze="",
     ),
     Case(
+        # A sibling reachable ONLY through the package __init__.py (the entry
+        # graph never imports it directly) must still ship: importing the entry
+        # executes __init__.py, which imports the sibling at load time. The
+        # bundler has to trace __init__.py's own imports, not just staple it on.
+        name="sibling_imported_only_by_init_is_shipped",
+        input_files={
+            "pyproject.toml": '[project]\nname="x"\nversion="0"\n',
+            "pkg/__init__.py": "from pkg.sibling import helper\n",
+            "pkg/sibling.py": "def helper(): return 1\n",
+            "pkg/main.py": "def fn(): pass\n",
+        },
+        input_entry="pkg.main:fn",
+        input_pip_freeze=SAMPLE_PIP_FREEZE,
+        expected_files={"pkg/__init__.py", "pkg/sibling.py", "pkg/main.py"},
+        expected_ship_root="",
+        expected_external_deps=set(),
+        expected_filtered_pip_freeze="",
+    ),
+    Case(
         # Files under workspace_root that the entry doesn't import must NOT
         # land in the bundle. Without this case, a buggy bundler that ships
         # everything under workspace_root would still pass every other case.
