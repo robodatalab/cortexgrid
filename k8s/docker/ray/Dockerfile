@@ -52,3 +52,17 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --no-deps \
     torch==2.10.0
+
+# torch is installed --no-deps above (to control the multi-GB CUDA chain layer
+# by layer), which also drops its small pure-Python deps. Add them back with
+# torch 2.10.0's own version bounds -- without them torch._dynamo fails to import
+# (e.g. `import sympy` in torch.fx.experimental.symbolic_shapes). ~40 MB total,
+# dominated by sympy + networkx; pip leaves already-present deps (jinja2,
+# typing-extensions via ray/mlflow) untouched. Mirror torch's METADATA on bump.
+RUN pip install --no-cache-dir \
+    filelock \
+    "typing-extensions>=4.10.0" \
+    "sympy>=1.13.3" \
+    "networkx>=2.5.1" \
+    jinja2 \
+    "fsspec>=0.8.5"
