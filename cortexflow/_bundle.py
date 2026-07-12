@@ -1,8 +1,44 @@
-"""Static analysis for cortexflow code-bundling.
+"""Dependency tracing for cortexflow code-bundling.
 
-Walks the import graph from an entry point's source file. Imports that resolve
-to files inside the workspace are shipped; imports that don't are recorded as
-external (their pinned versions come from pip freeze, not from pyproject).
+Purpose: given the source file that defines an entry function, collect
+everything the Python interpreter would need to import and run that function on
+a remote worker that starts from nothing -- no first-party packages installed,
+no access to private package indexes.
+
+The bundler starts at the entry file and follows the import graph the way the
+interpreter resolves it (via sys.path), not by assuming a package sits directly
+under the submitting project. Each reached module is classified:
+
+  - ship as source: modules the worker cannot obtain on its own -- the
+    submitter's own code and any first-party package installed from VCS, an
+    editable checkout, or a local path. These are copied into the job bundle.
+    A package is always shipped whole: shipping a partial package whose
+    __init__ imports missing siblings would shadow a complete copy on the
+    worker and fail at import time.
+  - external (pip): modules available from a public index. Only their pinned
+    versions travel with the job (see filter_pip_freeze); the worker installs
+    them.
+  - skipped: the standard library, and distributions baked into the worker
+    image.
+
+A faithful trace has to account for all of the following, or the job dies on
+the worker with ModuleNotFoundError:
+
+  - modules installed outside the project tree (site-packages, editable
+    installs, src/ layouts, PYTHONPATH), resolved by real import lookup rather
+    than by joining the dotted name onto the project directory.
+  - transitive imports reached *through* an installed package, not just those
+    directly under the project -- tracing must not dead-end at a module it
+    cannot place under the project root.
+  - relative imports (from . import x, from .core import y), which name real
+    sibling files.
+  - non-.py runtime files a package loads: compiled extensions (.so/.pyd) and
+    package data.
+  - import graphs that span more than one sys.path root (project source plus an
+    installed package), which the staged bundle has to preserve.
+
+Known blind spot: imports built dynamically (importlib.import_module on a
+computed name, plugin registries) are invisible to static analysis.
 """
 
 from __future__ import annotations
@@ -42,6 +78,14 @@ def parse_imports(source_file: Path) -> list[str]:
 _DEP_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+")
 
 _CORTEXFLOW_DIR = Path(__file__).parent.resolve()
+
+
+def _is_installed_package(path: Path) -> bool:
+    """True if `path` lives in an installed-package location (a wheel install
+    in a venv/system), as opposed to editable source checked out in a workspace.
+    Installed distributions live under site-packages/dist-packages; editable or
+    in-tree source does not."""
+    return any(part in ("site-packages", "dist-packages") for part in path.parts)
 
 
 def _canonicalize(name: str) -> str:
@@ -177,7 +221,14 @@ def bundle_for_entry(
     pyproject = find_pyproject_for(entry_file)
     workspace_root = pyproject.parent
     seeds = [entry_file]
-    if _CORTEXFLOW_DIR.is_relative_to(workspace_root):
+    # Ship the live cortexflow source only when it is genuinely in-tree (a
+    # monorepo checkout / editable install). A wheel installed into a .venv that
+    # happens to sit *under* the consumer's workspace is also is_relative_to the
+    # root, but must be treated as an external dep (pip-installed on the cluster),
+    # not globbed in — doing so mixes sys.path roots and breaks find_ship_root.
+    if _CORTEXFLOW_DIR.is_relative_to(workspace_root) and not _is_installed_package(
+        _CORTEXFLOW_DIR
+    ):
         seeds.extend(_CORTEXFLOW_DIR.rglob("*.py"))
     files, external = collect_workspace(seeds, workspace_root)
     ship_root = find_ship_root(files)
