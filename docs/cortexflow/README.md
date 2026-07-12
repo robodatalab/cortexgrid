@@ -89,10 +89,11 @@ print(f"Submitted: {job_id}")
 
 A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
-Each submission captures your project's code and dependencies automatically:
-- Reads your project's `pyproject.toml` to build the pip dependency list (including `[tool.uv.sources]` git refs)
-- Sets `working_dir` to your project root
-- Excludes `.venv/`, `.git/`, `__pycache__/`, etc.
+Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](../../cortexflow/_bundle.py)):
+- Traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`) rather than assuming a package sits under your project
+- Ships first-party code as source: your own modules that are reached, plus any first-party dependency installed from a VCS/editable/local checkout (shipped as its whole package, since the worker cannot pip-install it from a public index). Import graphs that span several roots (your source plus an installed package) are merged into one `working_dir`
+- Pins the external public wheels that are actually imported from `pip freeze`; the worker installs them, with a `GH_TOKEN` injected for private `git+https` refs. `[project].dependencies` in your `pyproject.toml` is intentionally ignored
+- Skips bytecode caches (`__pycache__/`, `.pyc`)
 - Injects MLflow/S3 credentials so task code running on the DGX can reach all services
 
 ##### Retries
