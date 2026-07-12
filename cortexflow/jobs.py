@@ -265,8 +265,8 @@ def schedule_remote_job(
     job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
     with stage_bundle(fn) as bundle:
         log.info(
-            "Submitting job %s (ship_root=%s, %d deps)",
-            job_id, bundle.ship_root, len(bundle.external_deps),
+            "Submitting job %s (roots=%s, %d deps)",
+            job_id, bundle.roots, len(bundle.external_deps),
         )
         payload = Payload(
             experiment_name=experiment_name,
