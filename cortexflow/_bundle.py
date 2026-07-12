@@ -46,7 +46,9 @@ from __future__ import annotations
 import ast
 import contextlib
 import importlib.metadata
+import importlib.util
 import inspect
+import json
 import re
 import shutil
 import sys
@@ -56,23 +58,46 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 
-def parse_imports(source_file: Path) -> list[str]:
-    """Return absolute import targets from a Python source file.
+def _module_package(file: Path) -> str:
+    """Dotted package name `file` belongs to, for resolving its relative
+    imports. For an __init__.py this is the package itself; for a regular module
+    it is the module's dotted name minus the final component ('' at top level)."""
+    dotted, _ = infer_module_path(file)
+    if file.name == "__init__.py":
+        return dotted
+    return dotted.rpartition(".")[0]
 
-    `import a.b` -> 'a.b'; `from a.b import c` -> 'a.b'.
-    Relative imports (`from . import x`) are skipped: they don't cross
-    package boundaries and add no new files to ship.
+
+def _import_targets(file: Path) -> list[str]:
+    """Absolute dotted module names imported by `file`.
+
+    Relative imports are resolved against the file's own package, so
+    `from .core import x` in package `p` yields `p.core`. For `from pkg import
+    name`, both `pkg` and `pkg.name` are returned: `name` may be a submodule to
+    follow, or a plain attribute that simply will not resolve to a module.
     """
-    tree = ast.parse(source_file.read_text())
-    imports: list[str] = []
+    tree = ast.parse(file.read_text())
+    pkg = _module_package(file)
+    targets: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(alias.name)
+                targets.append(alias.name)
         elif isinstance(node, ast.ImportFrom):
-            if node.level == 0 and node.module:
-                imports.append(node.module)
-    return imports
+            if node.level == 0:
+                base = node.module or ""
+            else:
+                # A relative import drops `level - 1` trailing components from
+                # the current package, then appends the named module (if any).
+                parts = pkg.split(".") if pkg else []
+                base = ".".join(parts[: len(parts) - (node.level - 1)])
+                if node.module:
+                    base = f"{base}.{node.module}" if base else node.module
+            if base:
+                targets.append(base)
+            for alias in node.names:
+                targets.append(f"{base}.{alias.name}" if base else alias.name)
+    return targets
 
 
 _DEP_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+")
@@ -92,14 +117,74 @@ def _canonicalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _find_in_workspace(import_name: str, workspace_root: Path) -> Path | None:
-    """Probe the workspace filesystem for the .py file an import would resolve to."""
-    parts = import_name.split(".")
-    base = workspace_root.joinpath(*parts)
-    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-        if candidate.is_file():
-            return candidate.resolve()
+def _resolve(name: str) -> Path | None:
+    """The real source file `name` resolves to via the interpreter's own import
+    lookup (sys.path), or None if `name` is not an importable Python module: a
+    plain attribute, a namespace package, a builtin, or a compiled extension
+    (an .so ships only as part of its whole installed package, never alone)."""
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, AttributeError, ValueError):
+        return None
+    if spec is None or not spec.origin or not spec.origin.endswith(".py"):
+        return None
+    return Path(spec.origin).resolve()
+
+
+def _dist_info_for(site_packages: Path, top_level: str) -> Path | None:
+    """The *.dist-info directory in `site_packages` whose distribution name
+    canonicalizes to `top_level`. Matches the common case where the import name
+    equals the distribution name (model_gateway, cortexflow); a genuine mismatch
+    (PyYAML/yaml) just isn't found and the package is treated as external."""
+    canon = _canonicalize(top_level)
+    for child in site_packages.glob("*.dist-info"):
+        dist = child.name[: -len(".dist-info")].rsplit("-", 1)[0]
+        if _canonicalize(dist) == canon:
+            return child
     return None
+
+
+def _is_first_party_install(top_file: Path, top_level: str) -> bool:
+    """True if the installed distribution providing `top_level` came from VCS or
+    an editable/local checkout -- pip records that in direct_url.json. Such a
+    package is not on a public index, so the worker cannot pip-install it and it
+    must ship as source. A plain wheel has no direct_url.json and stays external."""
+    site_packages = next(
+        (p for p in top_file.parents if p.name in ("site-packages", "dist-packages")),
+        None,
+    )
+    if site_packages is None:
+        return False
+    dist_info = _dist_info_for(site_packages, top_level)
+    if dist_info is None:
+        return False
+    direct_url = dist_info / "direct_url.json"
+    if not direct_url.is_file():
+        return False
+    try:
+        data = json.loads(direct_url.read_text())
+    except (OSError, ValueError):
+        return False
+    return "vcs_info" in data or bool(data.get("dir_info", {}).get("editable"))
+
+
+def _classify_top(top_level: str) -> tuple[str, Path | None]:
+    """Classify a top-level import name into how the worker must obtain it:
+
+    'own'         -- loose source (the submitter's own tree); ship the traced
+                     files. Returns the top-level package/module file.
+    'first_party' -- a VCS/editable installed distribution; ship its whole
+                     package directory. Returns its top-level package file.
+    'external'    -- a public wheel, or unresolvable; leave it to pip.
+    """
+    top_file = _resolve(top_level)
+    if top_file is None:
+        return "external", None
+    if not _is_installed_package(top_file):
+        return "own", top_file
+    if _is_first_party_install(top_file, top_level):
+        return "first_party", top_file
+    return "external", top_file
 
 
 def infer_module_path(file: Path) -> tuple[str, Path]:
@@ -115,51 +200,97 @@ def infer_module_path(file: Path) -> tuple[str, Path]:
     return ".".join(parts), cur
 
 
-def collect_workspace(
-    starts: list[Path], workspace_root: Path
-) -> tuple[set[Path], set[str]]:
-    """BFS from each path in `starts` through imports. Returns (files_to_ship, external).
-
-    files_to_ship: workspace .py files reached transitively, plus each file's
-    __init__.py chain back to its sys.path root.
-    external: top-level names of imports that aren't stdlib and don't resolve
-    to a workspace file. Their pinned versions come from pip freeze.
-    """
-    visited: set[Path] = set()
-    external: set[str] = set()
-    queue: list[Path] = [s.resolve() for s in starts]
-    while queue:
-        file = queue.pop(0)
-        if file in visited:
+def _package_files(pkg_dir: Path) -> Iterator[Path]:
+    """Every shippable file under an installed package directory, skipping
+    bytecode caches (which are rebuilt on the worker)."""
+    for f in pkg_dir.rglob("*"):
+        if not f.is_file():
             continue
-        visited.add(file)
-        # Ship AND trace the parent-package __init__.py chain: importing any
-        # submodule executes these, so the modules they import are real deps.
-        _, root = infer_module_path(file)
-        cur = file.parent
-        while cur != root and (cur / "__init__.py").exists():
-            queue.append((cur / "__init__.py").resolve())
-            cur = cur.parent
-        for name in parse_imports(file):
-            top = name.split(".")[0]
-            if top in sys.stdlib_module_names:
+        if "__pycache__" in f.parts or f.suffix in (".pyc", ".pyo"):
+            continue
+        yield f.resolve()
+
+
+def _collect(entry_file: Path, force_whole: list[Path]) -> tuple[set[Path], set[str]]:
+    """Trace everything the interpreter needs to import and run the function
+    defined in `entry_file`, resolving imports the way the interpreter does.
+
+    Returns (files_to_ship, external_top_levels). Two kinds of work coexist:
+    loose source is traced file by file (only what is reached ships), while a
+    first-party installed package ships as its whole directory -- the unit pip
+    would otherwise have delivered, so package data and dynamically imported
+    submodules travel too. `force_whole` are package directories shipped
+    unconditionally (the cortexflow runtime the worker always needs).
+    external names are the public wheels the worker pip-installs.
+    """
+    ship: set[Path] = set()
+    external: set[str] = set()
+    handled_pkgs: set[Path] = set()
+    file_queue: list[Path] = []
+    pkg_queue: list[Path] = list(force_whole)
+    classified: dict[str, tuple[str, Path | None]] = {}
+
+    def classify(top: str) -> tuple[str, Path | None]:
+        if top not in classified:
+            classified[top] = _classify_top(top)
+        return classified[top]
+
+    def route(name: str) -> None:
+        top = name.split(".")[0]
+        if top in sys.stdlib_module_names:
+            return
+        kind, top_file = classify(top)
+        if kind == "external":
+            external.add(top)
+        elif kind == "first_party" and top_file is not None:
+            pkg_queue.append(top_file.parent)
+        else:  # own source: ship the specific module this import names
+            target = _resolve(name)
+            if target is not None and not _is_installed_package(target):
+                file_queue.append(target)
+
+    entry_top = infer_module_path(entry_file)[0].split(".")[0]
+    kind, top_file = _classify_top(entry_top)
+    if kind == "first_party" and top_file is not None:
+        pkg_queue.append(top_file.parent)
+    else:
+        file_queue.append(entry_file)
+
+    while file_queue or pkg_queue:
+        while pkg_queue:
+            pkg_dir = pkg_queue.pop().resolve()
+            if pkg_dir in handled_pkgs:
                 continue
-            ws_file = _find_in_workspace(name, workspace_root)
-            if ws_file is not None:
-                queue.append(ws_file)
-            else:
-                external.add(top)
-    return visited, external
+            handled_pkgs.add(pkg_dir)
+            for f in _package_files(pkg_dir):
+                ship.add(f)
+            for py in pkg_dir.rglob("*.py"):
+                if "__pycache__" in py.parts:
+                    continue
+                for name in _import_targets(py.resolve()):
+                    route(name)
+        if file_queue:
+            file = file_queue.pop().resolve()
+            if file in ship:
+                continue
+            ship.add(file)
+            # Ship and trace the parent __init__.py chain: importing this module
+            # executes them, so the modules they import are genuine runtime deps.
+            _, root = infer_module_path(file)
+            cur = file.parent
+            while cur != root and (cur / "__init__.py").exists():
+                file_queue.append((cur / "__init__.py").resolve())
+                cur = cur.parent
+            for name in _import_targets(file):
+                route(name)
+    return ship, external
 
 
-def find_ship_root(files: set[Path]) -> Path:
-    """All shipped files must agree on a single sys.path root. Returns it."""
-    roots = {infer_module_path(f)[1] for f in files}
-    if len(roots) != 1:
-        raise RuntimeError(
-            f"Workspace files resolve to inconsistent sys.path roots: {roots}"
-        )
-    return roots.pop()
+def _ship_roots(files: set[Path]) -> set[Path]:
+    """The sys.path roots the shipped files live under. A bundle may span more
+    than one (the submitter's own source plus an installed first-party package);
+    each file is staged relative to its own root so all of them stay importable."""
+    return {infer_module_path(f)[1] for f in files}
 
 
 def find_pyproject_for(file: Path) -> Path:
@@ -177,30 +308,31 @@ def find_pyproject_for(file: Path) -> Path:
 class StagedBundle:
     """A staged on-disk copy of the files needed to ship an entry point."""
 
-    ship_root: Path
+    roots: list[Path]
     staging_dir: Path
     external_deps: list[str]
 
 
 @contextlib.contextmanager
 def stage_bundle(entry: Callable[..., Any] | type) -> Iterator[StagedBundle]:
-    """Bundle `entry`'s reachable workspace files into a tempdir; clean up on exit.
+    """Bundle `entry`'s reachable files into a tempdir; clean up on exit.
 
-    Yields a StagedBundle whose `staging_dir` mirrors the ship root and
-    contains only the files reachable from `entry`'s import graph. `entry`
-    is the file-defining symbol Ray will load (a function for `cortexflow.remote`,
-    a class for `cortexflow.deploy_model`).
+    Yields a StagedBundle whose `staging_dir` holds only the files reachable
+    from `entry`'s import graph, each placed at its import path so the whole
+    directory can go on the worker's sys.path. `entry` is the file-defining
+    symbol Ray will load (a function for `cortexflow.remote`, a class for
+    `cortexflow.deploy_model`).
     """
-    ship_root, files, external_deps = bundle_for_entry(entry)
+    roots, files, external_deps = bundle_for_entry(entry)
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp)
         for f in files:
-            rel = f.relative_to(ship_root)
-            dst = staging / rel
+            _, root = infer_module_path(f)
+            dst = staging / f.relative_to(root)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, dst)
         yield StagedBundle(
-            ship_root=ship_root,
+            roots=sorted(roots),
             staging_dir=staging,
             external_deps=sorted(external_deps),
         )
@@ -208,31 +340,25 @@ def stage_bundle(entry: Callable[..., Any] | type) -> Iterator[StagedBundle]:
 
 def bundle_for_entry(
     entry: Callable[..., Any] | type,
-) -> tuple[Path, set[Path], set[str]]:
-    """Compute (ship_root, files_to_ship, external_imports) for shipping `entry`.
+) -> tuple[set[Path], set[Path], set[str]]:
+    """Compute (ship_roots, files_to_ship, external_imports) for shipping `entry`.
 
-    The pyproject.toml above the entry's source file only marks the workspace-root
-    candidate. Its [project].dependencies is intentionally ignored: external
-    imports are detected from the code, and pinned versions come from pip
-    freeze. This favours the live local version of any in-tree library over
-    a published one declared in pyproject.
+    The pyproject.toml above the entry's source file only marks the project
+    root. Its [project].dependencies is intentionally ignored: imports are
+    resolved from the running interpreter, first-party code ships as source, and
+    pinned versions of external wheels come from pip freeze. This favours the
+    live local version of any first-party library over a published one.
     """
     entry_file = Path(inspect.getfile(entry)).resolve()
-    pyproject = find_pyproject_for(entry_file)
-    workspace_root = pyproject.parent
-    seeds = [entry_file]
-    # Ship the live cortexflow source only when it is genuinely in-tree (a
-    # monorepo checkout / editable install). A wheel installed into a .venv that
-    # happens to sit *under* the consumer's workspace is also is_relative_to the
-    # root, but must be treated as an external dep (pip-installed on the cluster),
-    # not globbed in — doing so mixes sys.path roots and breaks find_ship_root.
-    if _CORTEXFLOW_DIR.is_relative_to(workspace_root) and not _is_installed_package(
-        _CORTEXFLOW_DIR
-    ):
-        seeds.extend(_CORTEXFLOW_DIR.rglob("*.py"))
-    files, external = collect_workspace(seeds, workspace_root)
-    ship_root = find_ship_root(files)
-    return ship_root, files, external
+    workspace_root = find_pyproject_for(entry_file).parent
+    force_whole: list[Path] = []
+    # The worker's job driver imports cortexflow even when the entry does not,
+    # so ship the live cortexflow whenever it lives within this submission's
+    # project tree (an in-project .venv, or a monorepo checkout).
+    if _CORTEXFLOW_DIR.is_relative_to(workspace_root):
+        force_whole.append(_CORTEXFLOW_DIR)
+    files, external = _collect(entry_file, force_whole)
+    return _ship_roots(files), files, external
 
 
 # Distributions baked into the ray image's system site-packages. Runtime envs
