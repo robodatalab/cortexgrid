@@ -21,7 +21,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexflow-ui-integration:f6dd4096eff894492a73485f764bc12d046871b2
+          image: ghcr.io/robodatalab/cortexflow-ui-integration:454a6ae8c12085f4a79ad1d188bc8a2e90e9e925
           env:
             - name: CORTEXFLOW_UI_URL
               value: "http://$(CORTEXFLOW_UI_FRONTEND_SERVICE_HOST):$(CORTEXFLOW_UI_FRONTEND_SERVICE_PORT)"
