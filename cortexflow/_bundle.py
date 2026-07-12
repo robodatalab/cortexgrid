@@ -131,44 +131,35 @@ def _resolve(name: str) -> Path | None:
     return Path(spec.origin).resolve()
 
 
-def _dist_info_for(site_packages: Path, top_level: str) -> Path | None:
-    """The *.dist-info directory in `site_packages` whose distribution name
-    canonicalizes to `top_level`. Matches the common case where the import name
-    equals the distribution name (model_gateway, cortexflow); a genuine mismatch
-    (PyYAML/yaml) just isn't found and the package is treated as external."""
-    canon = _canonicalize(top_level)
-    for child in site_packages.glob("*.dist-info"):
-        dist = child.name[: -len(".dist-info")].rsplit("-", 1)[0]
-        if _canonicalize(dist) == canon:
-            return child
-    return None
-
-
-def _is_first_party_install(top_file: Path, top_level: str) -> bool:
-    """True if the installed distribution providing `top_level` came from VCS or
-    an editable/local checkout -- pip records that in direct_url.json. Such a
+def _first_party_dist(top_level: str, pkg_dists: dict[str, list[str]]) -> bool:
+    """True if the distribution providing `top_level` was installed from VCS or
+    an editable/local checkout -- pip records that in its direct_url.json. Such a
     package is not on a public index, so the worker cannot pip-install it and it
-    must ship as source. A plain wheel has no direct_url.json and stays external."""
-    site_packages = next(
-        (p for p in top_file.parents if p.name in ("site-packages", "dist-packages")),
-        None,
-    )
-    if site_packages is None:
-        return False
-    dist_info = _dist_info_for(site_packages, top_level)
-    if dist_info is None:
-        return False
-    direct_url = dist_info / "direct_url.json"
-    if not direct_url.is_file():
-        return False
-    try:
-        data = json.loads(direct_url.read_text())
-    except (OSError, ValueError):
-        return False
-    return "vcs_info" in data or bool(data.get("dir_info", {}).get("editable"))
+    must ship as source; a plain wheel has no direct_url.json and stays external.
+
+    `pkg_dists` is importlib.metadata.packages_distributions() -- the
+    interpreter's own import-name -> distribution map, so this stays correct even
+    when the import name differs from the distribution name (remote_fixture is
+    provided by remote-fixture-pkg, jinja2 by Jinja2, and so on)."""
+    for dist_name in pkg_dists.get(top_level, []):
+        try:
+            raw = importlib.metadata.distribution(dist_name).read_text("direct_url.json")
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if "vcs_info" in data or data.get("dir_info", {}).get("editable"):
+            return True
+    return False
 
 
-def _classify_top(top_level: str) -> tuple[str, Path | None]:
+def _classify_top(
+    top_level: str, pkg_dists: dict[str, list[str]]
+) -> tuple[str, Path | None]:
     """Classify a top-level import name into how the worker must obtain it:
 
     'own'         -- loose source (the submitter's own tree); ship the traced
@@ -180,11 +171,11 @@ def _classify_top(top_level: str) -> tuple[str, Path | None]:
     top_file = _resolve(top_level)
     if top_file is None:
         return "external", None
-    if not _is_installed_package(top_file):
-        return "own", top_file
-    if _is_first_party_install(top_file, top_level):
+    if _first_party_dist(top_level, pkg_dists):
         return "first_party", top_file
-    return "external", top_file
+    if _is_installed_package(top_file):
+        return "external", top_file
+    return "own", top_file
 
 
 def infer_module_path(file: Path) -> tuple[str, Path]:
@@ -228,11 +219,12 @@ def _collect(entry_file: Path, force_whole: list[Path]) -> tuple[set[Path], set[
     handled_pkgs: set[Path] = set()
     file_queue: list[Path] = []
     pkg_queue: list[Path] = list(force_whole)
+    pkg_dists = dict(importlib.metadata.packages_distributions())
     classified: dict[str, tuple[str, Path | None]] = {}
 
     def classify(top: str) -> tuple[str, Path | None]:
         if top not in classified:
-            classified[top] = _classify_top(top)
+            classified[top] = _classify_top(top, pkg_dists)
         return classified[top]
 
     def route(name: str) -> None:
@@ -250,7 +242,7 @@ def _collect(entry_file: Path, force_whole: list[Path]) -> tuple[set[Path], set[
                 file_queue.append(target)
 
     entry_top = infer_module_path(entry_file)[0].split(".")[0]
-    kind, top_file = _classify_top(entry_top)
+    kind, top_file = classify(entry_top)
     if kind == "first_party" and top_file is not None:
         pkg_queue.append(top_file.parent)
     else:

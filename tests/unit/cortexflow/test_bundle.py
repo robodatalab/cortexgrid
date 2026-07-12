@@ -47,12 +47,14 @@ SITE = ".venv/site-packages"
 
 
 def _vcs_dist_info(name: str) -> dict[str, str]:
-    """dist-info pip writes for `pip install git+https://...`. Its presence is
-    how a first-party install is told apart from a public wheel."""
+    """dist-info pip writes for `pip install git+https://...`. The direct_url.json
+    vcs_info is how a first-party install is told apart from a public wheel;
+    top_level.txt lets importlib.metadata map the import name to this dist."""
     return {
         f"{name}-1.0.dist-info/METADATA": (
             f"Metadata-Version: 2.1\nName: {name}\nVersion: 1.0\n"
         ),
+        f"{name}-1.0.dist-info/top_level.txt": f"{name}\n",
         f"{name}-1.0.dist-info/direct_url.json": (
             '{"url": "https://github.com/org/' + name + '.git", '
             '"vcs_info": {"vcs": "git", "commit_id": "abc123"}}\n'
@@ -66,6 +68,7 @@ def _wheel_dist_info(name: str) -> dict[str, str]:
         f"{name}-2.0.dist-info/METADATA": (
             f"Metadata-Version: 2.1\nName: {name}\nVersion: 2.0\n"
         ),
+        f"{name}-2.0.dist-info/top_level.txt": f"{name}\n",
     }
 
 
