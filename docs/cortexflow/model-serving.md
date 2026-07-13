@@ -2,7 +2,7 @@
 
 cortexflow has two model-related surfaces, and they own strictly different things:
 
-- **Model registry** ([cortexflow.model_storage](../../cortexflow/model_storage.py)) - persists a trained model's *weights* to S3 + MLflow Model Registry as an opaque directory, addressable as `(family, suffix, run_name)`. At save time it also bundles the *serve-app* class (code + pip deps) that will front those weights, so the cluster can deploy it later without the caller holding the class.
+- **Model registry** ([cortexflow.model_storage](../../cortexflow/model_storage.py)) - persists a trained model's *weights* to S3 + MLflow Model Registry as an opaque directory, addressable as `(family, suffix, run_name)`. At save time it also bundles the *serve-app* class (its code and every dependency, as source) that will front those weights, so the cluster can deploy it later without the caller holding the class.
 - **Model serving** ([cortexflow.model_serving](../../cortexflow/model_serving.py)) - schedules the serve-app as a Ray Serve application and returns its URL. cortexflow imposes no request/response contract; the serve-app owns its own routes, request schemas, streaming, and timeouts.
 
 Both speak the same `(family, suffix, run_name)` triple.
@@ -105,13 +105,12 @@ No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_U
 1. **Weights:** uploads `weights_dir` as-is to `s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/` and records that path as the MLflow `ModelVersion.source`. cortexflow never inspects the contents - the on-disk format is the caller's concern.
 2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexflow/_bundle.py) `cortexflow.remote` uses), minus what the worker image already has (`worker_provides()`), ships every needed file as source, zips the staging dir, and uploads to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`. Nothing is `pip`-installed on the replica.
 
-The bundle URL, the serve-app import path, and the filtered pip list are persisted as MLflow tags on the new `ModelVersion`:
+The bundle URL and the serve-app import path are persisted as MLflow tags on the new `ModelVersion`:
 
 | Tag | Meaning |
 |---|---|
 | `serve_bundle_url` | `s3://...` URL of the zipped staging dir |
 | `class_import_path` | `<module>:<ClassName>` of the serve-app to import on the replica |
-| `serve_pip_list_json` | JSON-encoded `runtime_env.pip` entries |
 
 `deploy_model` reads those tags back; it does not need the class object, so deployment can happen from any environment that can hit MLflow + the Ray dashboard.
 
@@ -219,7 +218,7 @@ Removes the `ModelVersion`, the weights prefix, and the serve bundle. It does **
 
 | symptom | cause | fix |
 |---|---|---|
-| `save_model` raises; version left `upload_failed` | the upload step failed - S3/MinIO unreachable, bundling error, missing `GH_TOKEN`, `pip freeze` failure | fix the cause (S3 creds, the `GH_TOKEN` secret, the serve-app's importability), then re-run `save_model`. Remove the dead record with `delete_model`. |
+| `save_model` raises; version left `upload_failed` | the upload step failed - S3/MinIO unreachable, or a bundling error (the serve-app class, or something it imports, is not importable) | fix the cause (S3 creds, the serve-app's importability), then re-run `save_model`. Remove the dead record with `delete_model`. |
 | status reads `broken` | the process running `save_model` died mid-upload (kill, OOM, crash), so it never flipped to `ready`/`upload_failed` | `delete_model` the broken version and re-run `save_model`, ideally from a fresh process/run. |
 | `deploy_model` raises `ValueError: No saved model for .../cannot deploy` | no registered version for this triple - never saved, wrong triple, or the save is still `uploading` | confirm with `model_registry_status` / `list_models`; save first, or wait for `ready`. |
 | `deploy_model` raises `ValueError: ... missing the deployment bundle tag ...` | the version predates bundling or was created outside `save_model` | re-save with `cortexflow.save_model`. |
@@ -272,8 +271,8 @@ Re-PUTs the applications list without this app; the controller tears down the re
 
 | symptom | cause | fix |
 |---|---|---|
-| `deploy_model(wait=True)` raises `RuntimeError: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - import error, a dep missing from the captured `runtime_env.pip`, an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports/deps as captured at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
-| `deploy_model(wait=True)` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, slow image/pip install, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
+| `deploy_model(wait=True)` raises `RuntimeError: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time, or is neither bundled nor baked into the ray image), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
+| `deploy_model(wait=True)` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
 | `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing. |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
 | deployed but a route returns 404 | wrong route prefix, or hitting the app before `running` | routes hang off `{d.url}` = `/r/<family>/<suffix>/<run_name>`; confirm `phase == "running"` first. |
@@ -311,7 +310,7 @@ caller (laptop / arc-runner / training job)
   |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, size_bytes, lifecycle=uploading})
   |   2. upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
   |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip
-  |   4. set tags {serve_bundle_url, class_import_path, serve_pip_list_json}; flip lifecycle=ready
+  |   4. set tags {serve_bundle_url, class_import_path}; flip lifecycle=ready
   v
 S3 (weights + zipped bundle)
 MLflow Model Registry (ModelVersion + tags)
@@ -323,8 +322,7 @@ caller
   |   2. PUT /api/serve/applications/  (full applications list)
   v
 Ray Serve controller on the cluster
-  fetches the bundle zip via runtime_env.working_dir
-  installs runtime_env.pip
+  fetches the bundle zip via runtime_env.working_dir (every dependency is inside it, as source)
   imports cortexflow._serve_entry:build, which re-imports the serve-app class
   binds serve.deployment(ServeApp) -> __init__ calls cortexflow.load_model(...) -> Path
   exposes the serve-app's own routes under /r/<family>/<suffix>/<run_name>
@@ -346,11 +344,10 @@ Already deployed in the cluster:
 cortexflow secrets used:
 - `RAY_JOB_SERVER_URI` - dashboard endpoint; `deploy_model`/`undeploy_model`/`list_deployed_models` PUT/GET against `/api/serve/applications/` here. Same secret `cortexflow.remote` already uses.
 - `RAY_SERVE_URI` - data plane (port 30000), used to compose the deployment URL returned to callers.
-- `GH_TOKEN` - injected into `git+https://github.com/...` entries in `runtime_env.pip` so the replica can `pip install` private deps.
 - Existing `MLFLOW_TRACKING_URI`, `S3_*` for the registry side and for staging bundles.
 - No `RAY_ADDRESS` - the caller does not become a Ray driver.
 
-The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...) travel in `runtime_env.pip`, captured from the environment that ran `save_model`. cortexflow core does not depend on them.
+The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...) travel **as source** inside the bundle, collected from the environment that ran `save_model` by walking the serve-app's import graph -- minus whatever the ray worker image already bakes in (`worker_provides()`). Nothing is `pip`-installed on the replica, so any compiled dependency must be baked into the image (see [k8s/docker/ray/Dockerfile](../../k8s/docker/ray/Dockerfile)). cortexflow core does not depend on them.
 
 ## Pending work
 
