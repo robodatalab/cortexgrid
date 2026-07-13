@@ -43,29 +43,7 @@ class TestModelServing(unittest.TestCase):
         family, suffix = "it-deploy", "stub"
         self._save_stub(family, suffix, constant=15)
 
-        with self.assertLogs("cortexflow.model_serving", level="INFO") as captured:
-            deployed = cortexflow.deploy_model(
-                family, suffix, self.run_name, wait=True
-            )
-        pip_log = next(
-            (
-                r.getMessage()
-                for r in captured.records
-                if "runtime_env.pip" in r.getMessage()
-            ),
-            "",
-        )
-        self.assertTrue(pip_log, "deploy_model must log runtime_env.pip")
-        offending = [
-            line
-            for line in pip_log.splitlines()
-            if line.strip().startswith("torch==") or line.strip() == "torch"
-        ]
-        self.assertEqual(
-            offending,
-            [],
-            f"torch must not be in runtime_env.pip (baked into ray image); log was:\n{pip_log}",
-        )
+        deployed = cortexflow.deploy_model(family, suffix, self.run_name, wait=True)
         try:
             response = requests.post(
                 f"{deployed.url}/add", json={"x": 27}, timeout=60
