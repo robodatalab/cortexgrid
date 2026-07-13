@@ -17,7 +17,6 @@ from cortexflow.model_serving import (
 _FAKE_META = BundleMetadata(
     bundle_url="s3://bucket/stub.zip",
     class_import_path="stub:Stub",
-    pip_list=[],
 )
 
 
@@ -53,7 +52,7 @@ def _stub_build_spec(
         "route_prefix": f"/r/{family}/{suffix}/{run_name}",
         "import_path": "stub:Stub",
         "args": {"family": family, "suffix": suffix, "run_name": run_name},
-        "runtime_env": {"working_dir": meta.bundle_url, "pip": meta.pip_list},
+        "runtime_env": {"working_dir": meta.bundle_url},
     }
 
 

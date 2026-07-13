@@ -18,11 +18,9 @@ the end-to-end design.
 
 from __future__ import annotations
 
-import json
+import inspect
 import logging
 import shutil
-import subprocess
-import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -32,23 +30,16 @@ from typing import Any
 from mlflow.tracking import MlflowClient
 from ray.serve.schema import ApplicationStatus
 
-from cortexflow._bundle import filter_pip_freeze, stage_bundle
+from cortexflow._bundle import bundle, stage, worker_provides
 from cortexflow.infra import get_mlflow_tracking_uri, get_ray_serve_uri
 from cortexflow.ray_util import (
     get_serve_details,
     put_serve_applications,
 )
 from cortexflow.s3_util import upload
-from cortexflow.secrets import get_secret
 
 
 log = logging.getLogger(__name__)
-
-
-# Torch wheels for the cluster GPUs. Kept in this module rather than shared
-# with cortexflow.jobs: serve apps and jobs only happen to need the same wheel
-# index today; the two contexts shouldn't be coupled by a borrowed constant.
-_CUDA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 
 
 @dataclass
@@ -93,72 +84,41 @@ def _serve_phase(raw_status: str) -> str:
     return _PHASE_BY_SERVE_STATUS.get(raw_status, "deploying")
 
 
-def _pip_requirements_for_serve(external_deps: set[str]) -> list[str]:
-    """Build runtime_env.pip for a Serve app: freeze + filter + drop ray +
-    inject the GH token into git URLs + prepend the torch CUDA index.
-    Ray will write this list to a requirements.txt on the worker."""
-    freeze = subprocess.run(
-        [sys.executable, "-m", "pip", "freeze"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    filtered = filter_pip_freeze(freeze, external_deps)
-    token = get_secret("GH_TOKEN")
-    lines: list[str] = []
-    for raw in filtered.splitlines():
-        name = raw.lstrip().split("==", 1)[0].split(" @", 1)[0].split("[", 1)[0]
-        if name.strip().lower() == "ray" or not raw.strip():
-            continue
-        lines.append(
-            raw.replace(
-                "git+https://github.com/",
-                f"git+https://x-access-token:{token}@github.com/",
-            )
-        )
-    return [f"--extra-index-url {_CUDA_INDEX_URL}", *lines]
-
-
 @dataclass
 class BundleMetadata:
     """What `bundle_class` produces and `deploy_model` needs to PUT the app."""
 
     bundle_url: str
     class_import_path: str
-    pip_list: list[str]
 
 
 def bundle_class(
     cls: type, family: str, suffix: str, run_name: str
 ) -> BundleMetadata:
-    """Stage code, capture pip deps, upload bundle to MinIO.
+    """Bundle the serve-app class's code (and the serve entrypoint), zip it, and
+    upload to MinIO.
 
     Returns the metadata `deploy_model` needs later; callers (typically
     `save_model`) persist it on the ModelVersion so the deploy step can run
     without holding the class object."""
-    import_path = f"{cls.__module__}:{cls.__name__}"
-
-    with stage_bundle(cls) as bundle:
-        pip_list = _pip_requirements_for_serve(set(bundle.external_deps))
+    entry_file = Path(inspect.getfile(cls)).resolve()
+    serve_entry = Path(__file__).with_name("_serve_entry.py")
+    files = (bundle(entry_file) | bundle(serve_entry)) - worker_provides()
+    with tempfile.TemporaryDirectory() as tmp:
+        code_root = Path(tmp) / "code"
+        stage(files, code_root)
         log.info(
-            "Serve runtime_env.pip for %s/%s/%s (%d entries):\n  %s",
-            family, suffix, run_name, len(pip_list), "\n  ".join(pip_list),
+            "Serve bundle for %s/%s/%s: %d files", family, suffix, run_name, len(files)
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            zip_base = Path(tmp) / f"{family}__{suffix}"
-            shutil.make_archive(
-                str(zip_base), "zip", root_dir=str(bundle.staging_dir)
-            )
-            zip_path = zip_base.with_suffix(".zip")
-            bundle_url = upload(
-                str(zip_path),
-                dest_path=f"serve-bundles/{run_name}/{family}__{suffix}.zip",
-            )
-
+        zip_base = Path(tmp) / f"{family}__{suffix}"
+        shutil.make_archive(str(zip_base), "zip", root_dir=str(code_root))
+        bundle_url = upload(
+            str(zip_base.with_suffix(".zip")),
+            dest_path=f"serve-bundles/{run_name}/{family}__{suffix}.zip",
+        )
     return BundleMetadata(
         bundle_url=bundle_url,
-        class_import_path=import_path,
-        pip_list=pip_list,
+        class_import_path=f"{cls.__module__}:{cls.__name__}",
     )
 
 
@@ -166,10 +126,6 @@ def _build_application_spec(
     family: str, suffix: str, run_name: str, meta: BundleMetadata
 ) -> dict[str, Any]:
     """Assemble a Ray Serve application schema from pre-bundled metadata."""
-    log.info(
-        "Serve runtime_env.pip for %s/%s/%s (%d entries):\n  %s",
-        family, suffix, run_name, len(meta.pip_list), "\n  ".join(meta.pip_list),
-    )
     return {
         "name": _app_name(family, suffix, run_name),
         "route_prefix": _route_prefix(family, suffix, run_name),
@@ -184,7 +140,9 @@ def _build_application_spec(
             "suffix": suffix,
             "run_name": run_name,
         },
-        "runtime_env": {"working_dir": meta.bundle_url, "pip": meta.pip_list},
+        # Every dependency ships as source inside the bundle, so working_dir
+        # alone makes the serve app importable; nothing is pip-installed.
+        "runtime_env": {"working_dir": meta.bundle_url},
     }
 
 
@@ -192,7 +150,6 @@ def _build_application_spec(
 # `deploy_model` reads back.
 _CLASS_IMPORT_PATH_TAG = "class_import_path"
 _BUNDLE_URL_TAG = "serve_bundle_url"
-_PIP_LIST_TAG = "serve_pip_list_json"
 
 
 def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
@@ -202,7 +159,6 @@ def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
     return {
         _CLASS_IMPORT_PATH_TAG: meta.class_import_path,
         _BUNDLE_URL_TAG: meta.bundle_url,
-        _PIP_LIST_TAG: json.dumps(meta.pip_list),
     }
 
 
@@ -224,7 +180,6 @@ def _load_bundle_metadata(
         return BundleMetadata(
             bundle_url=tags[_BUNDLE_URL_TAG],
             class_import_path=tags[_CLASS_IMPORT_PATH_TAG],
-            pip_list=json.loads(tags[_PIP_LIST_TAG]),
         )
     except KeyError as exc:
         raise ValueError(

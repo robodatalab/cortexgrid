@@ -90,10 +90,9 @@ print(f"Submitted: {job_id}")
 A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
 Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](../../cortexflow/_bundle.py)):
-- Traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`) rather than assuming a package sits under your project
-- Ships first-party code as source: your own modules that are reached, plus any first-party dependency installed from a VCS/editable/local checkout (shipped as its whole package, since the worker cannot pip-install it from a public index). Import graphs that span several roots (your source plus an installed package) are merged into one `working_dir`
-- Pins the external public wheels that are actually imported from `pip freeze`; the worker installs them, with a `GH_TOKEN` injected for private `git+https` refs. `[project].dependencies` in your `pyproject.toml` is intentionally ignored
-- Skips bytecode caches (`__pycache__/`, `.pyc`)
+- `bundle(entry)` traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`), and returns every file needed to run it -- your own modules and third-party packages alike, wherever they live. The standard library is excluded (it ships with the interpreter)
+- Everything ships **as source**: the bundle is staged at each file's import path and tarred into the Ray `working_dir`. Nothing is `pip`-installed on the worker
+- Dependencies the worker image already has are subtracted rather than shipped: `bundle(entry) - worker_provides()`, where `worker_provides()` is the bundle of the packages baked into the ray image (torch and its CUDA stack, ray, mlflow, ...). See [k8s/docker/ray/Dockerfile](../../k8s/docker/ray/Dockerfile)
 - Injects MLflow/S3 credentials so task code running on the DGX can reach all services
 
 ##### Retries

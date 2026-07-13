@@ -13,7 +13,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["remote_fixture"]
-
-# Ship the runtime data file inside the wheel so it lands in site-packages.
-[tool.hatch.build.targets.wheel.force-include]
-"remote_fixture/manifest.json" = "remote_fixture/manifest.json"

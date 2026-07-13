@@ -48,7 +48,6 @@ def _make_weights_dir() -> Path:
 _FAKE_BUNDLE = BundleMetadata(
     bundle_url="s3://b/serve-bundles/x.zip",
     class_import_path="fake.module:FakeClass",
-    pip_list=["--extra-index-url x", "fake==1.0"],
 )
 
 

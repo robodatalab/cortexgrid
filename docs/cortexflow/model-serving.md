@@ -103,7 +103,7 @@ No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_U
 `save_model(weights_dir, serve_app, family, suffix)` does two things:
 
 1. **Weights:** uploads `weights_dir` as-is to `s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/` and records that path as the MLflow `ModelVersion.source`. cortexflow never inspects the contents - the on-disk format is the caller's concern.
-2. **Serve-app bundle:** walks the serve-app class's import graph (same logic [_bundle.py](../../cortexflow/_bundle.py) uses for `cortexflow.remote`, generalised to accept a class entry point) - shipping first-party code as source (yours plus any VCS/editable-installed dependency, whole) and capturing external public wheels via `pip freeze` + `filter_pip_freeze` - zips the staging dir, and uploads to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`.
+2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexflow/_bundle.py) `cortexflow.remote` uses), minus what the worker image already has (`worker_provides()`), ships every needed file as source, zips the staging dir, and uploads to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`. Nothing is `pip`-installed on the replica.
 
 The bundle URL, the serve-app import path, and the filtered pip list are persisted as MLflow tags on the new `ModelVersion`:
 

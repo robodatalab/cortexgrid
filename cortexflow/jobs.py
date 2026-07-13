@@ -4,42 +4,25 @@ from __future__ import annotations
 
 import cloudpickle  # type: ignore
 from dataclasses import asdict, dataclass, field
+import inspect
+import io
 import json
 import logging
 from pathlib import Path
-import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
 from typing import Any, Callable
 
 from cortexflow import s3_util
-from cortexflow._bundle import filter_pip_freeze, stage_bundle
+from cortexflow._bundle import bundle, stage, worker_provides
 from cortexflow.infra import get_mlflow_tracking_uri
 from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
-from cortexflow.secrets import get_secret
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
 log = logging.getLogger(__name__)
-
-
-DEFAULT_EXCLUDES = [
-    ".venv",
-    ".git",
-    "__pycache__",
-    "*.pyc",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    "node_modules",
-    ".DS_Store",
-    "*.egg-info",
-]
-
-ENABLE_CUDA_ON_RAY = "https://download.pytorch.org/whl/cu128"
 
 
 @dataclass
@@ -163,7 +146,6 @@ class Payload(BaseModel):
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     project_code_root: str
-    external_deps: list[str] = []
     num_gpus: int = 0
     num_cpus: int = 1
 
@@ -173,31 +155,14 @@ class Payload(BaseModel):
         log.info(
             "Uploading payload for job %s from %s", self.job_id, self.project_code_root
         )
-
         with tempfile.TemporaryDirectory() as tmp_dir:
-            project_dest = Path(tmp_dir, "project_code_root")
-            shutil.copytree(
-                self.project_code_root,
-                str(project_dest),
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns(*DEFAULT_EXCLUDES),
-            )
-            Path(project_dest, "payload.pkl").write_bytes(cloudpickle.dumps(self))
-            pip_requirements = subprocess.run(
-                [sys.executable, "-m", "pip", "freeze"],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-            pip_requirements = filter_pip_freeze(pip_requirements, set(self.external_deps))
-            pip_requirements = _strip_ray(pip_requirements)
-            pip_requirements = _inject_github_token(pip_requirements)
-            (project_dest / "requirements.txt").write_text(
-                f"--extra-index-url {ENABLE_CUDA_ON_RAY}\n{pip_requirements}"
-            )
             tarball_path = Path(tmp_dir, "project_code_root.tar.gz")
+            payload_bytes = cloudpickle.dumps(self)
             with tarfile.open(tarball_path, "w:gz") as tar:
-                tar.add(str(project_dest), arcname="project_code_root")
+                tar.add(self.project_code_root, arcname="project_code_root")
+                info = tarfile.TarInfo("project_code_root/payload.pkl")
+                info.size = len(payload_bytes)
+                tar.addfile(info, io.BytesIO(payload_bytes))
             tarball_uri = s3_util.upload(
                 str(tarball_path),
                 dest_path=f"{artifact_path}/project_code_root.tar.gz",
@@ -261,57 +226,34 @@ def schedule_remote_job(
     **kwargs: Any,
 ) -> str:
     """Submit a function to the control plane. Returns a job ID."""
-    name_gen = Haikunator()
-    job_id = name_gen.haikunate(token_length=2, token_chars="0123456789")
-    with stage_bundle(fn) as bundle:
-        log.info(
-            "Submitting job %s (roots=%s, %d deps)",
-            job_id, bundle.roots, len(bundle.external_deps),
-        )
-        payload = Payload(
+    job_id = Haikunator().haikunate(token_length=2, token_chars="0123456789")
+    entry_file = Path(inspect.getfile(fn)).resolve()
+    driver_file = Path(__file__).with_name("_ray_job_driver.py")
+    files = (bundle(entry_file) | bundle(driver_file)) - worker_provides()
+    with tempfile.TemporaryDirectory() as tmp:
+        code_root = Path(tmp, "project_code_root")
+        stage(files, code_root)
+        log.info("Submitting job %s (%d files)", job_id, len(files))
+        Payload(
             experiment_name=experiment_name,
             run_id=run_id,
             job_id=job_id,
             fn=fn,
             args=args,
             kwargs=kwargs,
-            project_code_root=str(bundle.staging_dir),
-            external_deps=bundle.external_deps,
+            project_code_root=str(code_root),
             num_gpus=num_gpus,
             num_cpus=num_cpus,
-        )
-        payload.save_to_mlflow()
-        lifecycle = JobLifecycle(
+        ).save_to_mlflow()
+        JobLifecycle(
             experiment_name=experiment_name,
             run_id=run_id,
             job_id=job_id,
             retry=retry,
             num_gpus=num_gpus,
             num_cpus=num_cpus,
-        )
-        lifecycle.save_to_mlflow()
+        ).save_to_mlflow()
     return job_id
-
-
-def _strip_ray(pip_requirements: str) -> str:
-    """Drop ray from pip freeze output. Ray rejects any runtime_env pip list
-    that would install a different ray version than the cluster is running."""
-    result = []
-    for line in pip_requirements.splitlines():
-        name = line.lstrip().split("==", 1)[0].split(" @", 1)[0].split("[", 1)[0]
-        if name.strip().lower() == "ray":
-            continue
-        result.append(line)
-    return "\n".join(result)
-
-
-def _inject_github_token(pip_requirements: str) -> str:
-    """Rewrite github.com git URLs in pip freeze output to include the auth token."""
-    token = get_secret("GH_TOKEN")
-    return pip_requirements.replace(
-        "git+https://github.com/",
-        f"git+https://x-access-token:{token}@github.com/",
-    )
 
 
 def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:

@@ -26,6 +26,21 @@ from cortexflow.jobs import (
 EXPERIMENT_NAME = "exp"
 RUN_ID = "run-1"
 
+# Real repo files, pinned as `bundle`'s output so the job path is tested in
+# isolation from (slow) real import-graph tracing. `stage` lays them out at
+# their import paths, so the uploaded tarball mirrors the repo layout.
+_REPO = Path(__file__).resolve().parents[3]
+_SHIPPED = {
+    _REPO / "cortexflow/__init__.py",
+    _REPO / "cortexflow/experiment.py",
+    _REPO / "cortexflow/jobs.py",
+    _REPO / "cortexflow/ray_util.py",
+    _REPO / "tests/__init__.py",
+    _REPO / "tests/unit/__init__.py",
+    _REPO / "tests/unit/cortexflow/__init__.py",
+    _REPO / "tests/unit/cortexflow/test_jobs.py",
+}
+
 
 def _make_experiment() -> Experiment:
     return Experiment(experiment_name=EXPERIMENT_NAME, run_id=RUN_ID)
@@ -107,17 +122,10 @@ class TestRemote(unittest.TestCase):
                 return_value="http://test:5000",
             ),
             patch("cortexflow.jobs.s3_util", self.fake_s3),
-            patch(
-                "cortexflow.jobs.subprocess.run",
-                return_value=MagicMock(
-                    stdout=(
-                        "numpy==1.26\n"
-                        "torch==2.5\n"
-                        "mlflow @ git+https://github.com/paksas/mlflow-fork.git@abc123\n"
-                    )
-                ),
-            ),
-            patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
+            # Bundling is exercised in test_bundle; pin it here so the job path
+            # is tested in isolation, without tracing all of torch/mlflow.
+            patch("cortexflow.jobs.bundle", return_value=set(_SHIPPED)),
+            patch("cortexflow.jobs.worker_provides", return_value=frozenset()),
         ]
         for p in patchers:
             p.start()
@@ -165,35 +173,14 @@ class TestRemote(unittest.TestCase):
         self.assertTrue((project_root / "cortexflow" / "ray_util.py").is_file())
         self.assertFalse((project_root / ".venv").exists())
 
-    def test_remote_writes_requirements_txt(self) -> None:
+    def test_remote_ships_no_requirements_txt(self) -> None:
+        # Dependencies travel as source in the tarball; nothing is pip-installed.
         set_instance(_make_experiment())
 
         job_id = cortexflow.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
-        requirements = project_root / "requirements.txt"
-        self.assertTrue(requirements.exists())
-        contents = requirements.read_text()
-        # mlflow is reached transitively (cortexflow.experiment imports it).
-        self.assertIn("mlflow @", contents)
-        # numpy is NOT used by the bundle, so the filter drops it.
-        self.assertNotIn("numpy==1.26", contents)
-        # torch is baked into the ray image, so the bundler strips it from
-        # runtime_env.pip even when it appears in pip freeze.
-        self.assertNotIn("torch==2.5", contents)
-
-    def test_remote_injects_github_token_into_git_urls(self) -> None:
-        set_instance(_make_experiment())
-
-        job_id = cortexflow.remote(lambda: None)
-
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
-        content = (project_root / "requirements.txt").read_text()
-        self.assertIn(
-            "git+https://x-access-token:ghp_faketoken@github.com/paksas/mlflow-fork.git",
-            content,
-        )
-        self.assertNotIn("git+https://github.com/paksas/mlflow-fork.git", content)
+        self.assertFalse((project_root / "requirements.txt").exists())
 
     def test_initial_lifecycle_is_pending(self) -> None:
         set_instance(_make_experiment())
@@ -254,11 +241,6 @@ class TestPayloadSaveLoad(unittest.TestCase):
                 return_value="http://test:5000",
             ),
             patch("cortexflow.jobs.s3_util", self.fake_s3),
-            patch(
-                "cortexflow.jobs.subprocess.run",
-                return_value=MagicMock(stdout="numpy==1.26\n"),
-            ),
-            patch("cortexflow.jobs.get_secret", return_value="ghp_faketoken"),
         ]
         for p in patchers:
             p.start()

@@ -72,16 +72,13 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         project_code_root = lifecycle.download_project_code_root()
         log.info("Submitting a job (%s/%s) - project code downloaded", run_id, job_id)
 
-        requirements_txt_path = Path(project_code_root) / "requirements.txt"
-
+        # The bundle ships every dependency as source, so working_dir alone makes
+        # the code importable; nothing is pip-installed on the worker.
         log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
         submit_ray_job(
             submission_id=submission_id,
             entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
-            runtime_env={
-                "working_dir": project_code_root,
-                "pip": str(requirements_txt_path),
-            },
+            runtime_env={"working_dir": project_code_root},
             num_gpus=lifecycle.num_gpus,
             num_cpus=lifecycle.num_cpus,
         )
