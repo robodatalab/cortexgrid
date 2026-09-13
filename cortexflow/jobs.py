@@ -229,7 +229,7 @@ def schedule_remote_job(
     job_id = Haikunator().haikunate(token_length=2, token_chars="0123456789")
     entry_file = Path(inspect.getfile(fn)).resolve()
     driver_file = Path(__file__).with_name("_ray_job_driver.py")
-    files = (bundle(entry_file) | bundle(driver_file)) - worker_provides()
+    files = bundle(entry_file).merge(bundle(driver_file)).local_files - worker_provides()
     with tempfile.TemporaryDirectory() as tmp:
         code_root = Path(tmp, "project_code_root")
         stage(files, code_root)

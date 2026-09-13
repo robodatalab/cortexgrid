@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import cloudpickle  # type: ignore
 
 import cortexflow
+from cortexflow._bundle import BundleDesc
 from cortexflow.experiment import Experiment, clear_instance, set_instance
 from cortexflow.ray_util import JobStatus, get_ray_job_status
 from cortexflow.jobs import (
@@ -124,7 +125,10 @@ class TestRemote(unittest.TestCase):
             patch("cortexflow.jobs.s3_util", self.fake_s3),
             # Bundling is exercised in test_bundle; pin it here so the job path
             # is tested in isolation, without tracing all of torch/mlflow.
-            patch("cortexflow.jobs.bundle", return_value=set(_SHIPPED)),
+            patch(
+                "cortexflow.jobs.bundle",
+                return_value=BundleDesc(local_files=set(_SHIPPED), tp_deps={}),
+            ),
             patch("cortexflow.jobs.worker_provides", return_value=frozenset()),
         ]
         for p in patchers:

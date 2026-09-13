@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cortexflow._bundle import bundle, stage
+from cortexflow._bundle import BundleDesc, bundle, stage
 
 
 class _Tree:
@@ -57,18 +57,22 @@ class TestBundle(unittest.TestCase):
 
     def test_single_module(self) -> None:
         tree = self._tree({"main.py": "import json\ndef fn(): pass\n"})
-        self.assertEqual(tree.rel(bundle(tree.path("main.py"))), {"main.py"})
+        self.assertEqual(
+            tree.rel(bundle(tree.path("main.py")).local_files), {"main.py"}
+        )
 
     def test_standard_library_is_excluded(self) -> None:
         tree = self._tree({"main.py": "import os, sys, json\nfrom pathlib import Path\n"})
-        self.assertEqual(tree.rel(bundle(tree.path("main.py"))), {"main.py"})
+        self.assertEqual(
+            tree.rel(bundle(tree.path("main.py")).local_files), {"main.py"}
+        )
 
     def test_package_init_chain_is_included(self) -> None:
         tree = self._tree(
             {"a/__init__.py": "", "a/b/__init__.py": "", "a/b/main.py": "x = 1\n"}
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("a/b/main.py"))),
+            tree.rel(bundle(tree.path("a/b/main.py")).local_files),
             {"a/__init__.py", "a/b/__init__.py", "a/b/main.py"},
         )
 
@@ -81,7 +85,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {"pkg/__init__.py", "pkg/helper.py", "pkg/main.py"},
         )
 
@@ -94,7 +98,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {"pkg/__init__.py", "pkg/helper.py", "pkg/main.py"},
         )
 
@@ -107,7 +111,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {"pkg/__init__.py", "pkg/sub.py", "pkg/main.py"},
         )
 
@@ -121,7 +125,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/sub/main.py"))),
+            tree.rel(bundle(tree.path("pkg/sub/main.py")).local_files),
             {"pkg/__init__.py", "pkg/util.py", "pkg/sub/__init__.py", "pkg/sub/main.py"},
         )
 
@@ -134,7 +138,9 @@ class TestBundle(unittest.TestCase):
                 "unused.py": "raise RuntimeError\n",
             }
         )
-        self.assertEqual(tree.rel(bundle(tree.path("a.py"))), {"a.py", "b.py", "c.py"})
+        self.assertEqual(
+            tree.rel(bundle(tree.path("a.py")).local_files), {"a.py", "b.py", "c.py"}
+        )
 
     def test_init_pulls_sibling_the_entry_never_imports(self) -> None:
         # The model-gateway shape: the package __init__ eagerly imports a sibling
@@ -148,24 +154,83 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/core.py"))),
+            tree.rel(bundle(tree.path("pkg/core.py")).local_files),
             {"pkg/__init__.py", "pkg/core.py", "pkg/side.py"},
         )
 
     def test_dependency_in_a_separate_sys_path_root(self) -> None:
-        # `lib` is installed under a second root (a .venv/site-packages stand-in);
-        # bundle follows the import into it regardless of where it lives.
+        # `lib` is local source under a second root (a src/ layout, a sibling
+        # checkout); bundle follows the import into it.
         tree = self._tree(
             {
                 "app/__init__.py": "",
                 "app/main.py": "import lib\n",
-                "site/lib/__init__.py": "z = 1\n",
+                "libs/lib/__init__.py": "z = 1\n",
             },
-            roots=("", "site"),
+            roots=("", "libs"),
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("app/main.py"))),
-            {"app/__init__.py", "app/main.py", "site/lib/__init__.py"},
+            tree.rel(bundle(tree.path("app/main.py")).local_files),
+            {"app/__init__.py", "app/main.py", "libs/lib/__init__.py"},
+        )
+
+    def test_dependency_in_site_packages_is_not_followed(self) -> None:
+        # `lib` is an installed package: neither it nor anything it imports
+        # ships, even a module that lives in the local tree.
+        tree = self._tree(
+            {
+                "app/__init__.py": "",
+                "app/main.py": "import lib\n",
+                "helper.py": "h = 1\n",
+                "site-packages/lib/__init__.py": "import helper\n",
+            },
+            roots=("", "site-packages"),
+        )
+        self.assertEqual(
+            tree.rel(bundle(tree.path("app/main.py")).local_files),
+            {"app/__init__.py", "app/main.py"},
+        )
+
+    def test_dependency_in_dist_packages_is_not_followed(self) -> None:
+        tree = self._tree(
+            {
+                "app/__init__.py": "",
+                "app/main.py": "import lib\n",
+                "helper.py": "h = 1\n",
+                "dist-packages/lib/__init__.py": "import helper\n",
+            },
+            roots=("", "dist-packages"),
+        )
+        self.assertEqual(
+            tree.rel(bundle(tree.path("app/main.py")).local_files),
+            {"app/__init__.py", "app/main.py"},
+        )
+
+    def test_bundling_does_not_import_packages(self) -> None:
+        # Resolving `pkg.sub` must not execute pkg/__init__.py -- an installed
+        # package's __init__ can raise on this platform (click._winconsole).
+        tree = self._tree(
+            {
+                "main.py": "import pkg.sub\n",
+                "pkg/__init__.py": "raise RuntimeError('must not be imported')\n",
+                "pkg/sub.py": "s = 1\n",
+            }
+        )
+        self.assertEqual(
+            tree.rel(bundle(tree.path("main.py")).local_files),
+            {"main.py", "pkg/__init__.py", "pkg/sub.py"},
+        )
+
+    def test_namespace_package_submodule(self) -> None:
+        tree = self._tree(
+            {
+                "main.py": "import ns.sub.mod\n",
+                "ns/sub/mod.py": "m = 1\n",
+            }
+        )
+        self.assertEqual(
+            tree.rel(bundle(tree.path("main.py")).local_files),
+            {"main.py", "ns/sub/mod.py"},
         )
 
     def test_deeply_nested_package(self) -> None:
@@ -178,7 +243,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("a/b/c/main.py"))),
+            tree.rel(bundle(tree.path("a/b/c/main.py")).local_files),
             {"a/__init__.py", "a/b/__init__.py", "a/b/c/__init__.py", "a/b/c/main.py"},
         )
 
@@ -192,7 +257,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("a/b/main.py"))),
+            tree.rel(bundle(tree.path("a/b/main.py")).local_files),
             {"a/__init__.py", "a/util.py", "a/b/__init__.py", "a/b/main.py"},
         )
 
@@ -205,7 +270,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {"pkg/__init__.py", "pkg/sub.py", "pkg/main.py"},
         )
 
@@ -220,7 +285,7 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {
                 "pkg/__init__.py",
                 "pkg/leaf.py",
@@ -239,25 +304,41 @@ class TestBundle(unittest.TestCase):
             }
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("pkg/main.py"))),
+            tree.rel(bundle(tree.path("pkg/main.py")).local_files),
             {"pkg/__init__.py", "pkg/main.py"},
         )
 
-    def test_entry_defined_in_an_installed_package(self) -> None:
+    def test_entry_defined_in_a_separate_sys_path_root(self) -> None:
         # The model-gateway shape: the entry function lives in a package that
-        # sits under a separate sys.path root (site-packages), and importing it
-        # runs the package __init__, which pulls in a sibling.
+        # sits under a separate local sys.path root, and importing it runs the
+        # package __init__, which pulls in a sibling.
         tree = self._tree(
             {
-                "site/mypkg/__init__.py": "from mypkg.core import go\nfrom mypkg import extra\n",
-                "site/mypkg/core.py": "def go(): pass\n",
-                "site/mypkg/extra.py": "y = 1\n",
+                "libs/mypkg/__init__.py": "from mypkg.core import go\nfrom mypkg import extra\n",
+                "libs/mypkg/core.py": "def go(): pass\n",
+                "libs/mypkg/extra.py": "y = 1\n",
             },
-            roots=("site",),
+            roots=("libs",),
         )
         self.assertEqual(
-            tree.rel(bundle(tree.path("site/mypkg/core.py"))),
-            {"site/mypkg/__init__.py", "site/mypkg/core.py", "site/mypkg/extra.py"},
+            tree.rel(bundle(tree.path("libs/mypkg/core.py")).local_files),
+            {"libs/mypkg/__init__.py", "libs/mypkg/core.py", "libs/mypkg/extra.py"},
+        )
+
+    def test_entry_defined_in_an_installed_package(self) -> None:
+        # The same shape installed into site-packages: the entry is itself
+        # third-party, so nothing ships as a local file.
+        tree = self._tree(
+            {
+                "site-packages/mypkg/__init__.py": "from mypkg.core import go\nfrom mypkg import extra\n",
+                "site-packages/mypkg/core.py": "def go(): pass\n",
+                "site-packages/mypkg/extra.py": "y = 1\n",
+            },
+            roots=("site-packages",),
+        )
+        self.assertEqual(
+            tree.rel(bundle(tree.path("site-packages/mypkg/core.py")).local_files),
+            set(),
         )
 
     def test_subtraction_drops_a_dependency(self) -> None:
@@ -269,8 +350,8 @@ class TestBundle(unittest.TestCase):
                 "lib/core.py": "c = 1\n",
             }
         )
-        needed = bundle(tree.path("app/main.py"))
-        baked = bundle(tree.path("lib/__init__.py"))
+        needed = bundle(tree.path("app/main.py")).local_files
+        baked = bundle(tree.path("lib/__init__.py")).local_files
         self.assertEqual(
             tree.rel(needed - baked), {"app/__init__.py", "app/main.py"}
         )
@@ -287,10 +368,44 @@ class TestBundle(unittest.TestCase):
                 "lib/deep.py": "d = 1\n",
             }
         )
-        needed = bundle(tree.path("app/main.py"))
-        baked = bundle(tree.path("lib/__init__.py"))
+        needed = bundle(tree.path("app/main.py")).local_files
+        baked = bundle(tree.path("lib/__init__.py")).local_files
         self.assertEqual(
             tree.rel(needed - baked), {"app/__init__.py", "app/main.py"}
+        )
+
+
+class TestBundleDescMerge(unittest.TestCase):
+    def test_merge_unions_local_files(self) -> None:
+        a = BundleDesc(local_files={Path("/a.py"), Path("/shared.py")}, tp_deps={})
+        b = BundleDesc(local_files={Path("/b.py"), Path("/shared.py")}, tp_deps={})
+        self.assertEqual(
+            a.merge(b).local_files, {Path("/a.py"), Path("/b.py"), Path("/shared.py")}
+        )
+
+    def test_merge_combines_distinct_tp_deps(self) -> None:
+        a = BundleDesc(local_files=set(), tp_deps={"numpy": "1.26.4"})
+        b = BundleDesc(local_files=set(), tp_deps={"requests": "2.31.0"})
+        self.assertEqual(
+            a.merge(b).tp_deps, {"numpy": "1.26.4", "requests": "2.31.0"}
+        )
+
+    def test_merge_tp_dep_present_in_both(self) -> None:
+        # Both bundles resolve against the same environment, so a shared
+        # dependency carries the same version on each side.
+        a = BundleDesc(local_files=set(), tp_deps={"numpy": "1.26.4"})
+        b = BundleDesc(local_files=set(), tp_deps={"numpy": "1.26.4"})
+        self.assertEqual(a.merge(b).tp_deps, {"numpy": "1.26.4"})
+
+    def test_merge_leaves_operands_unchanged(self) -> None:
+        a = BundleDesc(local_files={Path("/a.py")}, tp_deps={"numpy": "1.26.4"})
+        b = BundleDesc(local_files={Path("/b.py")}, tp_deps={"requests": "2.31.0"})
+        a.merge(b)
+        self.assertEqual(
+            a, BundleDesc(local_files={Path("/a.py")}, tp_deps={"numpy": "1.26.4"})
+        )
+        self.assertEqual(
+            b, BundleDesc(local_files={Path("/b.py")}, tp_deps={"requests": "2.31.0"})
         )
 
 

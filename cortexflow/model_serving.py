@@ -103,7 +103,7 @@ def bundle_class(
     without holding the class object."""
     entry_file = Path(inspect.getfile(cls)).resolve()
     serve_entry = Path(__file__).with_name("_serve_entry.py")
-    files = (bundle(entry_file) | bundle(serve_entry)) - worker_provides()
+    files = bundle(entry_file).merge(bundle(serve_entry)).local_files - worker_provides()
     with tempfile.TemporaryDirectory() as tmp:
         code_root = Path(tmp) / "code"
         stage(files, code_root)
