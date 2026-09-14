@@ -29,8 +29,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "main" {
 
 # Loki keeps its chunks in a dedicated bucket so its retention and
 # lifecycle policy stay independent of the shared data bucket. The name
-# is referenced directly from the Loki Argo App's Helm values; no SM
-# entry because nothing else consumes it.
+# is referenced directly from the Loki Argo App's Helm values; nothing
+# else consumes it.
 resource "aws_s3_bucket" "loki_chunks" {
   bucket        = "robolab-loki-chunks"
   force_destroy = true
@@ -58,48 +58,4 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "loki_chunks" {
       sse_algorithm = "AES256"
     }
   }
-}
-
-# Surface the bucket name in SM so apps can read it via ESO instead of
-# hardcoding it into manifests.
-
-resource "aws_secretsmanager_secret" "bucket_name" {
-  name = "robolab/infra/S3_BUCKET_NAME"
-  # Purge immediately on destroy. Default 30-day recovery window blocks
-  # subsequent apply with "scheduled for deletion" -- bad for dev infra that
-  # cycles destroy/apply. Matches cortexgrid.secrets.delete_secret which
-  # uses ForceDeleteWithoutRecovery=True.
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "bucket_name" {
-  secret_id     = aws_secretsmanager_secret.bucket_name.id
-  secret_string = aws_s3_bucket.main.id
-}
-
-# Regional S3 endpoint URL. boto3 with this URL hits real S3 the same as if
-# no endpoint were passed for this region; storing it explicitly means
-# cortexgrid can read a single SM key regardless of profile (on-prem
-# overwrites it with the in-cluster MinIO URL).
-resource "aws_secretsmanager_secret" "s3_endpoint_url" {
-  name                    = "robolab/infra/S3_ENDPOINT_URL"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "s3_endpoint_url" {
-  secret_id     = aws_secretsmanager_secret.s3_endpoint_url.id
-  secret_string = "https://s3.${var.aws_region}.amazonaws.com"
-}
-
-# Region for S3 signing. boto3's SigV4 needs the region to match the endpoint
-# host; storing it next to S3_ENDPOINT_URL keeps the pair coherent and lets
-# cortexgrid.s3_util pick both up from S3_REGION in the s3-creds Secret.
-resource "aws_secretsmanager_secret" "s3_region" {
-  name                    = "robolab/infra/S3_REGION"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "s3_region" {
-  secret_id     = aws_secretsmanager_secret.s3_region.id
-  secret_string = var.aws_region
 }

@@ -25,7 +25,7 @@ restart:
 
 head-aws-apply:
 	@[ -f .env.head ] || { echo ".env.head not found (copy .env.head.template)"; exit 1; }
-	. ./.env.head; \
+	TAILSCALE_AUTH_KEY="$$(uv run python -c 'from dotenv import dotenv_values; print(dotenv_values(".env.head").get("TAILSCALE_AUTH_KEY") or "")')"; \
 	  [ -n "$$TAILSCALE_AUTH_KEY" ] || { echo "TAILSCALE_AUTH_KEY missing from .env.head"; exit 1; }; \
 	  cd terraform/platform && \
 	  terraform init && \

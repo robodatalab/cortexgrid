@@ -6,19 +6,19 @@ ArgoCD needs credentials at runtime to provision K8s Pods — AWS keys, GitHub t
 
 Cortexgrid assumes that:
 
-1. AWS Secrets Manager is the only source of truth and stores and manages all of the configuration of the research platform and the applications and experiments running on it.
-2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-node.py](../../../../k8s/seed/setup-node.py) is responsible for that
-3. Credentials rotate and cannot be cached for any longer that 12 hrs.
+1. The head secrets server is the only source of truth for the configuration of the research platform and the applications and experiments running on it. It runs on the head host ([cortexgrid_head.py](../../../../k8s/seed/scripts/cortexgrid_head.py), port 7700) and stores every value in `/etc/cortexgrid/.env`.
+2. Everything runs on the tailnet, so the server has no authentication.
+3. Head setup seeds it: `.env.head` values, terraform outputs (AWS) and generated credentials (on-prem).
 
-All secrets — ArgoCD bootstrap (GHCR pull, repo clone, AWS access) and application-level (consumed by `cortexgrid.secrets` at runtime) — live under a single namespace `robolab/infra/*`. Both consumers reach them through `cortexgrid.secrets` (ExternalSecrets operator reads via AWS SDK; application code via `cortexgrid.secrets.get_secret()`).
+All secrets — ArgoCD bootstrap (GHCR pull, repo clone) and application-level (consumed by `cortexgrid.secrets` at runtime) — live in that one store, keyed by plain names such as `GH_TOKEN`. The External Secrets Operator reads them through its webhook provider; application code through `cortexgrid.secrets.get_secret()`.
 
 
 ## Functionality of deployments from k8s/argo_deployments/secrets
 
-external-secrets/ connect to AWS Secrets Manager and will act as a provider of keys used to provision new K8s Pods. These secrets, specifically, will be:
+external-secrets/ defines the `cortexgrid-head` ClusterSecretStore, which calls the head secrets server through the `cortexgrid-head` Service in the `default` namespace (created by the seed's BootstrapSecrets), and the ExternalSecrets that turn stored values into K8s Secrets used to provision Pods:
 - GitHub access tokens to grant access to organization's private repositories
 - GitHub Container Registry access tokens to grant access to organization's private Docker Images
-- AWS deployment service account credentials that authorize ArgoCD to deploy platform and applications in  AWS
+- Route53 credentials for cert-manager and object-storage credentials for the workloads
 
 reflector/ replicates a single Secret into every K8s namespace, present and future. K8s Secrets are namespace-scoped, so without it we would have to enumerate target namespaces up front and create one ExternalSecret per namespace. Used for secrets that every pod may need regardless of namespace (e.g. the GHCR pull secret).
 
@@ -26,9 +26,8 @@ reflector/ replicates a single Secret into every K8s namespace, present and futu
 
 The user will be responsible for adding those required secrets:
 
-1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexgrid/secrets.py](../../../../cortexgrid/secrets.py) or AWS console).
-2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo_deployments/aws/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
-3. Commit + push. ESO creates the k8s Secret; rotation auto-propagates.
+1. Store the value in the head secrets store as `<NAME>`: add it to `.env.head` before head setup, or call `cortexgrid.set_secret("<NAME>", value)` (or the UI's Secrets page) on a running cluster.
+2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo_deployments/base/secrets/external-secrets/) referencing `key: <NAME>` in the `cortexgrid-head` ClusterSecretStore.
+3. Commit + push. ESO creates the k8s Secret; changes propagate on its refresh interval.
 
 There is no static list — it grows with the platform. A new secret is needed whenever a deployment fails with an auth error (ArgoCD shows it, `kubectl describe` names the missing credential) or when adding a deployment that talks to a new external system.
-

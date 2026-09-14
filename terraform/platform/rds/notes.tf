@@ -82,15 +82,3 @@ resource "null_resource" "notes_schema" {
     EOT
   }
 }
-
-# Connection URI for the cortexgrid-ui notes feature.
-# Same recovery_window_in_days=0 rationale as MLFLOW_BACKEND_STORE_URI above.
-resource "aws_secretsmanager_secret" "notes_db_uri" {
-  name                    = "robolab/infra/NOTES_DB_URI"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "notes_db_uri" {
-  secret_id     = aws_secretsmanager_secret.notes_db_uri.id
-  secret_string = local.notes_uri
-}

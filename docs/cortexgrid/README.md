@@ -13,7 +13,11 @@ dependencies = [
 ]
 ```
 
-Then `uv sync` to install it.
+Then `uv sync` to install it, and point it at the head's secrets server (reachable over the tailnet):
+
+```bash
+export CORTEXGRID_HEAD_URL=http://robolab-head:7700
+```
 
 ### Usage
 
@@ -23,7 +27,7 @@ import cortexgrid
 cortexgrid.init(experiment="weather-forecast")
 ```
 
-That single call fetches `CONTROL_PLANE_TAILSCALE_IP` from AWS Secrets Manager (using your local AWS credentials) and connects to all services via its Tailscale-derived URLs. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
+That single call reads the service URLs from the head's secrets server at `$CORTEXGRID_HEAD_URL` and connects to all services through them. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
 
 **One experiment per binary run.** `cortexgrid.init()` may only be called once per process. Every subsequent `cortexgrid.log_metric`, `cortexgrid.log_artifact`, checkpoint, and `cortexgrid.remote()` submission is scoped to that experiment+run. Remote jobs dispatched by the control plane inherit the experiment+run via the pickled payload, so their logging flows into the same MLflow run as the parent binary.
 

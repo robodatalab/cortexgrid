@@ -27,7 +27,7 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 - **Checkpoint / resume** — `cortexgrid.checkpoint() / resume()` persists training state to MLflow artifacts so retries pick up where the previous attempt left off.
 - **Retries** — `retry=True` on `remote()` re-submits failed jobs with the same checkpoint context.
 - **Storage** — `upload`, `download`, `upload_dir` against S3 (AWS) or MinIO (on-prem).
-- **Secrets** — `get_secret`, `set_secret` against AWS Secrets Manager (AWS) or K8s secrets (on-prem).
+- **Secrets** — `get_secret`, `set_secret` against the head's secrets server at `$CORTEXGRID_HEAD_URL`.
 - **Two deployment profiles** — same manifests target either AWS (managed Postgres + S3) or on-prem (in-cluster Postgres + MinIO + DGX worker).
 - **GitOps cluster bootstrap** — `make head-setup` / `make worker-setup` install k3s and seed Argo CD; the rest syncs from `k8s/`.
 - **Experiment UI** — `cortexgrid-ui` browses experiments, runs, and job logs (in development).

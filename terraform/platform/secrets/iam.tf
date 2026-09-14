@@ -1,5 +1,7 @@
 # =============================================================================
-# IAM — access policies for secrets consumers
+# IAM — the robolab-dgx user: the cluster's AWS identity for Route53 (both
+# profiles) and S3 (AWS profile). Head setup publishes its keys to the head
+# secrets store (k8s/seed/operators/terraform_outputs.py).
 # =============================================================================
 
 resource "aws_iam_user" "dgx" {
@@ -9,52 +11,6 @@ resource "aws_iam_user" "dgx" {
 
 resource "aws_iam_access_key" "dgx" {
   user = aws_iam_user.dgx.name
-}
-
-data "aws_iam_policy_document" "dgx_secrets_manage" {
-  statement {
-    actions = [
-      "secretsmanager:GetSecretValue",
-      "secretsmanager:DescribeSecret",
-      "secretsmanager:CreateSecret",
-      "secretsmanager:PutSecretValue",
-      "secretsmanager:DeleteSecret",
-    ]
-    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/infra/*"]
-  }
-
-  statement {
-    actions   = ["secretsmanager:ListSecrets"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_user_policy" "dgx_secrets_manage" {
-  name   = "secrets-manage"
-  user   = aws_iam_user.dgx.name
-  policy = data.aws_iam_policy_document.dgx_secrets_manage.json
-}
-
-# ── DGX → argocd/ secrets (manage + read) ───────────────────────────────────
-# Seed publishes .env here; ESO running in-cluster reads these using the same
-# robolab-dgx credentials.
-
-data "aws_iam_policy_document" "dgx_argocd_secrets_manage" {
-  statement {
-    actions = [
-      "secretsmanager:CreateSecret",
-      "secretsmanager:PutSecretValue",
-      "secretsmanager:DescribeSecret",
-      "secretsmanager:GetSecretValue",
-    ]
-    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/argocd/*"]
-  }
-}
-
-resource "aws_iam_user_policy" "dgx_argocd_secrets_manage" {
-  name   = "argocd-secrets-manage"
-  user   = aws_iam_user.dgx.name
-  policy = data.aws_iam_policy_document.dgx_argocd_secrets_manage.json
 }
 
 # ── DGX -> Route 53 (cert-manager ACME DNS-01 challenges) ────────────────────
@@ -87,117 +43,12 @@ resource "aws_iam_user_policy" "dgx_route53_acme" {
 }
 
 # ── GitHub Actions OIDC ──────────────────────────────────────────────────────
-# Allows CI pipelines to assume a role and read secrets — no static keys in GH.
+# The CI role that used it only read AWS Secrets Manager and is gone. The
+# provider stays: an AWS account holds one provider per URL, and other stacks
+# in the account may federate GitHub Actions through it.
 
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["ffffffffffffffffffffffffffffffffffffffff"]
-}
-
-data "aws_iam_policy_document" "github_actions_assume" {
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringLike"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = [for repo in var.github_repos : "repo:${repo}:*"]
-    }
-  }
-}
-
-resource "aws_iam_role" "github_actions" {
-  name               = "robolab-github-actions"
-  assume_role_policy = data.aws_iam_policy_document.github_actions_assume.json
-  tags               = { Project = "robolab", Component = "ci" }
-}
-
-data "aws_iam_policy_document" "github_actions_secrets_read" {
-  statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/*"]
-  }
-
-  statement {
-    actions   = ["secretsmanager:ListSecrets"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "github_actions_secrets_read" {
-  name   = "secrets-read"
-  role   = aws_iam_role.github_actions.id
-  policy = data.aws_iam_policy_document.github_actions_secrets_read.json
-}
-
-# Integration tests create/update/delete throwaway secrets named robolab/infra/it-*.
-# Scoped tightly so CI cannot touch production secrets.
-
-data "aws_iam_policy_document" "github_actions_it_secrets_manage" {
-  statement {
-    actions = [
-      "secretsmanager:DescribeSecret",
-      "secretsmanager:CreateSecret",
-      "secretsmanager:PutSecretValue",
-      "secretsmanager:DeleteSecret",
-    ]
-    resources = ["arn:aws:secretsmanager:${var.aws_region}:*:secret:robolab/infra/it-*"]
-  }
-}
-
-resource "aws_iam_role_policy" "github_actions_it_secrets_manage" {
-  name   = "it-secrets-manage"
-  role   = aws_iam_role.github_actions.id
-  policy = data.aws_iam_policy_document.github_actions_it_secrets_manage.json
-}
-
-# Surface the role ARN in SM so Argo Notifications can pass it through the
-# webhook payload to GitHub workflows, which then assume this role via OIDC.
-
-resource "aws_secretsmanager_secret" "github_actions_role_arn" {
-  name                    = "robolab/infra/AWS_ROLE_ARN"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "github_actions_role_arn" {
-  secret_id     = aws_secretsmanager_secret.github_actions_role_arn.id
-  secret_string = aws_iam_role.github_actions.arn
-}
-
-# Regions for the two distinct real-AWS identities used by the cluster:
-# SM_REGION targets AWS Secrets Manager; ROUTE53_REGION targets Route53 for
-# cert-manager's DNS-01 challenge. They share var.aws_region today but are
-# stored as separate SM entries so each can be retargeted without disturbing
-# the other.
-
-resource "aws_secretsmanager_secret" "sm_region" {
-  name                    = "robolab/infra/SM_REGION"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "sm_region" {
-  secret_id     = aws_secretsmanager_secret.sm_region.id
-  secret_string = var.aws_region
-}
-
-resource "aws_secretsmanager_secret" "route53_region" {
-  name                    = "robolab/infra/ROUTE53_REGION"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "route53_region" {
-  secret_id     = aws_secretsmanager_secret.route53_region.id
-  secret_string = var.aws_region
 }
