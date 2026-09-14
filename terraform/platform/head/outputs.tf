@@ -12,3 +12,19 @@ output "security_group_id" {
   description = "Security group ID — consumed by rds module to allow ingress from the head."
   value       = aws_security_group.head.id
 }
+
+output "dgx_user_name" {
+  description = "IAM user whose access key the cluster uses for S3; consumed by the s3 module to attach its policy."
+  value       = aws_iam_user.dgx.name
+}
+
+output "dgx_access_key_id" {
+  description = "Access key ID of the robolab-dgx IAM user."
+  value       = aws_iam_access_key.dgx.id
+}
+
+output "dgx_secret_access_key" {
+  description = "Secret access key of the robolab-dgx IAM user."
+  value       = aws_iam_access_key.dgx.secret
+  sensitive   = true
+}

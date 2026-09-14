@@ -12,10 +12,6 @@
   |                              |                   |
   |                     VPC [ RDS + NAT ]            |
   |                                                  |
-  |  Secrets Manager (robolab/auth/*)                |
-  |       ^                                          |
-  |       |  OIDC                                    |
-  |  GitHub Actions                                  |
   +--------------------------------------------------+
 
   Tailscale Network
@@ -42,9 +38,8 @@ below for how the same workload manifests work in both profiles.
 | Folder | Purpose |
 |--------|---------|
 | `terraform/website/` | Marketing site + investor auth infrastructure |
-| `terraform/platform/secrets/` | `robolab-dgx` IAM user (Route53 + S3 access) and the GitHub Actions OIDC provider |
 | `terraform/platform/network/` | VPC, public/private subnets, NAT, S3 Gateway endpoint |
-| `terraform/platform/head/` | EC2 + EBS that hosts the k3s head and platform services |
+| `terraform/platform/head/` | EC2 + EBS that hosts the k3s head and platform services, plus the `robolab-dgx` IAM user the cluster uses for S3 |
 | `terraform/platform/s3/` | Data + mlflow-artifacts bucket and IAM grant on `robolab-dgx` |
 | `terraform/platform/rds/` | Postgres for mlflow backend store; password generated, URIs exposed as outputs |
 | `k8s/` | Argo CD GitOps platform — bootstrap manifest, Argo Applications, workload manifests, one-shot seed scripts |
@@ -59,7 +54,7 @@ See [cortexgrid/README.md](cortexgrid/README.md) for full reference
 
 ### Setup
 
-**Prerequisites:** Mac on the Tailscale network, with `uv`, `kubectl` and `terraform`. A `.env.head` file at the repo root, copied from [.env.head.template](../.env.head.template) and filled in with the values head setup can't generate: GitHub token and App, Tailscale operator client, Route53 keys (on-prem) and `TAILSCALE_AUTH_KEY` (AWS). On the AWS profile, also AWS credentials that can apply and read the `terraform/platform` and `terraform/platform/secrets` stacks.
+**Prerequisites:** Mac on the Tailscale network, with `uv`, `kubectl` and `terraform`. A `.env.head` file at the repo root, copied from [.env.head.template](../.env.head.template) and filled in with the values head setup can't generate: GitHub token and App, Tailscale operator client, Route53 keys (created in the AWS console) and `TAILSCALE_AUTH_KEY` (AWS). On the AWS profile, also AWS credentials that can apply and read the `terraform/platform` stack.
 
 **1. Provision the AWS head infrastructure** (terraform — VPC, EC2, S3, RDS, all in one shot):
 
@@ -103,8 +98,6 @@ Every secret lives on the head in `/etc/cortexgrid/.env`, served by a small HTTP
 - **API:** `GET /secrets` lists ids; `GET`, `PUT` and `DELETE /secrets/<id>` read, write and remove one value as `{"value": "..."}`.
 - **Writers:** head setup (`EnvSecrets` publishes every `.env.head` key; `TerraformOutputs`, `PostgresCredentials`, `MinioCredentials` and `ControlPlaneDetails` publish what they generate or read, see [Service discovery](#service-discovery)) and anyone calling `cortexgrid.set_secret`, such as the UI's Secrets page.
 - **Readers:** [`cortexgrid.secrets`](../cortexgrid/secrets.py) at `$CORTEXGRID_HEAD_URL` (`http://robolab-head:7700` from a laptop, `http://cortexgrid-head.default.svc.cluster.local:7700` from pods, via a selector-less Service that `BootstrapSecrets` points at the head), and the [External Secrets Operator](../k8s/argo_deployments/base/secrets/), whose `cortexgrid-head` ClusterSecretStore uses the webhook provider to materialize `route53-creds`, `s3-creds`, `mlflow-config`, `ray-env`, GHCR pull, repo clone creds, etc.
-
-To carry values over from a cluster that still used AWS Secrets Manager, run `uv run python scripts/export_sm_to_env.py` and merge its output into `.env.head`.
 
 ## Website infrastructure
 
@@ -158,13 +151,14 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 | EBS gp3 (100 GB default) | Mounted at `/storage`; backs k3s local-path PVCs. Online-resizable via `aws ec2 modify-volume`. |
 | Security group | Egress-all only — no inbound. SSH and k3s API access are over Tailscale, which uses outbound DERP relays for inbound peer connections. |
 | Cloud-init | Adds your `~/.ssh/id_rsa.pub` to the `ubuntu` user, installs Tailscale (joins tailnet via auth key from `.env.head`), formats and mounts the EBS volume. |
+| IAM user `robolab-dgx` + access key | The cluster's S3 identity on the AWS profile; head setup publishes the key as `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`. Its S3 policy is attached in `s3/`. |
 
 #### `s3/` — Data + mlflow-artifacts bucket
 
 | Resource | Purpose |
 |----------|---------|
 | S3 bucket `robolab-data` | AES256, public access blocked. Used for cortexgrid data uploads and mlflow artifacts under `mlflow-artifacts/`. |
-| IAM user policy | Attaches read/write to the existing `robolab-dgx` IAM user, whose keys head setup publishes as `S3_*`. |
+| IAM user policy | Attaches read/write to the `robolab-dgx` IAM user created in `head/`. |
 
 #### `rds/` — Postgres for mlflow backend store
 
@@ -190,8 +184,9 @@ prefix:
 | `S3_*` | `s3-creds` | Object storage (real AWS on AWS profile, MinIO on on-prem) |
 
 - `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `RAY_SERVE_URI`).
-- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL` and `S3_REGION` from [terraform/platform](../terraform/platform/outputs.tf) outputs, and the `robolab-dgx` user's keys from [secrets](../terraform/platform/secrets/) outputs as both `S3_*` and `ROUTE53_*`.
-- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI` + `NOTES_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`. `ROUTE53_*` come from `.env.head`.
+- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL`, `S3_REGION` and the `robolab-dgx` user's keys (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) from [terraform/platform](../terraform/platform/outputs.tf) outputs.
+- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI` + `NOTES_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- Both profiles: `ROUTE53_*` come from `.env.head`, as keys of an IAM user created in the AWS console.
 - ESO syncs the store into k8s Secrets (`route53-creds`, `s3-creds`, `mlflow-config`); Reflector mirrors them into every workload namespace.
 
 #### Profile-aware values
@@ -200,7 +195,7 @@ Workload manifests reference Secret *names*, not specific backends. The Secret *
 
 | Key | AWS source | on-prem source |
 |---|---|---|
-| `ROUTE53_ACCESS_KEY_ID` / `ROUTE53_SECRET_ACCESS_KEY` | [`TerraformOutputs`](../k8s/seed/operators/terraform_outputs.py) (`robolab-dgx` user) | `.env.head` |
+| `ROUTE53_ACCESS_KEY_ID` / `ROUTE53_SECRET_ACCESS_KEY` | `.env.head` (IAM user created in the AWS console) | same |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | [`TerraformOutputs`](../k8s/seed/operators/terraform_outputs.py) (`robolab-dgx` user) | [`MinioCredentials`](../k8s/seed/operators/minio_credentials.py) writes MinIO admin creds (user `admin`, random password persisted in the cluster `minio-credentials` Secret) |
 | `S3_REGION` | `TerraformOutputs` (`eu-west-2`) | [`MinioCredentials`](../k8s/seed/operators/minio_credentials.py) writes `us-east-1` (MinIO ignores, boto3 needs a value) |
 | `S3_BUCKET_NAME` | `TerraformOutputs` (`robolab-data`) | [`MinioCredentials`](../k8s/seed/operators/minio_credentials.py) writes `mlflow-artifacts` |
@@ -217,10 +212,6 @@ Pods that call [`cortexgrid.secrets`](../cortexgrid/secrets.py) (jobs-control-pl
 
 The env-var namespaces never collide; nothing flows through boto3's default `AWS_*` chain in our code paths.
 
-### `terraform/platform/secrets/` — `robolab-dgx` IAM user
-
-The `robolab-dgx` IAM user: its Route53 policy lives here, its S3 policy in [terraform/platform/s3](../terraform/platform/s3/). On the AWS profile head setup publishes the user's keys from this stack's outputs. The stack also keeps the account's GitHub Actions OIDC provider.
-
 ### Security posture
 
 Both CloudFront distributions enforce:
@@ -231,10 +222,6 @@ Both CloudFront distributions enforce:
 - `X-Frame-Options: DENY`
 - `Referrer-Policy: strict-origin-when-cross-origin`
 - S3 buckets are fully private (all public access blocked, CloudFront OAC only)
-
-### CI/CD
-
-The secrets module keeps an `aws_iam_openid_connect_provider` trusting `token.actions.githubusercontent.com`. No role in this repo uses it; the one that did only read AWS Secrets Manager and is gone.
 
 ## Related repos
 

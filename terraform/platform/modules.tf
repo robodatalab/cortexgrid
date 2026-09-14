@@ -28,7 +28,8 @@ module "tailscale_router" {
 }
 
 module "s3" {
-  source = "./s3"
+  source        = "./s3"
+  dgx_user_name = module.head.dgx_user_name
 }
 
 module "rds" {

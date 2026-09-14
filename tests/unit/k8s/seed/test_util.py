@@ -262,45 +262,44 @@ class TestHeadUrl(unittest.TestCase):
 
 
 class TestLoadHeadEnv(unittest.TestCase):
-    """load_head_env reads .env.head and exits naming the keys the profile needs but lacks."""
+    """load_head_env reads .env.head and exits naming the required keys it lacks."""
 
-    _COMMON = (
+    _REQUIRED = (
         "GH_TOKEN=t\n"
         "TAILSCALE_OPERATOR_CLIENT_ID=i\n"
         "TAILSCALE_OPERATOR_CLIENT_SECRET=s\n"
         "GH_APP_ID=1\n"
         "GH_APP_INSTALLATION_ID=2\n"
         'GH_APP_PRIVATE_KEY="-----BEGIN KEY-----\nabc\n-----END KEY-----"\n'
+        "ROUTE53_ACCESS_KEY_ID=a\n"
+        "ROUTE53_SECRET_ACCESS_KEY=b\n"
     )
 
-    def _load(self, content: str, profile: str) -> dict[str, str]:
+    def _load(self, content: str) -> dict[str, str]:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / ".env.head"
             path.write_text(content)
             with patch.object(util, "ENV_FILE", path):
-                return util.load_head_env(profile)
+                return util.load_head_env()
 
-    def test_aws_does_not_need_route53_keys(self) -> None:
-        env = self._load(self._COMMON, "aws")
+    def test_returns_values_when_complete(self) -> None:
+        env = self._load(self._REQUIRED)
         self.assertEqual(env["GH_APP_PRIVATE_KEY"], "-----BEGIN KEY-----\nabc\n-----END KEY-----")
-
-    def test_onprem_requires_route53_keys(self) -> None:
-        with self.assertRaises(SystemExit) as ctx:
-            self._load(self._COMMON + "ROUTE53_ACCESS_KEY_ID=\n", "onprem")
-        self.assertIn("ROUTE53_ACCESS_KEY_ID, ROUTE53_SECRET_ACCESS_KEY", str(ctx.exception))
-
-    def test_onprem_with_route53_keys_passes(self) -> None:
-        env = self._load(
-            self._COMMON + "ROUTE53_ACCESS_KEY_ID=a\nROUTE53_SECRET_ACCESS_KEY=b\n", "onprem"
-        )
         self.assertEqual(env["ROUTE53_ACCESS_KEY_ID"], "a")
+
+    def test_empty_values_count_as_missing(self) -> None:
+        content = self._REQUIRED.replace("ROUTE53_ACCESS_KEY_ID=a", "ROUTE53_ACCESS_KEY_ID=")
+        with self.assertRaises(SystemExit) as ctx:
+            self._load(content)
+        self.assertIn("missing ROUTE53_ACCESS_KEY_ID.", str(ctx.exception))
 
     def test_missing_file_lists_every_required_key(self) -> None:
         with patch.object(util, "ENV_FILE", Path("/nonexistent/.env.head")):
             with self.assertRaises(SystemExit) as ctx:
-                util.load_head_env("aws")
+                util.load_head_env()
         self.assertIn("GH_TOKEN", str(ctx.exception))
-        self.assertIn("GH_APP_PRIVATE_KEY", str(ctx.exception))
+        self.assertIn("ROUTE53_SECRET_ACCESS_KEY", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

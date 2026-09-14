@@ -23,6 +23,17 @@ output "s3_region" {
   value       = var.aws_region
 }
 
+output "s3_access_key_id" {
+  description = "robolab-dgx access key ID, published as S3_ACCESS_KEY_ID by head setup"
+  value       = module.head.dgx_access_key_id
+}
+
+output "s3_secret_access_key" {
+  description = "robolab-dgx secret access key, published as S3_SECRET_ACCESS_KEY by head setup"
+  value       = module.head.dgx_secret_access_key
+  sensitive   = true
+}
+
 output "mlflow_backend_store_uri" {
   description = "Published as MLFLOW_BACKEND_STORE_URI by head setup"
   value       = module.rds.mlflow_backend_store_uri

@@ -3,3 +3,8 @@ variable "bucket_name" {
   type        = string
   default     = "robolab-data"
 }
+
+variable "dgx_user_name" {
+  description = "IAM user (created by the head module) that gets read/write access to S3."
+  type        = string
+}

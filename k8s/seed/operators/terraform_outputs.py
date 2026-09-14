@@ -1,17 +1,13 @@
 """TerraformOutputs -- AWS profile only.
 
-The AWS analog of MinioCredentials + PostgresCredentials: terraform provisions
-S3, RDS and the dgx IAM user, and this operator publishes their coordinates and
-credentials from `terraform output` to the head secrets store.
+The AWS analog of MinioCredentials + PostgresCredentials: terraform/platform
+provisions S3, RDS and the robolab-dgx IAM user, and this operator publishes
+their coordinates and credentials from `terraform output` to the head secrets
+store: S3_BUCKET_NAME, S3_ENDPOINT_URL, S3_REGION, S3_ACCESS_KEY_ID,
+S3_SECRET_ACCESS_KEY, MLFLOW_BACKEND_STORE_URI and NOTES_DB_URI.
 
-  terraform/platform:          S3_BUCKET_NAME, S3_ENDPOINT_URL, S3_REGION,
-                               MLFLOW_BACKEND_STORE_URI, NOTES_DB_URI
-  terraform/platform/secrets:  the dgx IAM user's access key, published as both
-                               S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY and
-                               ROUTE53_ACCESS_KEY_ID / ROUTE53_SECRET_ACCESS_KEY
-
-Needs terraform on the laptop, AWS credentials that can read both states, and
-both stacks applied (`make core-aws-setup`, `make head-aws-apply`).
+Needs terraform on the laptop, AWS credentials that can read the
+terraform/platform state, and the stack applied (`make head-aws-apply`).
 
 Required deps: (none).
 """
@@ -31,38 +27,31 @@ log = logging.getLogger("k8s.seed.operators.terraform_outputs")
 
 
 _PLATFORM_DIR = util.REPO_ROOT / "terraform" / "platform"
-_SECRETS_DIR = _PLATFORM_DIR / "secrets"
 
-# secret id -> (terraform root, output name)
+# secret id -> terraform/platform output name
 _OUTPUTS = {
-    "S3_BUCKET_NAME": (_PLATFORM_DIR, "s3_bucket_name"),
-    "S3_ENDPOINT_URL": (_PLATFORM_DIR, "s3_endpoint_url"),
-    "S3_REGION": (_PLATFORM_DIR, "s3_region"),
-    "MLFLOW_BACKEND_STORE_URI": (_PLATFORM_DIR, "mlflow_backend_store_uri"),
-    "NOTES_DB_URI": (_PLATFORM_DIR, "notes_db_uri"),
-    "S3_ACCESS_KEY_ID": (_SECRETS_DIR, "dgx_user_access_key_id"),
-    "S3_SECRET_ACCESS_KEY": (_SECRETS_DIR, "dgx_user_secret_access_key"),
-    "ROUTE53_ACCESS_KEY_ID": (_SECRETS_DIR, "dgx_user_access_key_id"),
-    "ROUTE53_SECRET_ACCESS_KEY": (_SECRETS_DIR, "dgx_user_secret_access_key"),
+    "S3_BUCKET_NAME": "s3_bucket_name",
+    "S3_ENDPOINT_URL": "s3_endpoint_url",
+    "S3_REGION": "s3_region",
+    "S3_ACCESS_KEY_ID": "s3_access_key_id",
+    "S3_SECRET_ACCESS_KEY": "s3_secret_access_key",
+    "MLFLOW_BACKEND_STORE_URI": "mlflow_backend_store_uri",
+    "NOTES_DB_URI": "notes_db_uri",
 }
 
 
 class TerraformOutputs(Operator):
     def setup(self, deps: dict) -> None:
-        outputs = {tf_dir: _read_outputs(tf_dir) for tf_dir in (_PLATFORM_DIR, _SECRETS_DIR)}
-        missing = sorted(
-            f"{tf_dir.relative_to(util.REPO_ROOT)}:{name}"
-            for tf_dir, name in _OUTPUTS.values()
-            if name not in outputs[tf_dir]
-        )
+        outputs = _read_outputs(_PLATFORM_DIR)
+        missing = sorted(name for name in _OUTPUTS.values() if name not in outputs)
         if missing:
             sys.exit(
-                f"Error: terraform outputs missing: {', '.join(missing)}. "
-                f"Apply both stacks first (make core-aws-setup, make head-aws-apply)."
+                f"Error: terraform/platform outputs missing: {', '.join(missing)}. "
+                f"Apply the stack first (make head-aws-apply)."
             )
         log.info("Publishing terraform outputs to the head secrets store...")
-        for secret_id, (tf_dir, name) in _OUTPUTS.items():
-            set_secret(secret_id, outputs[tf_dir][name])
+        for secret_id, name in _OUTPUTS.items():
+            set_secret(secret_id, outputs[name])
 
     def teardown(self, deps: dict) -> None:
         for secret_id in _OUTPUTS:

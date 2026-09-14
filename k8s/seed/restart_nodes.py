@@ -186,7 +186,7 @@ def main() -> None:
     worker_entries = [n for n in snapshot if n["role"] == "worker"]
 
     # Validate .env.head before tearing anything down.
-    env = util.load_head_env(head_entry["profile"]) if head_entry else {}
+    env = util.load_head_env() if head_entry else {}
     # cortexgrid.secrets (used by the operators) talks to $CORTEXGRID_HEAD_URL.
     os.environ["CORTEXGRID_HEAD_URL"] = util.head_url(cfg)
 

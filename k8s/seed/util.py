@@ -78,8 +78,7 @@ HEAD_ENV_PATH = "/etc/cortexgrid/.env"
 HEAD_SERVICE_NAME = "cortexgrid-head"
 HEAD_SERVICE_NAMESPACE = "default"
 
-# Keys .env.head must provide on every profile, and on on-prem only. On the AWS
-# profile the Route53 keys come from terraform (TerraformOutputs).
+# Keys .env.head must provide. Head setup generates or looks up the rest.
 _REQUIRED_HEAD_ENV = [
     "GH_TOKEN",
     "TAILSCALE_OPERATOR_CLIENT_ID",
@@ -87,8 +86,9 @@ _REQUIRED_HEAD_ENV = [
     "GH_APP_ID",
     "GH_APP_INSTALLATION_ID",
     "GH_APP_PRIVATE_KEY",
+    "ROUTE53_ACCESS_KEY_ID",
+    "ROUTE53_SECRET_ACCESS_KEY",
 ]
-_REQUIRED_HEAD_ENV_ONPREM = ["ROUTE53_ACCESS_KEY_ID", "ROUTE53_SECRET_ACCESS_KEY"]
 
 
 def head_url_for(host: str) -> str:
@@ -105,17 +105,14 @@ def head_url(cfg: dict) -> str:
     return head_url_for(head["ip"] if head else HEAD_TAILNET_HOSTNAME)
 
 
-def load_head_env(profile: str) -> dict[str, str]:
-    """Read .env.head; exit listing the keys `profile` requires that it lacks."""
+def load_head_env() -> dict[str, str]:
+    """Read .env.head; exit listing the required keys it lacks."""
     env = {k: v for k, v in dotenv_values(ENV_FILE).items() if v}
-    required = _REQUIRED_HEAD_ENV + (
-        _REQUIRED_HEAD_ENV_ONPREM if profile == "onprem" else []
-    )
-    missing = [k for k in required if k not in env]
+    missing = [k for k in _REQUIRED_HEAD_ENV if k not in env]
     if missing:
         sys.exit(
-            f"Error: {ENV_FILE.name} is missing {', '.join(missing)} "
-            f"(profile={profile}). See .env.head.template."
+            f"Error: {ENV_FILE.name} is missing {', '.join(missing)}. "
+            f"See .env.head.template."
         )
     return env
 

@@ -194,7 +194,7 @@ def _run_worker(
 def main() -> None:
     args = parse_args()
     # Validate .env.head before touching infra-config.yaml.
-    env = util.load_head_env(args.profile) if args.type == "head" else {}
+    env = util.load_head_env() if args.type == "head" else {}
     cfg = util.load_config()
     cfg = validate_and_update(cfg, args)
     util.save_config(cfg)
