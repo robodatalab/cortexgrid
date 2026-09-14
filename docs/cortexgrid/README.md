@@ -11,12 +11,6 @@ Add `cortexgrid` as a dependency in your project's `pyproject.toml`:
 dependencies = [
     "cortexgrid",
 ]
-
-[tool.uv.sources]
-cortexgrid = { git = "https://github.com/robodatalab/robolab-infra.git", subdirectory = "cortexgrid" }
-
-[tool.hatch.metadata]
-allow-direct-references = true
 ```
 
 Then `uv sync` to install it.
@@ -89,10 +83,10 @@ print(f"Submitted: {job_id}")
 
 A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
-Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](../../cortexgrid/_bundle.py)):
+Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](https://github.com/robodatalab/cortexgrid/blob/main/cortexgrid/_bundle.py)):
 - `bundle(entry)` traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`), and returns every file needed to run it -- your own modules and third-party packages alike, wherever they live. The standard library is excluded (it ships with the interpreter)
 - Everything ships **as source**: the bundle is staged at each file's import path and tarred into the Ray `working_dir`. Nothing is `pip`-installed on the worker
-- Dependencies the worker image already has are subtracted rather than shipped: `bundle(entry) - worker_provides()`, where `worker_provides()` is the bundle of the packages baked into the ray image (torch and its CUDA stack, ray, mlflow, ...). See [k8s/docker/ray/Dockerfile](../../k8s/docker/ray/Dockerfile)
+- Dependencies the worker image already has are subtracted rather than shipped: `bundle(entry) - worker_provides()`, where `worker_provides()` is the bundle of the packages baked into the ray image (torch and its CUDA stack, ray, mlflow, ...). See [k8s/docker/ray/Dockerfile](https://github.com/robodatalab/cortexgrid/blob/main/k8s/docker/ray/Dockerfile)
 - Injects MLflow/S3 credentials so task code running on the DGX can reach all services
 
 ##### Retries
@@ -136,7 +130,7 @@ deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name, wait=True
 print(deployed.url)
 ```
 
-`save_model` is synchronous (registry lifecycle: `uploading` -> `ready`); `deploy_model` schedules the serving lifecycle (`deploying` -> `running`). See [model-serving.md](model-serving.md) for both lifecycles end to end - upload/deploy/undeploy/delete, status queries (`model_registry_status`, `model_serving_status`), and error handling.
+`save_model` is synchronous (registry lifecycle: `uploading` -> `ready`); `deploy_model` schedules the serving lifecycle (`deploying` -> `running`). See [model-serving.md](https://github.com/robodatalab/cortexgrid/blob/main/docs/cortexgrid/model-serving.md) for both lifecycles end to end - upload/deploy/undeploy/delete, status queries (`model_registry_status`, `model_serving_status`), and error handling.
 
 ### API reference
 
@@ -161,7 +155,7 @@ print(deployed.url)
 
 ## ML compute stack
 
-The DGX Spark runs the following services as k8s workloads managed by Argo CD (see [../k8s/argo_deployments/](../../k8s/argo_deployments/)):
+The DGX Spark runs the following services as k8s workloads managed by Argo CD (see [../k8s/argo_deployments/](https://github.com/robodatalab/cortexgrid/tree/main/k8s/argo_deployments/)):
 
 | Service | Port | Purpose |
 |---------|------|---------|

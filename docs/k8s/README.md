@@ -105,7 +105,7 @@ Workers register with the head's GCS via the in-cluster Service at `ray-head.ray
 
 ### Branch dev-environments
 
-**Problem.** Changes to `robolab-infra` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexgrid` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
+**Problem.** Changes to `cortexgrid` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexgrid` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
 
 **Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexgrid-ui, jobs-control-plane) get per-branch copies.
 

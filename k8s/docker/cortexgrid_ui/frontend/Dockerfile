@@ -14,3 +14,5 @@ FROM nginx:1.27-alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY k8s/docker/cortexgrid_ui/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+# trigger: cortexgrid-rename-2026-09-14

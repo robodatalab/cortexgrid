@@ -4,11 +4,8 @@ version = "0.1.0"
 description = "Example: checkpoint and retry with cortexgrid"
 requires-python = ">=3.11"
 dependencies = [
-    "cortexgrid[training]",
+    "cortexgrid",
 ]
-
-[tool.uv.sources]
-cortexgrid = { git = "https://github.com/robodatalab/robolab-infra.git" }
 
 [build-system]
 requires = ["hatchling"]

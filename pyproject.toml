@@ -2,6 +2,9 @@
 name = "cortexgrid"
 version = "0.2.85"
 description = "Connect your ML code to the RoboLab compute cluster — Ray, MLflow, and S3"
+readme = "docs/cortexgrid/README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "ray[default]>=2.9,<3",
@@ -21,12 +24,20 @@ dependencies = [
     "requests>=2.31",
 ]
 
+[project.urls]
+Homepage = "https://github.com/robodatalab/cortexgrid"
+Repository = "https://github.com/robodatalab/cortexgrid"
+Documentation = "https://github.com/robodatalab/cortexgrid/blob/main/docs/cortexgrid/README.md"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.build.targets.sdist]
+include = ["/cortexgrid"]
 
 [dependency-groups]
 dev = [

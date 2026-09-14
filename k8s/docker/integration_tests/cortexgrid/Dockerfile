@@ -24,3 +24,5 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --locked
 
 CMD ["/app/.venv/bin/python", "-m", "unittest", "discover", "-t", "/app", "-s", "tests", "-p", "test_*.py", "-v"]
+
+# trigger: cortexgrid-rename-2026-09-14
