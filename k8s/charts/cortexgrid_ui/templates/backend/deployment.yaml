@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cortexgrid-ui-backend
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+    app: cortexgrid-ui-backend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cortexgrid-ui-backend
+  template:
+    metadata:
+      labels:
+        app: cortexgrid-ui-backend
+    spec:
+      nodeSelector:
+        role: head
+      serviceAccountName: cortexgrid-ui-backend
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: cortexgrid-ui-backend
+          image: {{ .Values.images.backend }}
+          env:
+            - name: MLFLOW_HTTP_REQUEST_MAX_RETRIES
+              value: "{{ .Values.backend.mlflowHttpMaxRetries }}"
+            - name: MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR
+              value: "{{ .Values.backend.mlflowHttpBackoffFactor }}"
+          envFrom:
+            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
+            - secretRef:
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
+          ports:
+            - name: http
+              containerPort: {{ .Values.services.backend.port }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.services.backend.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5

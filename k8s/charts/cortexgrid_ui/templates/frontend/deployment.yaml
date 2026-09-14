@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cortexgrid-ui-frontend
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+    app: cortexgrid-ui-frontend
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cortexgrid-ui-frontend
+  template:
+    metadata:
+      labels:
+        app: cortexgrid-ui-frontend
+    spec:
+      nodeSelector:
+        role: head
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: cortexgrid-ui-frontend
+          image: {{ .Values.images.frontend }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.services.frontend.port }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.services.frontend.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            timeoutSeconds: 5

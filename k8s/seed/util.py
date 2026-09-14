@@ -25,7 +25,7 @@ CONFIG_FILE = REPO_ROOT / "infra-config.yaml"
 ENV_FILE = REPO_ROOT / ".env"
 KUBE_CONTEXT = "robolab"
 
-# cortexflow.secrets prefixes these with "robolab/infra/".
+# cortexgrid.secrets prefixes these with "robolab/infra/".
 SECRET_K3S_TOKEN = "K3S_NODE_TOKEN"
 SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
 SECRET_MLFLOW_TRACKING_URI = "MLFLOW_TRACKING_URI"

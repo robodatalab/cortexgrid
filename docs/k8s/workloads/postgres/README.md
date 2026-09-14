@@ -33,7 +33,7 @@ Mirrors the AWS posture: terraform's `random_password.master` persists in tfstat
 ## Logging in from a laptop
 
 ```sh
-psql "$(uv run python -c 'from cortexflow.secrets import get_secret; print(get_secret("MLFLOW_BACKEND_STORE_URI"))')"
+psql "$(uv run python -c 'from cortexgrid.secrets import get_secret; print(get_secret("MLFLOW_BACKEND_STORE_URI"))')"
 ```
 
 Substitute `NOTES_DB_URI` for the notes database. Identical command works against AWS RDS — only the host portion of the URI differs, and it always resolves via the tailnet (subnet router on AWS, NodePort on the head's tailscale IP on-prem).

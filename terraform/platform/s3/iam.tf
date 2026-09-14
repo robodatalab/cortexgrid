@@ -1,5 +1,5 @@
 # Grants the existing robolab-dgx IAM user (created by terraform/platform/secrets)
-# full read/write/create/delete on any S3 bucket in the account. cortexflow
+# full read/write/create/delete on any S3 bucket in the account. cortexgrid
 # auto-creates buckets on demand under arbitrary names, so the policy is
 # account-wide rather than scoped to a single bucket. Same key is used by
 # ESO/in-cluster boto3 clients, so all pods with aws-bootstrap-creds inherit

@@ -9,7 +9,7 @@ variable "private_subnet_ids" {
 }
 
 variable "nodes" {
-  description = "Members of the head deployment set. Map key is a stable name used in tags and the Tailscale hostname suffix; value sizes the EC2 and its attached EBS. amd64 because most workload images are not yet multi-arch (only ray is). t3.xlarge sized for argocd + mlflow + cortexflow-ui + jobs-control-plane + prometheus sharing the box; t3.large saturated under reconciliation spikes."
+  description = "Members of the head deployment set. Map key is a stable name used in tags and the Tailscale hostname suffix; value sizes the EC2 and its attached EBS. amd64 because most workload images are not yet multi-arch (only ray is). t3.xlarge sized for argocd + mlflow + cortexgrid-ui + jobs-control-plane + prometheus sharing the box; t3.large saturated under reconciliation spikes."
   type = map(object({
     instance_type = string
     ebs_size_gb   = number

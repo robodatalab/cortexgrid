@@ -14,7 +14,7 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project
 
-COPY cortexflow/ ./cortexflow/
+COPY cortexgrid/ ./cortexgrid/
 COPY jobs_control_plane/ ./jobs_control_plane/
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cortexgrid_ui
+description: CortexGrid UI - dashboard for the cortexgrid platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

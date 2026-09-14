@@ -11,8 +11,8 @@ component | unit test | docker image | integration test |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
 | ray | - | <!--s:build_ray-->🔴 failing<!--/s--> | - |
 | arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
-| ui backend | <!--s:test_cortexflow_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexflow_ui_backend-->🟢 passing<!--/s--> | - |
-| ui frontend | <!--s:test_cortexflow_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexflow_ui_frontend-->🟢 passing<!--/s--> | - |
+| ui backend | <!--s:test_cortexgrid_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_backend-->🟢 passing<!--/s--> | - |
+| ui frontend | <!--s:test_cortexgrid_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | - |
 | k8s seed | <!--s:test_k8s_seed-->🟢 passing<!--/s--> | - | - |
 
 
@@ -22,23 +22,23 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 
 ## Features
 
-- **Async job submission** — `cortexflow.remote(fn, *args, num_gpus=, num_cpus=, retry=)` ships a Python callable to the cluster and returns a job ID for polling.
+- **Async job submission** — `cortexgrid.remote(fn, *args, num_gpus=, num_cpus=, retry=)` ships a Python callable to the cluster and returns a job ID for polling.
 - **Experiment tracking** — `Experiment.init(name)` creates an MLflow experiment+run; `log_metric`, `log_params`, `log_artifact` log against it.
-- **Checkpoint / resume** — `cortexflow.checkpoint() / resume()` persists training state to MLflow artifacts so retries pick up where the previous attempt left off.
+- **Checkpoint / resume** — `cortexgrid.checkpoint() / resume()` persists training state to MLflow artifacts so retries pick up where the previous attempt left off.
 - **Retries** — `retry=True` on `remote()` re-submits failed jobs with the same checkpoint context.
 - **Storage** — `upload`, `download`, `upload_dir` against S3 (AWS) or MinIO (on-prem).
 - **Secrets** — `get_secret`, `set_secret` against AWS Secrets Manager (AWS) or K8s secrets (on-prem).
 - **Two deployment profiles** — same manifests target either AWS (managed Postgres + S3) or on-prem (in-cluster Postgres + MinIO + DGX worker).
 - **GitOps cluster bootstrap** — `make head-setup` / `make worker-setup` install k3s and seed Argo CD; the rest syncs from `k8s/`.
-- **Experiment UI** — `cortexflow-ui` browses experiments, runs, and job logs (in development).
+- **Experiment UI** — `cortexgrid-ui` browses experiments, runs, and job logs (in development).
 
 ## Comparison to other platforms
 
-Where cortexflow's surface overlaps with hosted/open-source alternatives. The "Submission" column is the dimension that actually distinguishes them — callable-level (submit a function) vs script-level (lift-and-shift the whole script) vs DAG/class-based.
+Where cortexgrid's surface overlaps with hosted/open-source alternatives. The "Submission" column is the dimension that actually distinguishes them — callable-level (submit a function) vs script-level (lift-and-shift the whole script) vs DAG/class-based.
 
 | Platform | Compute | Submission | Retries | Checkpoint | Tracking | Exp. UI | On-prem | OSS |
 |---|---|---|---|---|---|---|---|---|
-| **Cortexflow** | Ray + jobs-control-plane | callable | `retry=` flag | auto via MLflow | MLflow | `cortexflow-ui` | yes | yes |
+| **Cortexgrid** | Ray + jobs-control-plane | callable | `retry=` flag | auto via MLflow | MLflow | `cortexgrid-ui` | yes | yes |
 | **ClearML** | agents + queues | script (`execute_remotely`) | yes | manual (artifacts) | yes | yes | yes (self-host) | yes |
 | **Determined AI** | yes | `Trial` class | auto | first-class | yes | yes | yes (Helm) | yes |
 | **Metaflow / Outerbounds** | yes | `@step` DAG | yes | first-class | yes | yes | yes | yes (Metaflow) |
@@ -46,18 +46,18 @@ Where cortexflow's surface overlaps with hosted/open-source alternatives. The "S
 | **dstack** | yes | task config | yes | manual | no | partial | yes | yes |
 | **Modal** | yes | callable (`spawn`) | yes | manual (`modal.Volume`) | no | jobs only | no | no |
 
-**Bottom line:** no platform is a 1:1 drop-in. **ClearML** has the broadest *infrastructure* overlap (queues + agents + tracking + UI + on-prem) but submits scripts, not callables — you'd restructure how work is dispatched. **Anyscale** is the closest *API* match (cortexflow's callable submission is just Ray) but kills on-prem and isn't OSS. **Modal** has the slickest DX but covers only the compute half.
+**Bottom line:** no platform is a 1:1 drop-in. **ClearML** has the broadest *infrastructure* overlap (queues + agents + tracking + UI + on-prem) but submits scripts, not callables — you'd restructure how work is dispatched. **Anyscale** is the closest *API* match (cortexgrid's callable submission is just Ray) but kills on-prem and isn't OSS. **Modal** has the slickest DX but covers only the compute half.
 
 ### Code differences
 
-The same toy job — log a metric locally, submit a remote callable that logs another metric to the same experiment — looks different on each platform. The full rewrites of [`cortexflow_examples/jobs/main.py`](cortexflow_examples/jobs/main.py) for each are below.
+The same toy job — log a metric locally, submit a remote callable that logs another metric to the same experiment — looks different on each platform. The full rewrites of [`cortexgrid_examples/jobs/main.py`](cortexgrid_examples/jobs/main.py) for each are below.
 
-**1. Defining the remote callable.** Cortexflow and ClearML need no decoration; Modal binds the function to an `App` + `Image`; Anyscale uses Ray's `@ray.remote`.
+**1. Defining the remote callable.** Cortexgrid and ClearML need no decoration; Modal binds the function to an `App` + `Image`; Anyscale uses Ray's `@ray.remote`.
 
 ```python
-# Cortexflow
+# Cortexgrid
 def job_fn():
-    cortexflow.log_metric("job_metric", 42.0)
+    cortexgrid.log_metric("job_metric", 42.0)
 
 # Modal
 @app.function(secrets=[modal.Secret.from_name("mlflow")])
@@ -75,19 +75,19 @@ def job_fn(tracking_uri: str, run_id: str): ...
 
 | Platform | Submit | Returns |
 |---|---|---|
-| Cortexflow | `cortexflow.remote(job_fn)` | string job ID |
+| Cortexgrid | `cortexgrid.remote(job_fn)` | string job ID |
 | Modal | `job_fn.spawn(run_id)` | `FunctionCall` |
 | Anyscale | `job_fn.remote(uri, run_id)` | `ObjectRef` |
 | ClearML | `task.execute_remotely(queue_name="dgx")` | (enqueues, then exits the local process) |
 
-**3. Waiting for completion.** Cortexflow polls Ray via the MLflow lifecycle. Modal and Anyscale block on the handle. ClearML is implicit — the agent runs to completion after the local process has already exited.
+**3. Waiting for completion.** Cortexgrid polls Ray via the MLflow lifecycle. Modal and Anyscale block on the handle. ClearML is implicit — the agent runs to completion after the local process has already exited.
 
 ```python
-# Cortexflow — poll
+# Cortexgrid — poll
 while True:
-    lifecycle = cortexflow.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-    status = cortexflow.get_ray_job_status(lifecycle.get_ray_job_id())
-    if status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
+    lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
+    status = cortexgrid.get_ray_job_status(lifecycle.get_ray_job_id())
+    if status in (cortexgrid.JobStatus.FINISHED, cortexgrid.JobStatus.FAILED):
         break
     time.sleep(5)
 
@@ -100,17 +100,17 @@ ray.get(future)
 # ClearML — nothing; local side has already exited at execute_remotely()
 ```
 
-**4. Experiment tracking.** Cortexflow and ClearML have it built in: both halves of the job log to the same run/task automatically. Modal and Anyscale don't — you bring your own MLflow server and explicitly pass `run_id` (and `tracking_uri`) into the remote callable.
+**4. Experiment tracking.** Cortexgrid and ClearML have it built in: both halves of the job log to the same run/task automatically. Modal and Anyscale don't — you bring your own MLflow server and explicitly pass `run_id` (and `tracking_uri`) into the remote callable.
 
 **5. What it actually costs to use.** The mechanism by which each platform ships your code (tarball / image / runtime env / git diff) maps to four user-visible costs:
 
 | | Money | BYO hardware | Time from submit to running | Steps for the very first job |
 |---|---|---|---|---|
-| **Cortexflow** | $0 software; you pay your own hardware | default | ~10s warm (5s control-plane poll + Ray container start) | write fn → `cortexflow.remote(fn)`. No Dockerfile, no decorator, no commit. |
+| **Cortexgrid** | $0 software; you pay your own hardware | default | ~10s warm (5s control-plane poll + Ray container start) | write fn → `cortexgrid.remote(fn)`. No Dockerfile, no decorator, no commit. |
 | **Modal** | per-second metered for compute + GPU; no way to use your own hardware for a discount | not supported (Modal's fleet only) | 1-2s with memory snapshots, 5-30s cold; first image build can take minutes | decorate `@app.function(image=...)`, declare the image inline (pip deps in Python), `modal run` |
 | **Anyscale** | AWS/GCP bill + Anyscale management margin | cloud accounts only; true on-prem limited | sub-second on a warm cluster; minutes if a cluster must spin up | configure compute cluster + runtime env, `@ray.remote`, `ray.init("anyscale://...")` |
 | **ClearML** | $0 software; you pay your own hardware | default | agent poll (~5-10s) + env recreation from pip freeze (seconds to minutes) | `Task.init()` + `task.execute_remotely()`; *commit and push* so the agent can clone the repo; install `clearml-agent` on the worker |
 
-The asymmetry: Modal asks you to *describe* the environment (in Python). ClearML asks you to *commit* it (to git). Cortexflow uses whatever's in your working directory at submit time — no description, no commit.
+The asymmetry: Modal asks you to *describe* the environment (in Python). ClearML asks you to *commit* it (to git). Cortexgrid uses whatever's in your working directory at submit time — no description, no commit.
 
 Full documentation: [docs/README.md](docs/README.md).

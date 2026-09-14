@@ -26,7 +26,7 @@ def build() -> Pipeline:
         # MinioCredentials is the on-prem analog of terraform/platform/s3:
         # the *infrastructure layer* publishes the MinIO/S3 endpoint URL +
         # credentials into AWS Secrets Manager so every consumer (mlflow,
-        # cortexflow library on a laptop, CI runners, ray workers) reads a
+        # cortexgrid library on a laptop, CI runners, ray workers) reads a
         # single profile-agnostic key from SM and gets a tailnet-reachable
         # URL.
         #

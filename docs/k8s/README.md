@@ -8,7 +8,7 @@ The platform is a hybrid: a single k3s **head** plus zero or more **GPU workers*
 
 | Role | Label | What lands there | Typical box |
 |------|-------|------------------|-------------|
-| `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexflow-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`head-aws-apply` + `head-setup`) **or** on-prem ThinkStation/DGX (`head-setup` only) |
+| `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexgrid-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`head-aws-apply` + `head-setup`) **or** on-prem ThinkStation/DGX (`head-setup` only) |
 | `worker` | `role=worker` | ray-worker DaemonSet (1 Pod per node, requests 1 GPU) | DGX, ThinkStation, GPU EC2 - anything joined via `worker-setup` |
 
 Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../../infra-config.yaml) at the repo root. That file is written by the seed scripts and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs.
@@ -22,11 +22,11 @@ Both profiles render via kustomize from a shared [argo_deployments/base/](../../
 - **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
 - **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (`base/` plus the on-prem `loki.yaml` and `secrets/` overlay; on-prem-only MinIO + Postgres Apps would also live here when added). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
 
-Workload manifests (mlflow, ray, cortexflow-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
+Workload manifests (mlflow, ray, cortexgrid-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
 
 ### Argo Application hierarchy
 
-Within each profile the manifests are a three-tier App-of-Apps that mirrors the dependency direction (bootstrap → cortexflow → ui):
+Within each profile the manifests are a three-tier App-of-Apps that mirrors the dependency direction (bootstrap → cortexgrid → ui):
 
 ```
 argo-bootstrap-<profile>           bootstrap (defined in argocd.yaml; no upstream deps)
@@ -35,9 +35,9 @@ argo-bootstrap-<profile>           bootstrap (defined in argocd.yaml; no upstrea
 ├── tailscale-operator             leaf
 ├── nvidia                         leaf
 ├── monitoring                     leaf (kube-prometheus-stack)
-└── ui                             top aggregator (fires cortexflow-ui integration tests)
-    ├── cortexflow-ui              leaf
-    └── cortexflow                 mid aggregator (fires cortexflow library integration tests)
+└── ui                             top aggregator (fires cortexgrid-ui integration tests)
+    ├── cortexgrid-ui              leaf
+    └── cortexgrid                 mid aggregator (fires cortexgrid library integration tests)
         ├── jobs-control-plane     leaf
         ├── mlflow                 leaf
         ├── mlflow-monitoring      leaf (Grafana dashboards for mlflow)
@@ -50,7 +50,7 @@ The bootstrap App's `directory.exclude: 'ui/**'` keeps it from claiming anything
 
 **Why secrets/ must stay bootstrap-owned.** ArgoCD reads its source repo using the `argo-github-repo` Secret, which is produced by an `ExternalSecret` backed by the `ClusterSecretStore` from `secrets/external-secrets/`. If those resources live downstream of an aggregator, ArgoCD enters a chicken-and-egg state on any sync that prunes them — the aggregator can't reload its source until git auth is restored, and git auth comes from what the aggregator was supposed to manage. Bootstrap-owning `secrets/` keeps the trust chain rooted at a layer that doesn't depend on git working. Recovery from accidentally nesting it requires re-running `make head-setup` so [BootstrapSecrets](../../k8s/seed/operators/bootstrap_secrets.py) can re-seed `argo-github-repo` directly via `kubectl apply`.
 
-**Test triggers.** Each aggregator subscribes to a distinct ArgoCD notification trigger (`on-cortexflow-stack-deployed`, `on-cortexflow-ui-stack-deployed`) declared in [argocd.yaml](../../k8s/argocd.yaml) and uses `oncePer: app.status.sync.revision` so it fires exactly once per main commit, only after every child is Synced + Healthy. The corresponding GitHub workflows under [.github/workflows/](../../.github/workflows/) listen for the matching `repository_dispatch` event types — no polling, no per-commit dedup logic on the GH side.
+**Test triggers.** Each aggregator subscribes to a distinct ArgoCD notification trigger (`on-cortexgrid-stack-deployed`, `on-cortexgrid-ui-stack-deployed`) declared in [argocd.yaml](../../k8s/argocd.yaml) and uses `oncePer: app.status.sync.revision` so it fires exactly once per main commit, only after every child is Synced + Healthy. The corresponding GitHub workflows under [.github/workflows/](../../.github/workflows/) listen for the matching `repository_dispatch` event types — no polling, no per-commit dedup logic on the GH side.
 
 ### Seeding
 
@@ -91,7 +91,7 @@ Ray is split into a CPU-only control plane on the head and a GPU-bearing worker 
 | `ray-head` | `role=head` | none (no `nvidia.com/gpu` request, no `--num-gpus`, no `runtimeClassName`) | 1 (Deployment) |
 | `ray-worker` | `role=worker` | 1 (`nvidia.com/gpu: 1`, `runtimeClassName: nvidia`) | 1 per worker node (DaemonSet) |
 
-Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexflow submission site.
+Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexgrid submission site.
 
 **To run ray on AWS:** join GPU EC2 instances via `worker-setup`. ray-head stays on the AWS EC2 head; ray-worker DaemonSet lights up one Pod per GPU EC2.
 
@@ -105,9 +105,9 @@ Workers register with the head's GCS via the in-cluster Service at `ray-head.ray
 
 ### Branch dev-environments
 
-**Problem.** Changes to `robolab-infra` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexflow` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
+**Problem.** Changes to `robolab-infra` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexgrid` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
 
-**Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexflow-ui, jobs-control-plane) get per-branch copies.
+**Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexgrid-ui, jobs-control-plane) get per-branch copies.
 
 ### Multi-cluster routing
 
@@ -153,7 +153,7 @@ metadata:
 ```bash
 kubectl -n <namespace> delete deployment <name>
 ```
-Argo's next sync creates a new object from scratch with only the fields in our manifest — no stale subfields survive. Brief downtime (seconds), no ongoing cost. This is what we did for `jobs-control-plane`, `cortexflow-ui-*`, `minio`, and `postgres` when adding `strategy: Recreate`.
+Argo's next sync creates a new object from scratch with only the fields in our manifest — no stale subfields survive. Brief downtime (seconds), no ongoing cost. This is what we did for `jobs-control-plane`, `cortexgrid-ui-*`, `minio`, and `postgres` when adding `strategy: Recreate`.
 
 **Alternative (annotation-based).** `argocd.argoproj.io/sync-options: Replace=true` on the Deployment swaps SSA for `kubectl replace` on every sync — wipes stale fields automatically. Cost: every manifest edit (image tag, env, probe) triggers a full object replace and a pod recreate. Worth it only when the delete-and-recreate dance is too disruptive. See [workloads/ray/deployment.yaml](../../k8s/workloads/ray/deployment.yaml) for an example.
 

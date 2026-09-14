@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   promote:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     concurrency:
       group: badges-push
       cancel-in-progress: false
@@ -37,16 +37,16 @@ jobs:
           fi
 
           JOB_KEYS=(
-            test_cortexflow
-            test_cortexflow_ui_backend
-            test_cortexflow_ui_frontend
+            test_cortexgrid
+            test_cortexgrid_ui_backend
+            test_cortexgrid_ui_frontend
             test_jobs_control_plane
             test_k8s_seed
             build_arc_runner
-            build_cortexflow_integration
-            build_cortexflow_ui_backend
-            build_cortexflow_ui_frontend
-            build_cortexflow_ui_integration
+            build_cortexgrid_integration
+            build_cortexgrid_ui_backend
+            build_cortexgrid_ui_frontend
+            build_cortexgrid_ui_integration
             build_jobs_control_plane
             build_mlflow
             build_ray

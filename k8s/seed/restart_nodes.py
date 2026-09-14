@@ -17,7 +17,7 @@ from typing import Callable
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-from cortexflow.secrets import get_secret, list_secrets
+from cortexgrid.secrets import get_secret, list_secrets
 from k8s.seed import head, util, worker
 
 

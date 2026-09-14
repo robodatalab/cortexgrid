@@ -1,4 +1,4 @@
-"""In-memory fakes for the infrastructure cortexflow talks to.
+"""In-memory fakes for the infrastructure cortexgrid talks to.
 
 Tests using these fakes assert on observable post-state of S3, MLflow,
 Ray and Postgres rather than on which helper functions were called.

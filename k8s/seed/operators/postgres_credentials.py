@@ -26,7 +26,7 @@ import secrets
 import subprocess
 import textwrap
 
-from cortexflow.secrets import delete_secret, set_secret
+from cortexgrid.secrets import delete_secret, set_secret
 from k8s.seed import util
 from k8s.seed.pipeline import Operator
 
@@ -34,7 +34,7 @@ from k8s.seed.pipeline import Operator
 log = logging.getLogger("k8s.seed.operators.postgres_credentials")
 
 
-_NAMESPACE = "cortexflow"
+_NAMESPACE = "cortexgrid"
 _SECRET_NAME = "postgres-credentials"
 _USER = "robolab"
 _DB_INITIAL = "mlflow"

@@ -67,7 +67,7 @@ resource "aws_secretsmanager_secret" "bucket_name" {
   name = "robolab/infra/S3_BUCKET_NAME"
   # Purge immediately on destroy. Default 30-day recovery window blocks
   # subsequent apply with "scheduled for deletion" -- bad for dev infra that
-  # cycles destroy/apply. Matches cortexflow.secrets.delete_secret which
+  # cycles destroy/apply. Matches cortexgrid.secrets.delete_secret which
   # uses ForceDeleteWithoutRecovery=True.
   recovery_window_in_days = 0
 }
@@ -79,7 +79,7 @@ resource "aws_secretsmanager_secret_version" "bucket_name" {
 
 # Regional S3 endpoint URL. boto3 with this URL hits real S3 the same as if
 # no endpoint were passed for this region; storing it explicitly means
-# cortexflow can read a single SM key regardless of profile (on-prem
+# cortexgrid can read a single SM key regardless of profile (on-prem
 # overwrites it with the in-cluster MinIO URL).
 resource "aws_secretsmanager_secret" "s3_endpoint_url" {
   name                    = "robolab/infra/S3_ENDPOINT_URL"
@@ -93,7 +93,7 @@ resource "aws_secretsmanager_secret_version" "s3_endpoint_url" {
 
 # Region for S3 signing. boto3's SigV4 needs the region to match the endpoint
 # host; storing it next to S3_ENDPOINT_URL keeps the pair coherent and lets
-# cortexflow.s3_util pick both up from S3_REGION in the s3-creds Secret.
+# cortexgrid.s3_util pick both up from S3_REGION in the s3-creds Secret.
 resource "aws_secretsmanager_secret" "s3_region" {
   name                    = "robolab/infra/S3_REGION"
   recovery_window_in_days = 0

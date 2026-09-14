@@ -1,16 +1,16 @@
 # Secrets
 
-ArgoCD needs credentials at runtime to provision K8s Pods — AWS keys, GitHub token, registry auth. The need arises from pod orchestration (cloning private repos, pulling private images, calling AWS APIs), not from application code inside the pods. App code reaches its own secrets through `cortexflow.secrets`, independently.
+ArgoCD needs credentials at runtime to provision K8s Pods — AWS keys, GitHub token, registry auth. The need arises from pod orchestration (cloning private repos, pulling private images, calling AWS APIs), not from application code inside the pods. App code reaches its own secrets through `cortexgrid.secrets`, independently.
 
-## Cortexflow infrastructure environment
+## Cortexgrid infrastructure environment
 
-Cortexflow assumes that:
+Cortexgrid assumes that:
 
 1. AWS Secrets Manager is the only source of truth and stores and manages all of the configuration of the research platform and the applications and experiments running on it.
 2. The entire infrastructure can only be seeded once - when it's deployed for the first time. [setup-node.py](../../../../k8s/seed/setup-node.py) is responsible for that
 3. Credentials rotate and cannot be cached for any longer that 12 hrs.
 
-All secrets — ArgoCD bootstrap (GHCR pull, repo clone, AWS access) and application-level (consumed by `cortexflow.secrets` at runtime) — live under a single namespace `robolab/infra/*`. Both consumers reach them through `cortexflow.secrets` (ExternalSecrets operator reads via AWS SDK; application code via `cortexflow.secrets.get_secret()`).
+All secrets — ArgoCD bootstrap (GHCR pull, repo clone, AWS access) and application-level (consumed by `cortexgrid.secrets` at runtime) — live under a single namespace `robolab/infra/*`. Both consumers reach them through `cortexgrid.secrets` (ExternalSecrets operator reads via AWS SDK; application code via `cortexgrid.secrets.get_secret()`).
 
 
 ## Functionality of deployments from k8s/argo_deployments/secrets
@@ -26,7 +26,7 @@ reflector/ replicates a single Secret into every K8s namespace, present and futu
 
 The user will be responsible for adding those required secrets:
 
-1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexflow/secrets.py](../../../../cortexflow/secrets.py) or AWS console).
+1. Store value in AWS Secrets Manager at `robolab/infra/<NAME>` (via [cortexgrid/secrets.py](../../../../cortexgrid/secrets.py) or AWS console).
 2. Add an `ExternalSecret` YAML in [external-secrets/](../../../../k8s/argo_deployments/aws/secrets/external-secrets/) referencing `key: robolab/infra/<NAME>`.
 3. Commit + push. ESO creates the k8s Secret; rotation auto-propagates.
 

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cortexgrid-ui-backend
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+    app: cortexgrid-ui-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: cortexgrid-ui-backend
+  ports:
+    - name: http
+      port: {{ .Values.services.backend.port }}
+      targetPort: {{ .Values.services.backend.port }}

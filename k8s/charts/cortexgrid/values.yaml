@@ -1,0 +1,39 @@
+images:
+  mlflow: ghcr.io/robodatalab/mlflow:latest
+  ray: ghcr.io/robodatalab/ray-head:latest
+  jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:latest
+
+# Per-component switches. On AWS, minio and postgres are external (S3, RDS) so
+# the in-cluster deployments are disabled and the chart only ships the consumers.
+minio:
+  enabled: true
+postgres:
+  enabled: true
+
+services:
+  mlflow:
+    host: mlflow.cortexgrid.svc.cluster.local
+    port: 5000
+    nodePort: 30500
+    ingressHost: mlflow.robodatalab.com
+  postgres:
+    host: postgres.cortexgrid.svc.cluster.local
+    port: 5432
+  minio:
+    host: minio.cortexgrid.svc.cluster.local
+    port: 9000
+  ray:
+    headHost: ray-head.cortexgrid.svc.cluster.local
+    headPort: 6379
+    ingressHost: ray.robodatalab.com
+  monitoring:
+    grafana: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local:80
+    prometheus: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+
+storage:
+  minio: 100Gi
+  postgres: 20Gi
+
+ingress:
+  className: traefik
+  tlsSecretName: robodatalab-wildcard-tls

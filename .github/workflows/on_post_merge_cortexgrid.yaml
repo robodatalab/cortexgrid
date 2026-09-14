@@ -1,0 +1,83 @@
+name: on_post_merge_cortexgrid
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "k8s/workloads/cortexgrid_integration_tests/job.yaml"
+            - "k8s/workloads/cortexgrid/kustomization.yaml"
+            - "k8s/workloads/arc_runner_set/**"
+            - ".github/workflows/on_post_merge_cortexgrid.yaml"
+
+concurrency:
+    group: cortexgrid-integration
+    cancel-in-progress: false
+
+permissions:
+    contents: write
+
+jobs:
+    wait_for_cortexgrid_deployment:
+        runs-on: arc-runners
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: main
+                  fetch-depth: 0
+            - run: |
+                  kubectl annotate -n argocd app cortexgrid argocd.argoproj.io/refresh=normal --overwrite
+                  deadline=$(($(date +%s) + 600))
+                  until git merge-base --is-ancestor "$GITHUB_SHA" \
+                        "$(kubectl get -n argocd app/cortexgrid -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
+                      [ $(date +%s) -ge $deadline ] && { echo "timed out waiting for argo to deploy $GITHUB_SHA or a descendant"; exit 1; }
+                      sleep 5
+                  done
+                  kubectl wait -n argocd app/cortexgrid --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
+                  kubectl wait -n argocd app/cortexgrid --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
+
+    test_cortexgrid_integration:
+        needs: wait_for_cortexgrid_deployment
+        runs-on: arc-runners
+        steps:
+            - uses: actions/checkout@v4
+            - run: |
+                  trap 'kubectl delete -n cortexgrid job/cortexgrid-integration-tests --ignore-not-found --wait=false' EXIT
+                  kubectl delete -n cortexgrid job/cortexgrid-integration-tests --ignore-not-found --wait=true
+                  kubectl apply -f k8s/workloads/cortexgrid_integration_tests/job.yaml
+                  until kubectl get pod -n cortexgrid -l job-name=cortexgrid-integration-tests --no-headers 2>/dev/null | grep -q .; do sleep 1; done
+                  kubectl wait -n cortexgrid --for=condition=ready pod -l job-name=cortexgrid-integration-tests --timeout=600s
+                  kubectl logs -n cortexgrid -f job/cortexgrid-integration-tests &
+                  kubectl wait -n cortexgrid --for=condition=complete --timeout=15m job/cortexgrid-integration-tests
+
+    report:
+        needs: test_cortexgrid_integration
+        if: always()
+        runs-on: ubuntu-latest
+        concurrency:
+            group: badges-push
+            cancel-in-progress: false
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: main
+            - env:
+                  RESULT: ${{ needs.test_cortexgrid_integration.result }}
+              run: |
+                  if [ "$RESULT" = "skipped" ] || [ "$RESULT" = "cancelled" ]; then
+                      exit 0
+                  fi
+                  if [ "$RESULT" = "success" ]; then
+                      msg="🟢 passing"
+                  else
+                      msg="🔴 failing"
+                  fi
+                  git config user.name  "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git pull --rebase origin main
+                  sed -i -E "s|<!--s:test_cortexgrid_integration-->[^<]*<!--/s-->|<!--s:test_cortexgrid_integration-->${msg}<!--/s-->|" README.md
+                  git add README.md
+                  if git diff --cached --quiet; then
+                      exit 0
+                  fi
+                  git commit -m "update cortexgrid integration status"
+                  git push origin main

@@ -22,8 +22,8 @@
   +-------------+    +---------------------------+    +---------------------------+
   |  MacBook    |--->|  EC2 head (k3s server)    |<-->|  DGX Spark (k3s worker)   |
   |  your code  |    |    role=head              |    |    role=worker            |
-  |  cortexflow |    |    argocd, mlflow,        |    |    ray-head, ray-worker   |
-  |             |    |    cortexflow-ui,         |    |    (GPU workloads)        |
+  |  cortexgrid |    |    argocd, mlflow,        |    |    ray-head, ray-worker   |
+  |             |    |    cortexgrid-ui,         |    |    (GPU workloads)        |
   |             |    |    jobs-control-plane     |    |                           |
   +-------------+    +---------------------------+    +---------------------------+
                             |               |
@@ -47,14 +47,14 @@ below for how the same workload manifests work in both profiles.
 | `terraform/platform/s3/` | Data + mlflow-artifacts bucket and IAM grant on `robolab-dgx` |
 | `terraform/platform/rds/` | Postgres for mlflow backend store; password generated, pushed to SM |
 | `k8s/` | Argo CD GitOps platform — bootstrap manifest, Argo Applications, workload manifests, one-shot seed scripts |
-| `cortexflow/` | Python library for ML code to reach Ray/MLflow/S3 |
+| `cortexgrid/` | Python library for ML code to reach Ray/MLflow/S3 |
 | `lambda/auth/` | Auth Lambda source (deployed by `terraform/website/`) |
 
-## cortexflow
+## cortexgrid
 
-`cortexflow` is a Python library that connects your ML code to the deployed infrastructure. It wraps Ray, MLflow, and S3/MinIO so your training scripts don't need to know about URLs, credentials, or service endpoints.
+`cortexgrid` is a Python library that connects your ML code to the deployed infrastructure. It wraps Ray, MLflow, and S3/MinIO so your training scripts don't need to know about URLs, credentials, or service endpoints.
 
-See [cortexflow/README.md](cortexflow/README.md) for full reference
+See [cortexgrid/README.md](cortexgrid/README.md) for full reference
 
 ### Setup
 
@@ -93,7 +93,7 @@ make head-aws-destroy                     # single terraform destroy of the plat
 
 One namespace, backed by AWS Secrets Manager:
 
-- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key, including `SM_*`), `PlatformConfig` (mirrors `SM_*` into `ROUTE53_*` on both profiles and `S3_*` on AWS), and `terraform/platform/{rds,s3,secrets}` (AWS-managed coordinates: `S3_ENDPOINT_URL`, `S3_REGION`, `S3_BUCKET_NAME`, `MLFLOW_BACKEND_STORE_URI`, `SM_REGION`, `ROUTE53_REGION`). Read at cluster level by [External Secrets Operator](../k8s/argo_deployments/aws/secrets/) (which materializes `sm-creds`, `route53-creds`, `s3-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexflow.secrets`](../cortexflow/secrets.py).
+- **`robolab/infra/*`** → written by three producers depending on the entry: `EnvSecrets` (every `.env` key, including `SM_*`), `PlatformConfig` (mirrors `SM_*` into `ROUTE53_*` on both profiles and `S3_*` on AWS), and `terraform/platform/{rds,s3,secrets}` (AWS-managed coordinates: `S3_ENDPOINT_URL`, `S3_REGION`, `S3_BUCKET_NAME`, `MLFLOW_BACKEND_STORE_URI`, `SM_REGION`, `ROUTE53_REGION`). Read at cluster level by [External Secrets Operator](../k8s/argo_deployments/aws/secrets/) (which materializes `sm-creds`, `route53-creds`, `s3-creds`, `mlflow-config`, GHCR pull, repo clone creds, etc.) and at application level by [`cortexgrid.secrets`](../cortexgrid/secrets.py).
 
 ## Website infrastructure
 
@@ -152,7 +152,7 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 
 | Resource | Purpose |
 |----------|---------|
-| S3 bucket `robolab-data` | AES256, public access blocked. Used for cortexflow data uploads and mlflow artifacts under `mlflow-artifacts/`. |
+| S3 bucket `robolab-data` | AES256, public access blocked. Used for cortexgrid data uploads and mlflow artifacts under `mlflow-artifacts/`. |
 | IAM user policy | Attaches read/write to the existing `robolab-dgx` IAM user (also reused by ESO/in-cluster boto3). |
 | SM `robolab/infra/S3_BUCKET_NAME` | Bucket name surfaced for ESO → `s3-creds` Secret → all consumer pods. |
 
@@ -203,9 +203,9 @@ Workload manifests reference Secret *names*, not specific backends. The Secret *
 
 Three cluster Secrets, three purposes:
 
-- `sm-creds` carries `SM_ACCESS_KEY_ID/SECRET/REGION`. Consumed via `envFrom` by every pod that uses [`cortexflow.secrets`](../cortexflow/secrets.py), which reads them explicitly and builds an SM-only boto3 client. Used by jobs-control-plane, cortexflow-ui-backend, ray-head, ray-worker, integration-test Jobs.
+- `sm-creds` carries `SM_ACCESS_KEY_ID/SECRET/REGION`. Consumed via `envFrom` by every pod that uses [`cortexgrid.secrets`](../cortexgrid/secrets.py), which reads them explicitly and builds an SM-only boto3 client. Used by jobs-control-plane, cortexgrid-ui-backend, ray-head, ray-worker, integration-test Jobs.
 - `route53-creds` carries `ROUTE53_ACCESS_KEY_ID/SECRET/REGION`. Read by the cert-manager `ClusterIssuer` for DNS-01 ACME challenges.
-- `s3-creds` carries `S3_ACCESS_KEY_ID/SECRET/REGION/ENDPOINT_URL/BUCKET_NAME`. Consumed by [`cortexflow.s3_util`](../cortexflow/s3_util.py) (which builds its boto3 client explicitly from the `S3_*` env), and by mlflow + loki (third-party servers that require the `AWS_*` env var shape — their pod specs map `S3_*` → `AWS_*` explicitly).
+- `s3-creds` carries `S3_ACCESS_KEY_ID/SECRET/REGION/ENDPOINT_URL/BUCKET_NAME`. Consumed by [`cortexgrid.s3_util`](../cortexgrid/s3_util.py) (which builds its boto3 client explicitly from the `S3_*` env), and by mlflow + loki (third-party servers that require the `AWS_*` env var shape — their pod specs map `S3_*` → `AWS_*` explicitly).
 
 The three env-var namespaces never collide; nothing flows through boto3's default `AWS_*` chain in our code paths.
 
@@ -252,5 +252,5 @@ The secrets module provisions a GitHub Actions OIDC integration:
 
 - [k8s/README.md](k8s/README.md) — GitOps overview + bootstrap FAQ
 - [k8s/argo_deployments/](../k8s/argo_deployments/) — one-pager README per platform component (Ray, MLflow, monitoring, secrets, NVIDIA device plugin, jobs control plane; on-prem-only: MinIO, Postgres)
-- [cortexflow/README.md](cortexflow/README.md) — Python library reference
+- [cortexgrid/README.md](cortexgrid/README.md) — Python library reference
 - [tests/INTEGRATION.md](tests/INTEGRATION.md) — integration test platform: trigger flow, secrets, how to add a target

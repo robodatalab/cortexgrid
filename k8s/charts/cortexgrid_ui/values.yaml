@@ -1,0 +1,21 @@
+images:
+  backend: ghcr.io/robodatalab/cortexgrid-ui-backend:latest
+  frontend: ghcr.io/robodatalab/cortexgrid-ui-frontend:latest
+
+services:
+  backend:
+    port: 8000
+  frontend:
+    port: 80
+    nodePort: 30088
+  ingressHost: cortexgrid.robodatalab.com
+
+ingress:
+  className: traefik
+  tlsSecretName: robodatalab-wildcard-tls
+
+backend:
+  # Retry-tolerant MLflow client: outlast a single OOMKill+restart cycle
+  # (~30-60s of MLflow downtime) before surfacing the failure to UI users.
+  mlflowHttpMaxRetries: 10
+  mlflowHttpBackoffFactor: 2

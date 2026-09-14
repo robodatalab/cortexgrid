@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cortexgrid-ui-integration-tests
+  namespace: cortexgrid
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+  labels:
+    app.kubernetes.io/part-of: cortexgrid-ui
+    app.kubernetes.io/component: integration-tests
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        role: head
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: tests
+          image: ghcr.io/robodatalab/cortexgrid-ui-integration:454a6ae8c12085f4a79ad1d188bc8a2e90e9e925
+          env:
+            - name: CORTEXGRID_UI_URL
+              value: "http://$(CORTEXGRID_UI_FRONTEND_SERVICE_HOST):$(CORTEXGRID_UI_FRONTEND_SERVICE_PORT)"
+          envFrom:
+            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
+            - secretRef:
+                name: sm-creds
+            - secretRef:
+                name: s3-creds
+          volumeMounts:
+            - name: test-results
+              mountPath: /tmp
+      volumes:
+        - name: test-results
+          emptyDir: {}

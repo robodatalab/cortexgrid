@@ -36,8 +36,8 @@ Example: PR with SHA `a` merges; the badge bot pushes SHA `b` 15s later; Argo de
 
 | Workflow | Watched `paths:` | Tests |
 |---|---|---|
-| [.github/workflows/on_post_merge_cortexflow.yaml](../../.github/workflows/on_post_merge_cortexflow.yaml) | `mlflow`, `ray`, `jobs_control_plane`, `cortexflow_integration_tests` job | `tests/integration/cortexflow` |
-| [.github/workflows/on_post_merge_cortexflow_ui.yaml](../../.github/workflows/on_post_merge_cortexflow_ui.yaml) | same as above plus `cortexflow_ui/deployment_*`, `cortexflow_ui_integration_tests` job | `tests/integration/cortexflow_ui` |
+| [.github/workflows/on_post_merge_cortexgrid.yaml](../../.github/workflows/on_post_merge_cortexgrid.yaml) | `mlflow`, `ray`, `jobs_control_plane`, `cortexgrid_integration_tests` job | `tests/integration/cortexgrid` |
+| [.github/workflows/on_post_merge_cortexgrid_ui.yaml](../../.github/workflows/on_post_merge_cortexgrid_ui.yaml) | same as above plus `cortexgrid_ui/deployment_*`, `cortexgrid_ui_integration_tests` job | `tests/integration/cortexgrid_ui` |
 
 A `concurrency` block per workflow with `cancel-in-progress: false` queues runs in order rather than collapsing them.
 

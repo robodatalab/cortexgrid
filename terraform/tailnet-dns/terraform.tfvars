@@ -3,7 +3,7 @@ tailnet     = "tailaa75f1.ts.net"
 
 hostnames = [
   "argo",
-  "cortexflow",
+  "cortexgrid",
   "grafana",
   "mlflow",
   "prometheus",

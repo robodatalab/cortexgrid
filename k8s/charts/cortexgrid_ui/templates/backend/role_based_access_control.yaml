@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cortexgrid-ui-backend
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cortexgrid-ui-backend-reader
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cortexgrid-ui-backend-reader
+  labels:
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: cortexgrid-ui-backend
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: cortexgrid-ui-backend-reader
+  apiGroup: rbac.authorization.k8s.io
