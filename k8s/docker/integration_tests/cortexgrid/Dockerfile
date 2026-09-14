@@ -13,6 +13,9 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --locked --no-install-project
 
 COPY pyproject.toml ./
+# pyproject.toml's readme and license-files; `uv sync` builds the project and needs both.
+COPY docs/cortexgrid/README.md ./docs/cortexgrid/README.md
+COPY LICENSE ./
 COPY cortexgrid/ ./cortexgrid/
 COPY tests/__init__.py ./tests/
 COPY tests/integration/__init__.py ./tests/integration/
