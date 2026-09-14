@@ -4,9 +4,9 @@
 
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
-| cortexflow integration | - | <!--s:build_cortexflow_integration-->🔴 failing<!--/s--> | <!--s:test_cortexflow_integration-->🔴 failing<!--/s--> |
-| ui integration | - | <!--s:build_cortexflow_ui_integration-->🔴 failing<!--/s--> | <!--s:test_cortexflow_ui_integration-->🟢 passing<!--/s--> |
-| cortexflow | <!--s:test_cortexflow-->🔴 failing<!--/s--> | - | - |
+| cortexgrid integration | - | <!--s:build_cortexgrid_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_integration-->🔴 failing<!--/s--> |
+| ui integration | - | <!--s:build_cortexgrid_ui_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_ui_integration-->🟢 passing<!--/s--> |
+| cortexgrid | <!--s:test_cortexgrid-->🔴 failing<!--/s--> | - | - |
 | jobs control plane | <!--s:test_jobs_control_plane-->🔴 failing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
 | ray | - | <!--s:build_ray-->🔴 failing<!--/s--> | - |
@@ -27,7 +27,7 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 - **Checkpoint / resume** — `cortexgrid.checkpoint() / resume()` persists training state to MLflow artifacts so retries pick up where the previous attempt left off.
 - **Retries** — `retry=True` on `remote()` re-submits failed jobs with the same checkpoint context.
 - **Storage** — `upload`, `download`, `upload_dir` against S3 (AWS) or MinIO (on-prem).
-- **Secrets** — `get_secret`, `set_secret` against AWS Secrets Manager (AWS) or K8s secrets (on-prem).
+- **Secrets** — `get_secret`, `set_secret` against the head's secrets server at `$CORTEXGRID_HEAD_URL`.
 - **Two deployment profiles** — same manifests target either AWS (managed Postgres + S3) or on-prem (in-cluster Postgres + MinIO + DGX worker).
 - **GitOps cluster bootstrap** — `make head-setup` / `make worker-setup` install k3s and seed Argo CD; the rest syncs from `k8s/`.
 - **Experiment UI** — `cortexgrid-ui` browses experiments, runs, and job logs (in development).

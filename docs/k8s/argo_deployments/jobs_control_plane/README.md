@@ -12,4 +12,4 @@ Training runs submitted through MLflow need to be picked up and scheduled on Ray
 
 - **MLflow** ([../mlflow/](../../../../k8s/argo_deployments/aws/mlflow/)) — polled for submitted runs. URL set via `MLFLOW_TRACKING_URI`.
 - **Ray** ([../ray/](../../../../k8s/argo_deployments/aws/ray/)) — target scheduler. Connection via `RAY_ADDRESS` (Ray client port on the head service).
-- **Reflector** ([../secrets/](../../../../k8s/argo_deployments/aws/secrets/)) — mirrors the cluster-wide `aws-creds` (seeded by `setup-node.py` in `external-secrets`) and `ghcr-pull` Secrets into this namespace. The Deployment consumes `aws-creds` via `envFrom` and references `ghcr-pull` in `imagePullSecrets`.
+- **Reflector** ([../secrets/](../../../../k8s/argo_deployments/base/secrets/)) — mirrors the cluster-wide `s3-creds` and `ghcr-pull` Secrets into this namespace. The Deployment consumes `s3-creds` via `envFrom`, references `ghcr-pull` in `imagePullSecrets`, and reads everything else from the head secrets server at `CORTEXGRID_HEAD_URL`.

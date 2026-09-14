@@ -4,7 +4,7 @@ variable "bucket_name" {
   default     = "robolab-data"
 }
 
-variable "aws_region" {
-  description = "AWS region. Used to compose the regional S3 endpoint URL surfaced in SM."
+variable "dgx_user_name" {
+  description = "IAM user (created by the head module) that gets read/write access to S3."
   type        = string
 }

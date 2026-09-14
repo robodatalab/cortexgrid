@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Callable
 
-from dotenv import load_dotenv
+import requests  # type: ignore
 from tqdm import tqdm
 
 from cortexgrid.secrets import get_secret, list_secrets
@@ -103,7 +103,7 @@ def _teardown_worker(entry: dict) -> None:
         )
 
 
-def _setup_head(entry: dict) -> None:
+def _setup_head(entry: dict, env: dict[str, str]) -> None:
     ip = entry["ip"]
     user = util.ssh_user_for_ip(ip) or getpass.getuser()
     ssh_pw, sudo_pw = _password_callbacks(user, ip)
@@ -123,10 +123,7 @@ def _setup_head(entry: dict) -> None:
                 "storage_path": entry["storage_path"],
                 "workers": workers,
                 "profile": entry["profile"],
-                "github_token": os.environ["GH_TOKEN"],
-                "sm_access_key_id": os.environ["SM_ACCESS_KEY_ID"],
-                "sm_secret_access_key": os.environ["SM_SECRET_ACCESS_KEY"],
-                "sm_region": os.environ["SM_REGION"],
+                "github_token": env["GH_TOKEN"],
             },
             direction="setup",
             ip=ip,
@@ -138,7 +135,10 @@ def _setup_worker(entry: dict) -> None:
     ip = entry["ip"]
     user = util.ssh_user_for_ip(ip) or getpass.getuser()
     ssh_pw, sudo_pw = _password_callbacks(user, ip)
-    available = set(list_secrets())
+    try:
+        available = set(list_secrets())
+    except requests.RequestException:
+        available = set()
     head_ready = (
         util.SECRET_K3S_TOKEN in available
         and util.SECRET_CONTROL_PLANE_IP in available
@@ -149,9 +149,7 @@ def _setup_worker(entry: dict) -> None:
         deps["head_ip"] = get_secret(util.SECRET_CONTROL_PLANE_IP)
         deps["head_token"] = get_secret(util.SECRET_K3S_TOKEN)
     else:
-        deps["sm_access_key_id"] = os.environ["SM_ACCESS_KEY_ID"]
-        deps["sm_secret_access_key"] = os.environ["SM_SECRET_ACCESS_KEY"]
-        deps["sm_region"] = os.environ["SM_REGION"]
+        deps["head_url"] = os.environ["CORTEXGRID_HEAD_URL"]
     with util.connect(user, ip, ssh_pw, sudo_pw) as c:
         deps["connection"] = c
         _run(
@@ -187,7 +185,10 @@ def main() -> None:
     head_entry = next((n for n in snapshot if n["role"] == "head"), None)
     worker_entries = [n for n in snapshot if n["role"] == "worker"]
 
-    load_dotenv(util.ENV_FILE)
+    # Validate .env.head before tearing anything down.
+    env = util.load_head_env() if head_entry else {}
+    # cortexgrid.secrets (used by the operators) talks to $CORTEXGRID_HEAD_URL.
+    os.environ["CORTEXGRID_HEAD_URL"] = util.head_url(cfg)
 
     log.info(
         "Restarting %d node(s): head=%s, workers=%s",
@@ -205,7 +206,7 @@ def main() -> None:
 
     if head_entry is not None:
         _config_add(head_entry)
-        _setup_head(head_entry)
+        _setup_head(head_entry, env)
     for w in worker_entries:
         _config_add(w)
         _setup_worker(w)

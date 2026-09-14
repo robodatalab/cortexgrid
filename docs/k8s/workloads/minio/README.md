@@ -11,14 +11,14 @@ How the MinIO server runs inside Kubernetes. Applied by the Argo Application at 
 - **Ports** — 9000 (S3 API), 9001 (web console). Both exposed via NodePort (30900 / 30901) so they're reachable from anywhere on the tailnet.
 - **Probes** — MinIO's `/minio/health/ready` + `/minio/health/live` HTTP endpoints.
 
-## Credentials and SM publishing
+## Credentials and service-discovery publishing
 
 The cluster-side `minio-credentials` Secret is **not** in this directory — it is applied by the seed pipeline operator [MinioCredentials](../../../../k8s/seed/operators/minio_credentials.py) before the Argo App syncs. The operator:
 
 1. Generates a random MinIO admin password on first run, persists it in the Secret. On rerun reads the existing Secret rather than regenerating, so MinIO data tied to those creds is preserved.
-2. Publishes to AWS Secrets Manager: `AWS_S3_ENDPOINT_URL` (=`http://<head-tailscale-ip>:30900`), `S3_BUCKET_NAME` (=`mlflow-artifacts`), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+2. Publishes to the head secrets store: `S3_ENDPOINT_URL` (=`http://<head-tailscale-ip>:30900`), `S3_REGION`, `S3_BUCKET_NAME` (=`mlflow-artifacts`), `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 
-The endpoint URL uses the head's tailscale IP + the NodePort so the same value works for in-cluster pods (flannel binds to `tailscale0`) and for any tailnet member — laptops, CI runners, ray workers. This is the on-prem analog of `terraform/platform/s3` writing `https://s3.<region>.amazonaws.com` on the AWS profile: in both cases the *infrastructure layer* publishes service-discovery info into the shared SM namespace, and workloads only read.
+The endpoint URL uses the head's tailscale IP + the NodePort so the same value works for in-cluster pods (flannel binds to `tailscale0`) and for any tailnet member — laptops, CI runners, ray workers. This is the on-prem analog of `TerraformOutputs` publishing `https://s3.<region>.amazonaws.com` on the AWS profile: in both cases the *infrastructure layer* publishes service-discovery info into the head secrets store, and workloads only read.
 
 ## Files
 
@@ -29,4 +29,4 @@ The endpoint URL uses the head's tailscale IP + the NodePort so the same value w
 
 ## AWS migration plan
 
-On the AWS profile this whole directory is excluded from the Argo bootstrap — `terraform/platform/s3` provisions a real S3 bucket and writes the same SM keys (`AWS_S3_ENDPOINT_URL` = regional public S3 URL, `S3_BUCKET_NAME` = the real bucket name); `PlatformConfig` mirrors the real-AWS keys to `S3_ACCESS_KEY_ID`/`SECRET`. The workload manifests that consume those SM keys are profile-agnostic — same Secret names, different contents per profile.
+On the AWS profile this whole directory is excluded from the Argo bootstrap — `terraform/platform/s3` provisions a real S3 bucket and the `TerraformOutputs` seed operator publishes the same keys (`S3_ENDPOINT_URL` = regional public S3 URL, `S3_BUCKET_NAME` = the real bucket name, `S3_ACCESS_KEY_ID`/`SECRET` = the `robolab-dgx` IAM user). The workload manifests that consume those keys are profile-agnostic — same Secret names, different contents per profile.

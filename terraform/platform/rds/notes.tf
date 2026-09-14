@@ -62,7 +62,7 @@ resource "null_resource" "notes_schema" {
   depends_on = [null_resource.notes_database]
 
   triggers = {
-    schema_sha = filesha256("${path.module}/../../../k8s/workloads/postgres/notes-schema.sql")
+    schema_sha = filesha256("${path.module}/../../../k8s/charts/cortexgrid/files/postgres/notes_schema.sql")
   }
 
   provisioner "local-exec" {
@@ -78,19 +78,7 @@ resource "null_resource" "notes_schema" {
         echo "Waiting for notes DB via tailnet..." >&2
         sleep 10
       done
-      psql "${local.notes_uri}" -v ON_ERROR_STOP=1 -f "${path.module}/../../../k8s/workloads/postgres/notes-schema.sql"
+      psql "${local.notes_uri}" -v ON_ERROR_STOP=1 -f "${path.module}/../../../k8s/charts/cortexgrid/files/postgres/notes_schema.sql"
     EOT
   }
-}
-
-# Connection URI for the cortexgrid-ui notes feature.
-# Same recovery_window_in_days=0 rationale as MLFLOW_BACKEND_STORE_URI above.
-resource "aws_secretsmanager_secret" "notes_db_uri" {
-  name                    = "robolab/infra/NOTES_DB_URI"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "notes_db_uri" {
-  secret_id     = aws_secretsmanager_secret.notes_db_uri.id
-  secret_string = local.notes_uri
 }

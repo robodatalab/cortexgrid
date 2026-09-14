@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-"""Worker deferred-join: poll AWS SM for head creds, install k3s-agent, self-remove.
+"""Worker deferred-join: poll the head secrets server for head creds, install k3s-agent, self-remove.
 
 Uploaded to /usr/local/bin/robolab-join.py by JoinCluster._deferred_join and
 run periodically by the robolab-join.timer systemd unit. Exits 0 (no-op) until
-both head creds appear in AWS SM; then runs the k3s install command, disables
-the timer, and removes its own files.
+both head creds are readable from the head secrets server; then runs the k3s
+install command, disables the timer, and removes its own files.
 
-Runtime deps (installed on the worker by JoinCluster._deferred_join):
-  - python3 (pre-installed on Ubuntu)
-  - python3-boto3 (apt)
+Runtime deps: python3 (pre-installed on Ubuntu); standard library only.
 
-SM creds are read from /etc/default/robolab-bootstrap (mode 0600), which
-JoinCluster._deferred_join writes at setup time.
+The head server URL is read from /etc/default/robolab-bootstrap (mode 0600),
+which JoinCluster._deferred_join writes at setup time.
 """
 
+import json
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
-
-import boto3  # type: ignore
-from botocore.exceptions import ClientError  # type: ignore
 
 
 ENV_PATH = "/etc/default/robolab-bootstrap"
@@ -28,8 +25,8 @@ SCRIPT_PATH = "/usr/local/bin/robolab-join.py"
 SERVICE_PATH = "/etc/systemd/system/robolab-join.service"
 TIMER_PATH = "/etc/systemd/system/robolab-join.timer"
 
-K3S_TOKEN_SECRET = "robolab/infra/K3S_NODE_TOKEN"
-CONTROL_PLANE_IP_SECRET = "robolab/infra/CONTROL_PLANE_TAILSCALE_IP"
+K3S_TOKEN_SECRET = "K3S_NODE_TOKEN"
+CONTROL_PLANE_IP_SECRET = "CONTROL_PLANE_TAILSCALE_IP"
 
 
 def _load_env() -> bool:
@@ -43,19 +40,12 @@ def _load_env() -> bool:
     return True
 
 
-def _sm_client():
-    return boto3.client(
-        "secretsmanager",
-        aws_access_key_id=os.environ["SM_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["SM_SECRET_ACCESS_KEY"],
-        region_name=os.environ["SM_REGION"],
-    )
-
-
-def _get_secret(client, name: str) -> str | None:
+def _get_secret(head_url: str, name: str) -> str | None:
+    # Unreachable head, missing secret, bad response: all mean "not yet".
     try:
-        return client.get_secret_value(SecretId=name)["SecretString"]
-    except ClientError:
+        with urllib.request.urlopen(f"{head_url}/secrets/{name}", timeout=10) as response:
+            return json.load(response)["value"]
+    except (OSError, ValueError, KeyError):
         return None
 
 
@@ -75,9 +65,9 @@ def main() -> None:
     if not _load_env():
         sys.exit(0)
 
-    client = _sm_client()
-    token = _get_secret(client, K3S_TOKEN_SECRET)
-    head_ip = _get_secret(client, CONTROL_PLANE_IP_SECRET)
+    head_url = os.environ["CORTEXGRID_HEAD_URL"].rstrip("/")
+    token = _get_secret(head_url, K3S_TOKEN_SECRET)
+    head_ip = _get_secret(head_url, CONTROL_PLANE_IP_SECRET)
     if not token or not head_ip:
         sys.exit(0)
 

@@ -6,8 +6,8 @@ Usage:
 
 Dispatcher responsibilities:
   - Parse args, validate and update infra-config.yaml.
-  - Resolve every pipeline dependency (env vars, head creds from AWS SM, etc.)
-    into a single deps dict.
+  - Resolve every pipeline dependency (.env.head values, head creds from the
+    head secrets server, etc.) into a single deps dict.
   - Open the SSH connection, call head.build() / worker.build(), then run
     pipeline.setup(deps).
 """
@@ -19,7 +19,7 @@ import os
 import sys
 from typing import Callable, Literal
 
-from dotenv import load_dotenv
+import requests  # type: ignore
 from tqdm import tqdm
 
 from cortexgrid.secrets import get_secret, list_secrets
@@ -101,7 +101,11 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
 
 
 def _lookup_head_creds() -> tuple[str | None, str | None]:
-    available = set(list_secrets())
+    try:
+        available = set(list_secrets())
+    except requests.RequestException:
+        # Head server not up (or no head yet): the worker joins later.
+        return None, None
     if util.SECRET_K3S_TOKEN in available and util.SECRET_CONTROL_PLANE_IP in available:
         return get_secret(util.SECRET_K3S_TOKEN), get_secret(
             util.SECRET_CONTROL_PLANE_IP
@@ -112,6 +116,7 @@ def _lookup_head_creds() -> tuple[str | None, str | None]:
 def _run_head(
     args: argparse.Namespace,
     cfg: dict,
+    env: dict[str, str],
     ssh_pw: Callable[[], str],
     sudo_pw: Callable[[], str],
 ) -> None:
@@ -136,10 +141,7 @@ def _run_head(
             "storage_path": args.storage_path,
             "workers": workers,
             "profile": args.profile,
-            "github_token": os.environ["GH_TOKEN"],
-            "sm_access_key_id": os.environ["SM_ACCESS_KEY_ID"],
-            "sm_secret_access_key": os.environ["SM_SECRET_ACCESS_KEY"],
-            "sm_region": os.environ["SM_REGION"],
+            "github_token": env["GH_TOKEN"],
         }
         pipeline.setup(deps)
     log.info(
@@ -177,9 +179,7 @@ def _run_worker(
             deps["head_ip"] = head_ip
             deps["head_token"] = head_token
         else:
-            deps["sm_access_key_id"] = os.environ["SM_ACCESS_KEY_ID"]
-            deps["sm_secret_access_key"] = os.environ["SM_SECRET_ACCESS_KEY"]
-            deps["sm_region"] = os.environ["SM_REGION"]
+            deps["head_url"] = os.environ["CORTEXGRID_HEAD_URL"]
         pipeline.setup(deps)
 
     if head_ready:
@@ -193,11 +193,14 @@ def _run_worker(
 
 def main() -> None:
     args = parse_args()
+    # Validate .env.head before touching infra-config.yaml.
+    env = util.load_head_env() if args.type == "head" else {}
     cfg = util.load_config()
     cfg = validate_and_update(cfg, args)
     util.save_config(cfg)
 
-    load_dotenv(util.ENV_FILE)
+    # cortexgrid.secrets (used by the operators) talks to $CORTEXGRID_HEAD_URL.
+    os.environ["CORTEXGRID_HEAD_URL"] = util.head_url(cfg)
 
     def ssh_pw():
         return getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")
@@ -206,7 +209,7 @@ def main() -> None:
         return getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
     if args.type == "head":
-        _run_head(args, cfg, ssh_pw, sudo_pw)
+        _run_head(args, cfg, env, ssh_pw, sudo_pw)
     else:
         _run_worker(args, ssh_pw, sudo_pw)
 

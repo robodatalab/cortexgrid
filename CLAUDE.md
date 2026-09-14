@@ -5,7 +5,6 @@ Cloud infrastructure and deployment orchestration for RoboLab.
 ## Structure
 
 - `terraform/` — Cloud infrastructure provisioning
-  - `platform/secrets/` — Centralized secrets management (AWS Secrets Manager + IAM)
 - `k8s/` — Argo CD GitOps platform. `argocd.yaml` declares both `argo-bootstrap-aws` and `argo-bootstrap-onprem`; K3sServer keeps the one matching the detected profile at install time. `argo_deployments/base/` holds the shared Application YAMLs; `argo_deployments/{aws,onprem}/` are kustomize overlays that pull in `base/` plus profile-local resources (`loki.yaml`, the `secrets/` ExternalSecret folder) and patches (the secrets Application's `path:`). `workloads/` holds the manifests Apps point at. `seed/` holds the one-shot setup scripts.
 - `cortexgrid/` — Python library for connecting ML code to the RoboLab compute cluster (Ray, MLflow, S3)
 - `lambda/auth/` — Auth Lambda source code

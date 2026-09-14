@@ -22,7 +22,7 @@ How the MLflow tracking server runs inside Kubernetes. Applied by the Argo Appli
 
 On AWS, swap:
 - Postgres connection string → RDS endpoint.
-- MinIO env vars → real AWS IAM credentials (materialized by ExternalSecret from Secrets Manager), `MLFLOW_S3_ENDPOINT_URL` unset so the SDK talks to real S3.
+- MinIO env vars → real AWS IAM credentials (materialized by ExternalSecret from the head secrets store), `MLFLOW_S3_ENDPOINT_URL` unset so the SDK talks to real S3.
 - `--artifacts-destination` → a real S3 bucket.
 
 The image stays the same.

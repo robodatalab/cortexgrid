@@ -30,9 +30,8 @@ spec:
             - --console-address
             - ":9001"
           envFrom:
-            # Source of truth for MINIO_ROOT_USER/PASSWORD lives in
-            # credentials.yaml. The publish-config Job consumes the same
-            # Secret to mirror the values into AWS Secrets Manager.
+            # The seed's MinioCredentials operator writes this Secret and
+            # publishes the same credentials to the head secrets store.
             - secretRef:
                 name: minio-credentials
           ports:

@@ -27,6 +27,18 @@ WORKER_1 = {"ip": "10.0.0.11", "role": "worker", "profile": "onprem"}
 WORKER_2 = {"ip": "10.0.0.12", "role": "worker", "profile": "onprem"}
 
 
+HEAD_ENV = (
+    "GH_TOKEN=gh-token\n"
+    "TAILSCALE_OPERATOR_CLIENT_ID=ts-id\n"
+    "TAILSCALE_OPERATOR_CLIENT_SECRET=ts-secret\n"
+    "GH_APP_ID=1\n"
+    "GH_APP_INSTALLATION_ID=2\n"
+    'GH_APP_PRIVATE_KEY="-----BEGIN KEY-----\nabc\n-----END KEY-----"\n'
+    "ROUTE53_ACCESS_KEY_ID=r53-id\n"
+    "ROUTE53_SECRET_ACCESS_KEY=r53-key\n"
+)
+
+
 def _seed_config(path: Path) -> None:
     with open(path, "w") as f:
         yaml.safe_dump({"nodes": [HEAD, WORKER_1, WORKER_2]}, f)
@@ -73,15 +85,10 @@ class RestartCallSequenceParityTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
         self.config_path = Path(self._tmpdir.name) / "infra-config.yaml"
-        self._env_patch = mock.patch.dict(
-            os.environ,
-            {
-                "GH_TOKEN": "gh-token",
-                "SM_ACCESS_KEY_ID": "sm-id",
-                "SM_SECRET_ACCESS_KEY": "sm-key",
-                "SM_REGION": "eu-west-2",
-            },
-        )
+        self.env_path = Path(self._tmpdir.name) / ".env.head"
+        self.env_path.write_text(HEAD_ENV)
+        # The dispatchers set CORTEXGRID_HEAD_URL; restore os.environ afterwards.
+        self._env_patch = mock.patch.dict(os.environ)
         self._env_patch.start()
 
     def tearDown(self) -> None:
@@ -94,15 +101,13 @@ class RestartCallSequenceParityTest(unittest.TestCase):
         secrets = [util.SECRET_K3S_TOKEN, util.SECRET_CONTROL_PLANE_IP]
         with (
             mock.patch.object(util, "CONFIG_FILE", self.config_path),
+            mock.patch.object(util, "ENV_FILE", self.env_path),
             mock.patch.object(util, "connect", mock.MagicMock()),
             mock.patch.object(util, "ssh_user_for_ip", return_value="tester"),
             mock.patch.object(
                 head, "build", lambda: _RecordingPipeline("head", calls)
             ),
             mock.patch.object(worker, "build", _worker_build_factory(calls)),
-            mock.patch("k8s.seed.restart_nodes.load_dotenv"),
-            mock.patch("k8s.seed.setup_node.load_dotenv"),
-            mock.patch("k8s.seed.teardown_node.load_dotenv"),
             mock.patch(
                 "k8s.seed.restart_nodes.list_secrets", return_value=secrets
             ),

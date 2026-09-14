@@ -13,10 +13,10 @@ Dispatcher responsibilities:
 import argparse
 import getpass
 import logging
+import os
 import sys
 from typing import Callable
 
-from dotenv import load_dotenv
 from tqdm import tqdm
 
 from k8s.seed import head, util, worker
@@ -107,7 +107,8 @@ def main() -> None:
             f"Nothing to tear down — refusing to touch an untracked node."
         )
 
-    load_dotenv(util.ENV_FILE)
+    # cortexgrid.secrets (used by the operators) talks to $CORTEXGRID_HEAD_URL.
+    os.environ["CORTEXGRID_HEAD_URL"] = util.head_url(cfg)
 
     def ssh_pw():
         return getpass.getpass(f"SSH password for {args.ssh_user}@{args.ip}: ")

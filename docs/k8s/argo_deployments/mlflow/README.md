@@ -15,7 +15,7 @@ Same reasoning as [ray/](../../../../k8s/argo_deployments/aws/ray/): on DGX we h
 ## Dependencies
 
 - **Custom image** ([../../docker/mlflow/](../../../../k8s/docker/mlflow/)) — `ghcr.io/robodatalab/mlflow`. Exact version pins for `mlflow`, `psycopg2-binary`, `boto3`.
-- **Postgres (RDS)** — metadata backend, provisioned by [terraform/platform/rds/](../../../../terraform/platform/rds/). Connection string is published to AWS Secrets Manager at `robolab/infra/MLFLOW_BACKEND_STORE_URI` and consumed by mlflow's `mlflow-config` ExternalSecret.
+- **Postgres (RDS)** — metadata backend, provisioned by [terraform/platform/rds/](../../../../terraform/platform/rds/). Head setup publishes the connection string from terraform outputs to the head secrets store as `MLFLOW_BACKEND_STORE_URI`, where mlflow's `mlflow-config` ExternalSecret reads it.
 - **MinIO** ([../minio/](../../../../k8s/argo_deployments/onprem/minio/)) — artifact store. Bucket `mlflow-artifacts` (auto-created by MinIO's `defaultBuckets`). Accessed as S3 via `MLFLOW_S3_ENDPOINT_URL=http://minio.minio.svc.cluster.local:9000`.
 - **Reflector** ([../secrets/](../../../../k8s/argo_deployments/aws/secrets/)) — provides the `ghcr-pull` Secret in this namespace.
 - **Ray** ([../ray/](../../../../k8s/argo_deployments/aws/ray/)) — training code on Ray workers logs to MLflow at `http://mlflow.mlflow.svc.cluster.local:5000`.

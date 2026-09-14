@@ -11,9 +11,9 @@ from cortexgrid.infra import (
 )
 
 
-class TestInfraReadsFromSm(unittest.TestCase):
-    """mlflow + ray URIs and the S3 endpoint + bucket name all come from AWS
-    Secrets Manager; no consumer has to export them as environment variables."""
+class TestInfraReadsFromSecrets(unittest.TestCase):
+    """mlflow + ray URIs and the S3 endpoint + bucket name all come from the head
+    secrets store; no consumer has to export them as environment variables."""
 
     @patch("cortexgrid.infra.get_secret", return_value="http://100.111.172.6:30500")
     def test_mlflow_tracking_uri(self, mock_secret: MagicMock) -> None:

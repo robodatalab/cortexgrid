@@ -15,26 +15,26 @@ FastAPI can serve the built frontend via `StaticFiles` (the code at [`cortexgrid
 
 ## Files
 
-- **deployment-backend.yaml** - backend `Deployment`. Runs as the `cortexgrid-ui-backend` ServiceAccount (see role-based-access-control.yaml). `envFrom: sm-creds, s3-creds` injects `SM_*` for `cortexgrid.secrets` to reach AWS Secrets Manager and `S3_*` for `cortexgrid.s3_util` to reach the object store. HTTP `/health` probe.
+- **deployment-backend.yaml** - backend `Deployment`. Runs as the `cortexgrid-ui-backend` ServiceAccount (see role-based-access-control.yaml). `CORTEXGRID_HEAD_URL` points `cortexgrid.secrets` at the head secrets server; `envFrom: s3-creds` injects `S3_*` for `cortexgrid.s3_util` to reach the object store. HTTP `/health` probe.
 - **deployment-frontend.yaml** - frontend `Deployment`. Pure nginx - no env, no secrets. Probe on `GET /`.
 - **service.yaml** - `cortexgrid-ui-backend` `ClusterIP:8000` (not browser-reachable on purpose), `cortexgrid-ui-frontend` `NodePort:30088`.
 - **role-based-access-control.yaml** - `ServiceAccount` `cortexgrid-ui-backend` + cluster-wide `ClusterRole`/`ClusterRoleBinding` granting `get`/`list` on `pods` and `get` on `pods/log`. Powers `/api/infra/status`, which queries the Kubernetes API to report pod health across every namespace for the Infrastructure dashboard.
 
 ## Where config comes from
 
-Service URLs come from AWS Secrets Manager under `robolab/infra/*` via `cortexgrid.secrets`:
+Service URLs come from the head secrets server via `cortexgrid.secrets`:
 
-- `cortexgrid.infra.get_mlflow_tracking_uri()` -> `robolab/infra/MLFLOW_TRACKING_URI`
-- `cortexgrid.infra.get_ray_job_server_uri()` -> `robolab/infra/RAY_JOB_SERVER_URI`
+- `cortexgrid.infra.get_mlflow_tracking_uri()` -> `MLFLOW_TRACKING_URI`
+- `cortexgrid.infra.get_ray_job_server_uri()` -> `RAY_JOB_SERVER_URI`
 
 Object-storage config comes from the pod env (injected by the `s3-creds` Secret):
 
 - `cortexgrid.s3_util.get_s3_client()` -> `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_ENDPOINT_URL`
 - Bucket name -> `S3_BUCKET_NAME`
 
-Both the in-cluster service URLs and the browser-facing URLs (returned by `/api/dashboards` so the UI can link out to MLflow/Ray dashboards) are the same SM-stored values - the head's Tailscale IP + NodePort, reachable from both inside and outside the cluster.
+Both the in-cluster service URLs and the browser-facing URLs (returned by `/api/dashboards` so the UI can link out to MLflow/Ray dashboards) are the same stored values - the head's Tailscale IP + NodePort, reachable from both inside and outside the cluster.
 
-The only env in the pod is what `sm-creds` (`SM_ACCESS_KEY_ID/SECRET/REGION` for `cortexgrid.secrets`) and `s3-creds` (`S3_*` for `cortexgrid.s3_util`) inject. Each Secret carries a distinct credential identity; nothing flows through boto3's default `AWS_*` chain.
+The only secret-related env in the pod is `CORTEXGRID_HEAD_URL` (for `cortexgrid.secrets`) and what `s3-creds` (`S3_*` for `cortexgrid.s3_util`) injects; nothing flows through boto3's default `AWS_*` chain.
 
 ## Port map
 

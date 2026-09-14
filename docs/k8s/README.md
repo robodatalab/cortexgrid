@@ -19,10 +19,10 @@ Cluster topology — which IP is head vs worker, where the head's HDD is mounted
 
 Both profiles render via kustomize from a shared [argo_deployments/base/](../../k8s/argo_deployments/base/) plus a per-profile overlay that supplies a profile-local `loki.yaml`, the profile's `secrets/` ExternalSecret folder, and a patch on the secrets Application's `path:`.
 
-- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, written to AWS Secrets Manager by `terraform/platform/{rds,s3}`.
-- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (`base/` plus the on-prem `loki.yaml` and `secrets/` overlay; on-prem-only MinIO + Postgres Apps would also live here when added). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into AWS Secrets Manager — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
+- **`aws`** — vendor reports `Amazon EC2`. K3sServer keeps `argo-bootstrap-aws`, which syncs [argo_deployments/aws/](../../k8s/argo_deployments/aws/). In-cluster MinIO and Postgres are not deployed; mlflow uses RDS + S3, whose coordinates the [`TerraformOutputs`](../../k8s/seed/operators/terraform_outputs.py) seed operator publishes to the head secrets store from `terraform/platform` outputs.
+- **`onprem`** — anything else. K3sServer keeps `argo-bootstrap-onprem`, which syncs [argo_deployments/onprem/](../../k8s/argo_deployments/onprem/) (`base/` plus the on-prem `loki.yaml` and `secrets/` overlay; on-prem-only MinIO + Postgres Apps would also live here when added). The [`MinioCredentials`](../../k8s/seed/operators/minio_credentials.py) and [`PostgresCredentials`](../../k8s/seed/operators/postgres_credentials.py) seed operators write profile-specific service-discovery into the head secrets store — endpoints (head tailscale IP + NodePort), bucket name, and credentials — so workload manifests stay profile-agnostic.
 
-Workload manifests (mlflow, ray, cortexgrid-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full SM key matrix.
+Workload manifests (mlflow, ray, cortexgrid-ui-backend, jobs-control-plane) reference the same Secret names in both profiles; only the Secret *contents* differ. See the root [README.md](../README.md#service-discovery) for the full key matrix.
 
 ### Argo Application hierarchy
 
@@ -72,7 +72,7 @@ make node-teardown IP=<any-ip> [SSH_USER=<user>]
 make head-aws-destroy   # AWS only - destroys EC2 + VPC + S3 + RDS
 ```
 
-Worker-before-head is supported: if the head hasn't been seeded yet, `make worker-setup` installs node prerequisites and drops a systemd timer on the worker that polls AWS Secrets Manager for the head's credentials and joins automatically once the head appears. The command returns immediately.
+Worker-before-head is supported: if the head hasn't been seeded yet, `make worker-setup` installs node prerequisites and drops a systemd timer on the worker that polls the head secrets server (`http://robolab-head:7700`) for the head's credentials and joins automatically once the head appears. The command returns immediately.
 
 ### Storage routing (head HDD)
 
@@ -105,7 +105,7 @@ Workers register with the head's GCS via the in-cluster Service at `ray-head.ray
 
 ### Branch dev-environments
 
-**Problem.** Changes to `robolab-infra` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexgrid` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
+**Problem.** Changes to `cortexgrid` shouldn't block downstream repositories consuming its `main` branch. Users of the `cortexgrid` library in separate experiment repos need a stable MLflow, Ray, and S3 always reachable. We want to iterate on an infra branch end-to-end without pushing to `main` first.
 
 **Shape.** One `ApplicationSet` per component we want replicated per PR, using Argo's `pullRequest` generator to emit one Application per open PR, sourced from that branch, into a namespace like `dev-pr-<N>`. CI already tags images `<branch-slug>-<sha>`; per-Application Image Updater regexes match only the right branch's tags. Not every component would get a per-branch copy — stateful/GPU-bound ones (MLflow, Ray) stay on `main` and are consumed cross-namespace; only actively-iterated workloads (cortexgrid-ui, jobs-control-plane) get per-branch copies.
 

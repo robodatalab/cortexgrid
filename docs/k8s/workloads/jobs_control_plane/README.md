@@ -17,4 +17,4 @@ How the jobs-control-plane workload runs inside Kubernetes. Applied by the Argo 
 
 ## Files
 
-- **deployment.yaml** — the `Deployment` described above. The `aws-creds` Secret is reflected into this namespace from [`external-secrets/aws-creds`](../../../../k8s/seed/setup-node.py) (seeded by `setup-node.py`, mirrored everywhere by [reflector](../../../../k8s/argo_deployments/aws/secrets/reflector/)).
+- **deployment.yaml** — the `Deployment` described above. The `s3-creds` Secret is materialized by External Secrets and mirrored into this namespace by [reflector](../../../../k8s/argo_deployments/base/secrets/reflector/); every other secret comes from the head secrets server at `CORTEXGRID_HEAD_URL`.

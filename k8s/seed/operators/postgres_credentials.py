@@ -3,8 +3,8 @@
 Mirrors what terraform/platform/rds does for AWS: generate a random master
 password, persist it (here: in the in-cluster postgres-credentials Secret;
 on AWS: in tfstate via random_password.master), and publish the composed
-MLFLOW_BACKEND_STORE_URI and NOTES_DB_URI to AWS Secrets Manager. The
-password itself is never stored in SM as a standalone key -- it only
+MLFLOW_BACKEND_STORE_URI and NOTES_DB_URI to the head secrets store. The
+password itself is never stored there as a standalone key -- it only
 appears inside the two URIs and inside the cluster Secret postgres needs
 to bootstrap.
 
@@ -101,7 +101,7 @@ class PostgresCredentials(Operator):
         util.kubectl("apply", "-f", "-", input=manifest, capture=False)
 
     def _publish_uris(self, node_ip: str, password: str) -> None:
-        log.info("Publishing MLFLOW_BACKEND_STORE_URI + NOTES_DB_URI to SM...")
+        log.info("Publishing MLFLOW_BACKEND_STORE_URI + NOTES_DB_URI to the head secrets store...")
         set_secret(
             _SECRET_MLFLOW_BACKEND_STORE_URI,
             util.postgres_uri_for(node_ip, _DB_INITIAL, _USER, password),

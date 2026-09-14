@@ -1,13 +1,8 @@
-# Grants the existing robolab-dgx IAM user (created by terraform/platform/secrets)
-# full read/write/create/delete on any S3 bucket in the account. cortexgrid
+# Grants the robolab-dgx IAM user (created by the head module) full
+# read/write/create/delete on any S3 bucket in the account. cortexgrid
 # auto-creates buckets on demand under arbitrary names, so the policy is
-# account-wide rather than scoped to a single bucket. Same key is used by
-# ESO/in-cluster boto3 clients, so all pods with aws-bootstrap-creds inherit
-# this access.
-
-data "aws_iam_user" "dgx" {
-  user_name = "robolab-dgx"
-}
+# account-wide rather than scoped to a single bucket. Pods get the user's key
+# through the s3-creds Secret.
 
 data "aws_iam_policy_document" "dgx_s3" {
   statement {
@@ -34,6 +29,6 @@ data "aws_iam_policy_document" "dgx_s3" {
 
 resource "aws_iam_user_policy" "dgx_s3" {
   name   = "s3-${var.bucket_name}"
-  user   = data.aws_iam_user.dgx.user_name
+  user   = var.dgx_user_name
   policy = data.aws_iam_policy_document.dgx_s3.json
 }

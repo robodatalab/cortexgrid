@@ -96,7 +96,7 @@ cortexgrid.undeploy_model("qwen", "instruct", "<run_name>")
 
 `deploy_model` returns a `Deployment` (URL + identifiers + status), not an inference proxy. Building the client - streaming reader, long timeout, custom request schema - is the caller's job.
 
-No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_URI` (already in SM, already used by `cortexgrid.remote`); the cluster handles the rest.
+No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_URI` (already in the head secrets store, already used by `cortexgrid.remote`); the cluster handles the rest.
 
 ## Code delivery: bundle at save time
 

@@ -19,7 +19,7 @@ How the Ray head runs inside Kubernetes. Applied by the Argo Application at [../
 
 - **deployment.yaml** — the `Deployment` described above.
 - **service.yaml** — `NodePort` Service exposing dashboard (`:30265`), Ray client (`:30001`), GCS (internal only), metrics (internal only, scraped via PodMonitor).
-- **secrets.yaml** — `ExternalSecret` that templates a Secret containing the three `RAY_*` env vars. Pulls `CONTROL_PLANE_TAILSCALE_IP` from Secrets Manager and composes URLs from it.
+- **secrets.yaml** — `ExternalSecret` that templates a Secret containing the three `RAY_*` env vars. Pulls `CONTROL_PLANE_TAILSCALE_IP` from the head secrets store and composes URLs from it.
 - **metrics.yaml** — `PodMonitor` telling Prometheus to scrape pods with label `app: ray-head` on port `metrics` (8080) every 15s.
 
 ## Port map

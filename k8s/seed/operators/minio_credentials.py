@@ -1,9 +1,9 @@
 """MinioCredentials -- on-prem only.
 
-Mirrors what terraform/platform/s3 does for AWS: the *infrastructure layer*
-(terraform on AWS, this seed operator on on-prem) is the publisher of MinIO/S3
-service-discovery into AWS Secrets Manager. The workload layer (mlflow,
-cortexgrid library, CI runners) only reads from SM and stays profile-agnostic.
+The on-prem analog of TerraformOutputs: the *infrastructure layer* (terraform
+on AWS, this seed operator on on-prem) publishes MinIO/S3 service-discovery
+into the head secrets store. The workload layer (mlflow, cortexgrid library,
+CI runners) only reads from the store and stays profile-agnostic.
 
 Generates a random MinIO admin password on first run, persists it in the
 in-cluster minio-credentials Secret (so MinIO can boot via
@@ -116,7 +116,7 @@ class MinioCredentials(Operator):
         util.kubectl("apply", "-f", "-", input=manifest, capture=False)
 
     def _publish(self, node_ip: str, password: str) -> None:
-        log.info("Publishing S3_* keys to SM...")
+        log.info("Publishing S3_* keys to the head secrets store...")
         set_secret(_SECRET_S3_ENDPOINT_URL, util.minio_s3_endpoint_for(node_ip))
         set_secret(_SECRET_S3_REGION, _REGION)
         set_secret(_SECRET_S3_BUCKET_NAME, _BUCKET)

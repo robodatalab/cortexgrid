@@ -3,6 +3,9 @@ images:
   frontend: ghcr.io/robodatalab/cortexgrid-ui-frontend:latest
 
 services:
+  # Head secrets server; the seed's BootstrapSecrets creates this Service.
+  head:
+    url: http://cortexgrid-head.default.svc.cluster.local:7700
   backend:
     port: 8000
   frontend:

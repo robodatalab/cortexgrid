@@ -1,6 +1,6 @@
 # Platform
 
-VPC + EC2 head + Tailscale subnet router + RDS + S3 + secrets/IAM.
+VPC + EC2 head + Tailscale subnet router + RDS + S3.
 
 ## Problem
 
@@ -13,14 +13,15 @@ k3s; an EKS cluster may slot in later, in the same VPC.
 
 - **network/** -- VPC, two private subnets, public subnet for NAT.
 - **head/** -- single EC2 in private subnet, runs k3s, joins tailnet as a node.
+  Also creates the `robolab-dgx` IAM user whose key the cluster uses for S3.
 - **tailscale-router/** -- single small EC2 in private subnet, advertises the
   whole VPC CIDR into the tailnet so any Tailscale device reaches every
   in-VPC IP (EC2, RDS, future EKS) by private IP.
 - **rds/** -- single Postgres instance. Hosts `mlflow` (created by RDS itself)
-  and `notes` (created by terraform via psql against RDS). Publishes
-  `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI` to AWS Secrets Manager.
-- **s3/** -- artifact bucket.
-- **secrets/** -- separate state, IAM only (DGX user, GitHub Actions OIDC role).
+  and `notes` (created by terraform via psql against RDS). Exposes
+  `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI` as outputs, which head setup
+  publishes to the head secrets store.
+- **s3/** -- artifact bucket, and the S3 policy on `robolab-dgx`.
 
 ## Bootstrap
 
@@ -31,7 +32,7 @@ so cold-start and incremental applies behave the same.
 This relies on two pieces of one-time Tailscale tenant configuration:
 
 1. **Auth key** ([Tailscale admin -> Settings -> Keys](https://login.tailscale.com/admin/settings/keys)):
-   Reusable, non-Ephemeral. Put it in `.env` as `TAILSCALE_AUTH_KEY`. The same
+   Reusable, non-Ephemeral. Put it in `.env.head` as `TAILSCALE_AUTH_KEY`. The same
    key is consumed by both the head and the subnet router (cloud-init runs on
    each).
 

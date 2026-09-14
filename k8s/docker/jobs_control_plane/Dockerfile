@@ -22,3 +22,5 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --locked
 
 CMD ["/app/.venv/bin/python", "-m", "jobs_control_plane.server"]
+
+# trigger: cortexgrid-rename-2026-09-14

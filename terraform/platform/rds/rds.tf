@@ -3,33 +3,6 @@ resource "random_password" "master" {
   special = false
 }
 
-# Composed mlflow backend store URI — the only SM entry this module publishes.
-# Single value, consumed directly by mlflow's `mlflow-config` ExternalSecret
-# (no ESO templating). On-prem writes the same key with an in-cluster Postgres
-# URI (see k8s/seed/operators/platform_config.py), so mlflow's manifest is
-# profile-agnostic. The master password lives only inside this composed URI
-# and the RDS instance itself.
-resource "aws_secretsmanager_secret" "mlflow_backend_store_uri" {
-  name = "robolab/infra/MLFLOW_BACKEND_STORE_URI"
-  # Purge immediately on destroy. Default 30-day recovery window blocks
-  # subsequent apply with "scheduled for deletion" -- bad for dev infra that
-  # cycles destroy/apply. The composed URI is regenerated from RDS attrs
-  # on every apply so there's nothing here worth preserving.
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "mlflow_backend_store_uri" {
-  secret_id = aws_secretsmanager_secret.mlflow_backend_store_uri.id
-  secret_string = format(
-    "postgresql://%s:%s@%s:%d/%s",
-    aws_db_instance.main.username,
-    random_password.master.result,
-    aws_db_instance.main.address,
-    aws_db_instance.main.port,
-    aws_db_instance.main.db_name,
-  )
-}
-
 resource "aws_db_instance" "main" {
   identifier             = "robolab"
   engine                 = "postgres"

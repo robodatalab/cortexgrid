@@ -10,7 +10,7 @@ How the on-prem Postgres runs inside Kubernetes. Applied by the Argo Application
 - **`image: postgres:16.13`** — matches the AWS RDS `engine_version`.
 - **`PGDATA: /var/lib/postgresql/data/pgdata`** — subdirectory of the mount, so initdb does not abort on a non-empty volume root (`lost+found`).
 - **Probes** — `pg_isready -U robolab -d mlflow`.
-- **Service** — `NodePort 30432` so the DB is reachable from in-cluster pods (via flannel's `tailscale0`-bound network) AND from any laptop on the tailnet — single endpoint, single composed URI in SM.
+- **Service** — `NodePort 30432` so the DB is reachable from in-cluster pods (via flannel's `tailscale0`-bound network) AND from any laptop on the tailnet — single endpoint, single composed URI in the head secrets store.
 
 ## Files
 
@@ -26,9 +26,9 @@ How the on-prem Postgres runs inside Kubernetes. Applied by the Argo Application
 The cluster-side `postgres-credentials` Secret is **not** in this directory — it is applied by the seed pipeline operator [PostgresCredentials](../../../../k8s/seed/operators/postgres_credentials.py) before the Argo App syncs. The operator:
 
 1. Generates a random master password on first run, persists it in the cluster Secret. On rerun reads the existing Secret rather than regenerating, so data survives reseeds.
-2. Composes `postgresql://robolab:<password>@<head-tailscale-ip>:30432/mlflow` and `.../notes`, publishes as `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI` in AWS Secrets Manager.
+2. Composes `postgresql://robolab:<password>@<head-tailscale-ip>:30432/mlflow` and `.../notes`, publishes as `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI` to the head secrets store.
 
-Mirrors the AWS posture: terraform's `random_password.master` persists in tfstate; the password lives only inside the RDS instance and inside the two composed URIs. No standalone password key in SM.
+Mirrors the AWS posture: terraform's `random_password.master` persists in tfstate; the password lives only inside the RDS instance and inside the two composed URIs. No standalone password key in the secrets store.
 
 ## Logging in from a laptop
 

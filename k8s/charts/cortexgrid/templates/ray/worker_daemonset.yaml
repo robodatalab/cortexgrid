@@ -38,6 +38,10 @@ spec:
             - --num-gpus=1
             - --block
           env:
+            # User code shipped via cortexgrid.remote runs in Ray actors here;
+            # its cortexgrid.secrets calls go to the head secrets server.
+            - name: CORTEXGRID_HEAD_URL
+              value: "{{ .Values.services.head.url }}"
             # Ray's runtime_env_agent fetches s3:// working_dir URIs for Serve
             # replicas with unmodified boto3, which only reads the standard
             # AWS_* env names; map them from the s3-creds Secret's S3_* keys.
@@ -65,11 +69,7 @@ spec:
                   name: s3-creds
                   key: S3_ENDPOINT_URL
           envFrom:
-            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
-            # User code shipped via cortexgrid.remote runs in Ray actors here
-            # and uses both.
-            - secretRef:
-                name: sm-creds
+            # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
           livenessProbe:

@@ -22,3 +22,5 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     uv sync --locked --group ui
 
 CMD ["/app/.venv/bin/uvicorn", "cortexgrid_ui.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# trigger: cortexgrid-rename-2026-09-14
