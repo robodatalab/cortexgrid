@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: head-setup worker-setup node-teardown restart head-aws-apply head-aws-destroy core-aws-setup core-aws-destroy tailnet-dns-apply tailnet-dns-destroy env dev install-frontend dev-frontend-against help
+.PHONY: head-setup worker-setup node-teardown restart head-aws-apply head-aws-destroy core-aws-setup core-aws-destroy tailnet-dns-apply tailnet-dns-destroy dev install-frontend dev-frontend-against help
 
 # Optional SSH_USER; defaults to the laptop user if not passed.
 SSH_USER_FLAG = $(if $(SSH_USER),--ssh-user=$(SSH_USER))
@@ -24,9 +24,9 @@ restart:
 	uv run python -m k8s.seed.restart_nodes
 
 head-aws-apply:
-	@[ -f .env ] || { echo ".env not found"; exit 1; }
-	. ./.env; \
-	  [ -n "$$TAILSCALE_AUTH_KEY" ] || { echo "TAILSCALE_AUTH_KEY missing from .env"; exit 1; }; \
+	@[ -f .env.head ] || { echo ".env.head not found (copy .env.head.template)"; exit 1; }
+	. ./.env.head; \
+	  [ -n "$$TAILSCALE_AUTH_KEY" ] || { echo "TAILSCALE_AUTH_KEY missing from .env.head"; exit 1; }; \
 	  cd terraform/platform && \
 	  terraform init && \
 	  TF_VAR_tailscale_auth_key="$$TAILSCALE_AUTH_KEY" terraform apply -auto-approve
@@ -48,18 +48,15 @@ tailnet-dns-apply:
 tailnet-dns-destroy:
 	cd terraform/tailnet-dns && terraform destroy -auto-approve
 
-env:
-	uv run python scripts/refresh_env.py
-
 install-frontend:
 	@if [ ! -d cortexgrid_ui/frontend/node_modules ]; then \
 		echo "Installing frontend dependencies..."; \
 		cd cortexgrid_ui/frontend && npm install; \
 	fi
 
-dev: env install-frontend ## Start backend + frontend dev servers (Ctrl+C stops both)
+dev: install-frontend ## Start backend + frontend dev servers (Ctrl+C stops both; needs CORTEXGRID_HEAD_URL, e.g. in .env)
 	@trap 'kill 0' EXIT; \
-	set -a; . ./.env; set +a; \
+	set -a; [ ! -f .env ] || . ./.env; set +a; \
 	( cd cortexgrid_ui/backend && uv run --group ui uvicorn main:app --reload --host 0.0.0.0 --port 8000 ) & \
 	( cd cortexgrid_ui/frontend && npm run dev ) & \
 	wait

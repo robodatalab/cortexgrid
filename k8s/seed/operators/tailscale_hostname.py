@@ -35,13 +35,14 @@ import logging
 import requests  # type: ignore
 from dotenv import dotenv_values
 
+from k8s.seed import util
 from k8s.seed.pipeline import Operator
 
 
 log = logging.getLogger("k8s.seed.operators.tailscale_hostname")
 
 
-_HOSTNAME = "robolab-head"
+_HOSTNAME = util.HEAD_TAILNET_HOSTNAME
 _K8S_TAG = "tag:k8s"
 _API_BASE = "https://api.tailscale.com/api/v2"
 
@@ -110,7 +111,7 @@ class TailscaleHostname(Operator):
         client_secret = env.get("TS_OAUTH_SECRET")
         if not client_id or not client_secret:
             log.warning(
-                "TS_OAUTH_CLIENT_ID/TS_OAUTH_SECRET missing from .env -- "
+                "TS_OAUTH_CLIENT_ID/TS_OAUTH_SECRET missing from .env.head -- "
                 "skipping tailnet device cleanup. Stale k8s-tagged devices "
                 "may collide with the next setup."
             )

@@ -2,17 +2,17 @@
 
 Has two setup modes chosen at construction time:
   - mode="direct":   install k3s-agent now, pointing at the already-running head
-  - mode="deferred": install python3-boto3 and drop a systemd timer that polls
-                     AWS SM; the timer runs scripts/robolab_join.py, which
+  - mode="deferred": drop a systemd timer that polls the head secrets server at
+                     head_url; the timer runs scripts/robolab_join.py, which
                      installs k3s-agent and self-removes once the head's
-                     token + IP appear in Secrets Manager.
+                     token + IP appear there.
 
-Teardown always runs both cleanups (uninstall k3s-agent + remove deferred timer
-and python3-boto3); they're idempotent, and we may not know which setup path
-was actually used.
+Teardown always runs both cleanups (uninstall k3s-agent + remove deferred
+timer); they're idempotent, and we may not know which setup path was actually
+used.
 
 Required deps (setup, mode="direct"):   connection, node_ip, head_ip, head_token
-Required deps (setup, mode="deferred"): connection, node_ip, sm_access_key_id, sm_secret_access_key, sm_region
+Required deps (setup, mode="deferred"): connection, node_ip, head_url
 Required deps (teardown):                connection
 """
 
@@ -46,13 +46,7 @@ class JoinCluster(Operator):
         if self.mode == "direct":
             self._direct_join(c, node_ip, deps["head_ip"], deps["head_token"])
         else:
-            self._deferred_join(
-                c,
-                node_ip,
-                deps["sm_access_key_id"],
-                deps["sm_secret_access_key"],
-                deps["sm_region"],
-            )
+            self._deferred_join(c, node_ip, deps["head_url"])
 
     def teardown(self, deps: dict) -> None:
         c = deps["connection"]
@@ -82,28 +76,18 @@ EOF
         """),
         )
 
-    def _deferred_join(
-        self,
-        c,
-        node_ip: str,
-        sm_access_key_id: str,
-        sm_secret_access_key: str,
-        sm_region: str,
-    ) -> None:
+    def _deferred_join(self, c, node_ip: str, head_url: str) -> None:
         log.info(
             f"Head not seeded yet — dropping systemd timer on {c.host} to join when it appears. "
             f"This command will now exit; the worker will join automatically."
         )
 
-        # python3-boto3 is the external dep that lets the timer script query AWS SM.
         # `node-ip` pins the agent to advertise its Tailscale IP when the timer
         # eventually runs `curl | sh -`; the file sits here waiting.
         util.sudo_script(
             c,
             textwrap.dedent(f"""\
             set -euo pipefail
-            apt-get update
-            apt-get install -y python3-boto3
             mkdir -p /etc/rancher/k3s
             cat > /etc/rancher/k3s/config.yaml <<EOF
 node-ip: {node_ip}
@@ -136,11 +120,7 @@ EOF
             WantedBy=timers.target
         """)
 
-        env_content = (
-            f'SM_ACCESS_KEY_ID="{sm_access_key_id}"\n'
-            f'SM_SECRET_ACCESS_KEY="{sm_secret_access_key}"\n'
-            f'SM_REGION="{sm_region}"\n'
-        )
+        env_content = f'CORTEXGRID_HEAD_URL="{head_url}"\n'
 
         util.write_remote_file(c, env_content, util.JOIN_ENV_PATH, mode="600")
         util.write_remote_file(c, join_script, util.JOIN_SCRIPT_PATH, mode="755")
@@ -182,6 +162,5 @@ EOF
             fi
             rm -f {util.JOIN_ENV_PATH} {util.JOIN_SCRIPT_PATH} {util.JOIN_SERVICE_PATH} {util.JOIN_TIMER_PATH}
             systemctl daemon-reload || true
-            apt-get remove --purge -y python3-boto3 || true
         """),
         )

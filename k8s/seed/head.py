@@ -13,30 +13,36 @@ def _on_onprem(deps: dict) -> bool:
     return deps["profile"] == "onprem"
 
 
+def _on_aws(deps: dict) -> bool:
+    return deps["profile"] == "aws"
+
+
 def build() -> Pipeline:
     return Pipeline([
         operators.InstallPrereqs(),
         operators.TailscaleHostname(),
+        # HeadServer, EnvSecrets and TerraformOutputs run before K3sServer so
+        # every secret is in the head store by the time Argo starts syncing
+        # the External Secrets Operator.
+        operators.HeadServer(),
+        operators.EnvSecrets(),
+        ConditionalOperator(operators.TerraformOutputs(), _on_aws),
         operators.K3sServer(),
         operators.Kubeconfig(),
         operators.LocalPath(),
-        operators.EnvSecrets(),
-        operators.PlatformConfig(),
         ConditionalOperator(operators.PostgresCredentials(), _on_onprem),
-        # MinioCredentials is the on-prem analog of terraform/platform/s3:
-        # the *infrastructure layer* publishes the MinIO/S3 endpoint URL +
-        # credentials into AWS Secrets Manager so every consumer (mlflow,
+        # MinioCredentials is the on-prem analog of TerraformOutputs: the
+        # *infrastructure layer* publishes the MinIO/S3 endpoint URL +
+        # credentials into the head secrets store so every consumer (mlflow,
         # cortexgrid library on a laptop, CI runners, ray workers) reads a
-        # single profile-agnostic key from SM and gets a tailnet-reachable
-        # URL.
+        # single profile-agnostic key and gets a tailnet-reachable URL.
         #
         # On-prem only because:
-        #   - On AWS, terraform/platform/s3 already populates the same SM
-        #     keys (S3_ENDPOINT_URL = regional public S3 URL, S3_REGION,
-        #     S3_BUCKET_NAME = the real S3 bucket) and PlatformConfig mirrors
-        #     the real-AWS keys to S3_ACCESS_KEY_ID/SECRET. Running this
-        #     operator on AWS would clobber those terraform-managed values
-        #     with values that point at a MinIO that isn't even deployed
+        #   - On AWS, TerraformOutputs already publishes the same keys
+        #     (S3_ENDPOINT_URL = regional public S3 URL, S3_REGION,
+        #     S3_BUCKET_NAME = the real S3 bucket, S3_ACCESS_KEY_ID/SECRET =
+        #     the dgx IAM user). Running this operator on AWS would clobber
+        #     them with values that point at a MinIO that isn't even deployed
         #     (the minio Argo App is excluded from the AWS bootstrap).
         #   - On-prem has no terraform layer; the seed pipeline IS the
         #     infrastructure layer. It's the only place that knows the head's

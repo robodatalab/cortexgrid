@@ -1,4 +1,4 @@
-"""ControlPlaneDetails — publishes the k3s join token + control-plane IP to AWS SM.
+"""ControlPlaneDetails — publishes the k3s join token + service URLs to the head secrets store.
 
 Required deps (setup): connection, node_ip.
 Required deps (teardown): (none — deletion is by secret name).
@@ -18,7 +18,7 @@ class ControlPlaneDetails(Operator):
     def setup(self, deps: dict) -> None:
         c = deps["connection"]
         node_ip = deps["node_ip"]
-        log.info("Publishing k3s token + service URLs to AWS SM...")
+        log.info("Publishing k3s token + service URLs to the head secrets store...")
         token = c.sudo(
             "cat /var/lib/rancher/k3s/server/node-token", hide=True
         ).stdout.strip()
@@ -29,7 +29,7 @@ class ControlPlaneDetails(Operator):
         set_secret(util.SECRET_RAY_SERVE_URI, util.ray_serve_uri_for(node_ip))
 
     def teardown(self, deps: dict) -> None:
-        log.info("Deleting k3s token + service URLs from AWS SM...")
+        log.info("Deleting k3s token + service URLs from the head secrets store...")
         delete_secret(util.SECRET_K3S_TOKEN)
         delete_secret(util.SECRET_CONTROL_PLANE_IP)
         delete_secret(util.SECRET_MLFLOW_TRACKING_URI)

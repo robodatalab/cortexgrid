@@ -1,6 +1,12 @@
-"""BootstrapSecrets — seeds Argo repo creds + ESO SM creds into k8s.
+"""BootstrapSecrets — seeds Argo repo creds + the in-cluster route to the head server.
 
-Required deps (setup): github_token, sm_access_key_id, sm_secret_access_key.
+- argo-github-repo: Argo CD's repo credentials, needed before the External
+  Secrets Operator exists to manage them.
+- cortexgrid-head Service: selector-less, with an EndpointSlice pointing at the
+  head secrets server (HeadServer) on the head's host, so pods and the External
+  Secrets Operator reach it at a fixed in-cluster address.
+
+Required deps (setup): github_token, node_ip.
 Required deps (teardown): (none — deletion is by name).
 
 Assumes the argocd namespace already exists — that's K3sServer's responsibility
@@ -20,8 +26,7 @@ log = logging.getLogger("k8s.seed.operators.bootstrap_secrets")
 class BootstrapSecrets(Operator):
     def setup(self, deps: dict) -> None:
         github_token = deps["github_token"]
-        sm_access_key_id = deps["sm_access_key_id"]
-        sm_secret_access_key = deps["sm_secret_access_key"]
+        node_ip = deps["node_ip"]
 
         log.info("Bootstrap: GitHub repo credentials in argocd namespace...")
         github_secret = textwrap.dedent(f"""\
@@ -41,28 +46,46 @@ class BootstrapSecrets(Operator):
         """)
         util.kubectl("apply", "-f", "-", input=github_secret, capture=False)
 
-        log.info("Seeding SM bootstrap credentials for ESO...")
-        sm_bootstrap_secret = textwrap.dedent(f"""\
+        log.info("Bootstrap: in-cluster Service for the head secrets server...")
+        head_service = textwrap.dedent(f"""\
             apiVersion: v1
-            kind: Namespace
+            kind: Service
             metadata:
-              name: external-secrets
+              name: {util.HEAD_SERVICE_NAME}
+              namespace: {util.HEAD_SERVICE_NAMESPACE}
+            spec:
+              ports:
+                - name: http
+                  port: {util.HEAD_SERVER_PORT}
+                  targetPort: {util.HEAD_SERVER_PORT}
+                  protocol: TCP
             ---
-            apiVersion: v1
-            kind: Secret
+            apiVersion: discovery.k8s.io/v1
+            kind: EndpointSlice
             metadata:
-              name: sm-bootstrap-creds
-              namespace: external-secrets
-            type: Opaque
-            stringData:
-              SM_ACCESS_KEY_ID: "{sm_access_key_id}"
-              SM_SECRET_ACCESS_KEY: "{sm_secret_access_key}"
+              name: {util.HEAD_SERVICE_NAME}
+              namespace: {util.HEAD_SERVICE_NAMESPACE}
+              labels:
+                kubernetes.io/service-name: {util.HEAD_SERVICE_NAME}
+            addressType: IPv4
+            ports:
+              - name: http
+                port: {util.HEAD_SERVER_PORT}
+                protocol: TCP
+            endpoints:
+              - addresses:
+                  - "{node_ip}"
         """)
-        util.kubectl("apply", "-f", "-", input=sm_bootstrap_secret, capture=False)
+        util.kubectl("apply", "-f", "-", input=head_service, capture=False)
 
     def teardown(self, deps: dict) -> None:
         util.kubectl(
             "-n", "argocd", "delete", "secret", "argo-github-repo",
+            "--ignore-not-found", check=False, capture=False,
+        )
+        util.kubectl(
+            "-n", util.HEAD_SERVICE_NAMESPACE, "delete",
+            "service,endpointslice", util.HEAD_SERVICE_NAME,
             "--ignore-not-found", check=False, capture=False,
         )
         # --wait=false: don't block on finalizers (e.g. ESO CRDs). The node is

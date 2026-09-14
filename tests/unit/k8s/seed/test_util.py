@@ -248,5 +248,59 @@ class TestCheckpointStepDone(unittest.TestCase):
         self.assertEqual(util.load_config()["nodes"], [{"ip": "10.0.0.1", "role": "head"}])
 
 
+
+class TestHeadUrl(unittest.TestCase):
+    """head_url points at the registered head, or its tailnet name before one exists."""
+
+    def test_uses_registered_head_ip(self) -> None:
+        cfg = {"nodes": [{"ip": "10.0.0.2", "role": "worker"}, {"ip": "10.0.0.1", "role": "head"}]}
+        self.assertEqual(util.head_url(cfg), "http://10.0.0.1:7700")
+
+    def test_falls_back_to_tailnet_hostname(self) -> None:
+        cfg = {"nodes": [{"ip": "10.0.0.2", "role": "worker"}]}
+        self.assertEqual(util.head_url(cfg), "http://robolab-head:7700")
+
+
+class TestLoadHeadEnv(unittest.TestCase):
+    """load_head_env reads .env.head and exits naming the keys the profile needs but lacks."""
+
+    _COMMON = (
+        "GH_TOKEN=t\n"
+        "TAILSCALE_OPERATOR_CLIENT_ID=i\n"
+        "TAILSCALE_OPERATOR_CLIENT_SECRET=s\n"
+        "GH_APP_ID=1\n"
+        "GH_APP_INSTALLATION_ID=2\n"
+        'GH_APP_PRIVATE_KEY="-----BEGIN KEY-----\nabc\n-----END KEY-----"\n'
+    )
+
+    def _load(self, content: str, profile: str) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ".env.head"
+            path.write_text(content)
+            with patch.object(util, "ENV_FILE", path):
+                return util.load_head_env(profile)
+
+    def test_aws_does_not_need_route53_keys(self) -> None:
+        env = self._load(self._COMMON, "aws")
+        self.assertEqual(env["GH_APP_PRIVATE_KEY"], "-----BEGIN KEY-----\nabc\n-----END KEY-----")
+
+    def test_onprem_requires_route53_keys(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            self._load(self._COMMON + "ROUTE53_ACCESS_KEY_ID=\n", "onprem")
+        self.assertIn("ROUTE53_ACCESS_KEY_ID, ROUTE53_SECRET_ACCESS_KEY", str(ctx.exception))
+
+    def test_onprem_with_route53_keys_passes(self) -> None:
+        env = self._load(
+            self._COMMON + "ROUTE53_ACCESS_KEY_ID=a\nROUTE53_SECRET_ACCESS_KEY=b\n", "onprem"
+        )
+        self.assertEqual(env["ROUTE53_ACCESS_KEY_ID"], "a")
+
+    def test_missing_file_lists_every_required_key(self) -> None:
+        with patch.object(util, "ENV_FILE", Path("/nonexistent/.env.head")):
+            with self.assertRaises(SystemExit) as ctx:
+                util.load_head_env("aws")
+        self.assertIn("GH_TOKEN", str(ctx.exception))
+        self.assertIn("GH_APP_PRIVATE_KEY", str(ctx.exception))
+
 if __name__ == "__main__":
     unittest.main()

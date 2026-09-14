@@ -15,7 +15,7 @@ class TestExperiment(unittest.TestCase):
         set_instance(None)
         self.fake_mlflow = MagicMock()
         for p in (
-            patch("boto3.client"),
+            patch("cortexgrid.infra.get_secret", return_value="http://mlflow"),
             patch(
                 "cortexgrid.experiment.MlflowClient",
                 return_value=self.fake_mlflow,

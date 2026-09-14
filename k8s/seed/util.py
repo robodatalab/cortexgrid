@@ -16,16 +16,18 @@ import uuid
 from typing import Callable
 
 import yaml  # type: ignore
+from dotenv import dotenv_values
 from fabric import Connection  # type: ignore
 from paramiko import AuthenticationException, AutoAddPolicy, SSHConfig  # type: ignore
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_FILE = REPO_ROOT / "infra-config.yaml"
-ENV_FILE = REPO_ROOT / ".env"
+# Head setup inputs nothing else can supply; see .env.head.template.
+ENV_FILE = REPO_ROOT / ".env.head"
 KUBE_CONTEXT = "robolab"
 
-# cortexgrid.secrets prefixes these with "robolab/infra/".
+# Secret ids in the head secrets store.
 SECRET_K3S_TOKEN = "K3S_NODE_TOKEN"
 SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
 SECRET_MLFLOW_TRACKING_URI = "MLFLOW_TRACKING_URI"
@@ -33,8 +35,8 @@ SECRET_RAY_JOB_SERVER_URI = "RAY_JOB_SERVER_URI"
 SECRET_RAY_SERVE_URI = "RAY_SERVE_URI"
 
 # NodePorts must match k8s/workloads/{mlflow,ray}/service.yaml. Seed pipeline
-# stores the full URL in SM at setup time; downstream consumers read the URL,
-# not the port.
+# stores the full URL in the head secrets store at setup time; downstream
+# consumers read the URL, not the port.
 _MLFLOW_NODEPORT = 30500
 _RAY_DASHBOARD_NODEPORT = 30265
 _RAY_SERVE_NODEPORT = 30000
@@ -60,6 +62,62 @@ def postgres_uri_for(tailscale_ip: str, db: str, user: str, password: str) -> st
 
 def minio_s3_endpoint_for(tailscale_ip: str) -> str:
     return f"http://{tailscale_ip}:{_MINIO_S3_NODEPORT}"
+
+
+# Head secrets server (HeadServer operator, scripts/cortexgrid_head.py). Runs on
+# the head host, outside k8s, so it is up before the cluster.
+HEAD_TAILNET_HOSTNAME = "robolab-head"
+HEAD_SERVER_PORT = 7700
+HEAD_SERVER_UNIT = "cortexgrid-head.service"
+HEAD_SERVER_SCRIPT_PATH = "/usr/local/bin/cortexgrid-head.py"
+HEAD_SERVER_SERVICE_PATH = f"/etc/systemd/system/{HEAD_SERVER_UNIT}"
+# Outside /var/lib/rancher and STORAGE_PATH, which teardown wipes.
+HEAD_ENV_PATH = "/etc/cortexgrid/.env"
+# Selector-less Service whose EndpointSlice points at the head server. Pods reach
+# it at http://cortexgrid-head.default.svc.cluster.local:7700.
+HEAD_SERVICE_NAME = "cortexgrid-head"
+HEAD_SERVICE_NAMESPACE = "default"
+
+# Keys .env.head must provide on every profile, and on on-prem only. On the AWS
+# profile the Route53 keys come from terraform (TerraformOutputs).
+_REQUIRED_HEAD_ENV = [
+    "GH_TOKEN",
+    "TAILSCALE_OPERATOR_CLIENT_ID",
+    "TAILSCALE_OPERATOR_CLIENT_SECRET",
+    "GH_APP_ID",
+    "GH_APP_INSTALLATION_ID",
+    "GH_APP_PRIVATE_KEY",
+]
+_REQUIRED_HEAD_ENV_ONPREM = ["ROUTE53_ACCESS_KEY_ID", "ROUTE53_SECRET_ACCESS_KEY"]
+
+
+def head_url_for(host: str) -> str:
+    return f"http://{host}:{HEAD_SERVER_PORT}"
+
+
+def head_url(cfg: dict) -> str:
+    """URL of the head secrets server for the cluster in infra-config.yaml.
+
+    Uses the registered head's IP. Before a head is registered, falls back to the
+    tailnet name TailscaleHostname gives the head during its setup.
+    """
+    head = next((n for n in cfg.get("nodes", []) if n["role"] == "head"), None)
+    return head_url_for(head["ip"] if head else HEAD_TAILNET_HOSTNAME)
+
+
+def load_head_env(profile: str) -> dict[str, str]:
+    """Read .env.head; exit listing the keys `profile` requires that it lacks."""
+    env = {k: v for k, v in dotenv_values(ENV_FILE).items() if v}
+    required = _REQUIRED_HEAD_ENV + (
+        _REQUIRED_HEAD_ENV_ONPREM if profile == "onprem" else []
+    )
+    missing = [k for k in required if k not in env]
+    if missing:
+        sys.exit(
+            f"Error: {ENV_FILE.name} is missing {', '.join(missing)} "
+            f"(profile={profile}). See .env.head.template."
+        )
+    return env
 
 JOIN_SCRIPT_PATH = "/usr/local/bin/robolab-join.py"
 JOIN_ENV_PATH = "/etc/default/robolab-bootstrap"
