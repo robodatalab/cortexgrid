@@ -37,7 +37,7 @@ def _recent_ms() -> int:
 
 def _make_weights_dir() -> Path:
     """Write the fixture weights the size-bytes assertions expect: config.json
-    (8 bytes) + model.safetensors (7 bytes) = 15 bytes. cortexflow treats the
+    (8 bytes) + model.safetensors (7 bytes) = 15 bytes. cortexgrid treats the
     directory as opaque, so the exact contents only matter for the byte count."""
     d = Path(tempfile.mkdtemp())
     (d / "config.json").write_text('{"x": 1}')
@@ -148,7 +148,7 @@ class FakeMLflow:
 
 
 class FakeS3:
-    """Fake `cortexflow.s3_util` module and the boto3 client it returns."""
+    """Fake `cortexgrid.s3_util` module and the boto3 client it returns."""
 
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
@@ -182,17 +182,17 @@ class FakeS3:
 
 def _patches(mlflow: FakeMLflow, s3: FakeS3) -> list:
     return [
-        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow),
-        patch("cortexflow.model_storage.s3_util", s3),
-        patch("cortexflow.model_storage.get_s3_bucket", return_value="b"),
+        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow),
+        patch("cortexgrid.model_storage.s3_util", s3),
+        patch("cortexgrid.model_storage.get_s3_bucket", return_value="b"),
         patch(
-            "cortexflow.model_storage.get_mlflow_tracking_uri",
+            "cortexgrid.model_storage.get_mlflow_tracking_uri",
             return_value="http://x",
         ),
         # bundling does pip freeze + import-graph walk + secret read - not
         # what these tests cover; the bundle behaviour is tested separately.
         patch(
-            "cortexflow.model_storage.bundle_class", return_value=_FAKE_BUNDLE
+            "cortexgrid.model_storage.bundle_class", return_value=_FAKE_BUNDLE
         ),
     ]
 

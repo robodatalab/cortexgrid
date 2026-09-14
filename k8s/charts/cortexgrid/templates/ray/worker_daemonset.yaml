@@ -3,7 +3,7 @@ kind: DaemonSet
 metadata:
   name: ray-worker
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: ray-worker
 spec:
   selector:
@@ -65,8 +65,8 @@ spec:
                   name: s3-creds
                   key: S3_ENDPOINT_URL
           envFrom:
-            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
-            # User code shipped via cortexflow.remote runs in Ray actors here
+            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
+            # User code shipped via cortexgrid.remote runs in Ray actors here
             # and uses both.
             - secretRef:
                 name: sm-creds

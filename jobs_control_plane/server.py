@@ -5,7 +5,7 @@ Architecture:
 - ``JobLifecycle`` is pure static identity plus the ``stop_requested`` and
   ``retry`` latches. Execution status is never persisted.
 - Ray is the source of truth for execution state. Each poll cycle reconciles
-  cortexflow jobs (from MLflow) against the set of Ray submissions returned
+  cortexgrid jobs (from MLflow) against the set of Ray submissions returned
   by ``list_ray_jobs_with_submission_id``.
 - Submission to Ray is async — handed to a ``ProcessPoolExecutor`` so a
   large payload upload cannot block the poll loop.
@@ -41,8 +41,8 @@ from cortexgrid import (
 
 log = logging.getLogger("jobs-control-plane")
 
-POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXFLOW_POLL_INTERVAL", "5"))
-STARTER_WORKERS = int(os.environ.get("CORTEXFLOW_STARTER_WORKERS", "4"))
+POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXGRID_POLL_INTERVAL", "5"))
+STARTER_WORKERS = int(os.environ.get("CORTEXGRID_STARTER_WORKERS", "4"))
 HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
 
 
@@ -77,7 +77,7 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
         submit_ray_job(
             submission_id=submission_id,
-            entrypoint="python -m cortexflow._ray_job_driver payload.pkl",
+            entrypoint="python -m cortexgrid._ray_job_driver payload.pkl",
             runtime_env={"working_dir": project_code_root},
             num_gpus=lifecycle.num_gpus,
             num_cpus=lifecycle.num_cpus,
@@ -115,13 +115,13 @@ def _record_state(cjob: JobLifecycle, rjob: str | None) -> None:
     cjob.save_to_mlflow()
 
 
-def _match_ray_jobs_to_cortexflow_jobs(
-    cortexflow_jobs: list[JobLifecycle],
+def _match_ray_jobs_to_cortexgrid_jobs(
+    cortexgrid_jobs: list[JobLifecycle],
 ) -> list[tuple[JobLifecycle, str | None]]:
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
 
     pairs: list[tuple[JobLifecycle, str | None]] = []
-    for cjob in cortexflow_jobs:
+    for cjob in cortexgrid_jobs:
         prefix = ray_submission_id(cjob.run_id, cjob.job_id, None) + "-"
         attempts = [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
         latest = max(attempts, key=get_ray_job_attempt) if attempts else None
@@ -158,21 +158,21 @@ def _get_jobs_for_processing(
     in_flight: dict[str, tuple[str, str, Future]],
 ) -> list[tuple[JobLifecycle, str | None]]:
     experiments = list_experiments()
-    cortexflow_jobs = [
+    cortexgrid_jobs = [
         job
         for experiment in experiments
         for job in list_experiment_run_jobs(experiment.run_id)
     ]
-    all_cortexflow_to_ray_jobs = _match_ray_jobs_to_cortexflow_jobs(cortexflow_jobs)
+    all_cortexgrid_to_ray_jobs = _match_ray_jobs_to_cortexgrid_jobs(cortexgrid_jobs)
 
     # filter out the jobs that are still in flight
-    not_in_flight_cortexflow_to_ray_jobs = []
-    for cjob, rjob in all_cortexflow_to_ray_jobs:
+    not_in_flight_cortexgrid_to_ray_jobs = []
+    for cjob, rjob in all_cortexgrid_to_ray_jobs:
         submission_id_core = ray_submission_id(cjob.run_id, cjob.job_id, None)
         if submission_id_core not in in_flight:
-            not_in_flight_cortexflow_to_ray_jobs.append((cjob, rjob))
+            not_in_flight_cortexgrid_to_ray_jobs.append((cjob, rjob))
 
-    return not_in_flight_cortexflow_to_ray_jobs
+    return not_in_flight_cortexgrid_to_ray_jobs
 
 
 def poll_once(
@@ -183,10 +183,10 @@ def poll_once(
     log.info("Poll once - starts")
 
     in_flight = _process_jobs_in_flight(in_flight)
-    cortexflow_to_ray_jobs = _get_jobs_for_processing(in_flight)
-    log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexflow_to_ray_jobs))
+    cortexgrid_to_ray_jobs = _get_jobs_for_processing(in_flight)
+    log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexgrid_to_ray_jobs))
 
-    for pair_idx, (cjob, rjob) in enumerate(cortexflow_to_ray_jobs):
+    for pair_idx, (cjob, rjob) in enumerate(cortexgrid_to_ray_jobs):
         _record_state(cjob, rjob)
 
         if cjob.stop_requested:

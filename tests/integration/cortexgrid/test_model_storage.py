@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cortexgrid
 
-from tests.integration.cortexflow._ray_run import experiment_name, get_logger
+from tests.integration.cortexgrid._ray_run import experiment_name, get_logger
 from tests.integration.stubs.serving import (
     AddConstantServeApp,
     read_constant,

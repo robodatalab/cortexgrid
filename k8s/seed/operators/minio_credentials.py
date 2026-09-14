@@ -3,7 +3,7 @@
 Mirrors what terraform/platform/s3 does for AWS: the *infrastructure layer*
 (terraform on AWS, this seed operator on on-prem) is the publisher of MinIO/S3
 service-discovery into AWS Secrets Manager. The workload layer (mlflow,
-cortexflow library, CI runners) only reads from SM and stays profile-agnostic.
+cortexgrid library, CI runners) only reads from SM and stays profile-agnostic.
 
 Generates a random MinIO admin password on first run, persists it in the
 in-cluster minio-credentials Secret (so MinIO can boot via
@@ -41,7 +41,7 @@ from k8s.seed.pipeline import Operator
 log = logging.getLogger("k8s.seed.operators.minio_credentials")
 
 
-_NAMESPACE = "cortexflow"
+_NAMESPACE = "cortexgrid"
 _SECRET_NAME = "minio-credentials"
 _USER = "admin"
 _BUCKET = "mlflow-artifacts"

@@ -1,8 +1,8 @@
 """Deployments stream.
 
 Single pinned topic: every Ray Serve application whose name matches the
-cortexflow `<family>__<suffix>__<run_name>` scheme, surfaced as the
-existing `cortexflow.model_serving.Deployment` dataclass. Items are
+cortexgrid `<family>__<suffix>__<run_name>` scheme, surfaced as the
+existing `cortexgrid.model_serving.Deployment` dataclass. Items are
 keyed by `<family>/<suffix>/<run_name>` so the UI can join them against
 `models_stream` by the same id.
 """
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from cortexgrid.model_serving import Deployment, list_deployed_models
 
-from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 
 DeploymentId = str

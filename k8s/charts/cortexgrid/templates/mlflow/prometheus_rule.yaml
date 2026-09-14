@@ -3,11 +3,11 @@ kind: PrometheusRule
 metadata:
   name: mlflow-memory
   # Discovered by kube-prometheus-stack via the release label below, so this
-  # resource lives in the monitoring namespace regardless of the cortexflow
+  # resource lives in the monitoring namespace regardless of the cortexgrid
   # release namespace.
   namespace: monitoring
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     release: kube-prometheus-stack
 spec:
   groups:

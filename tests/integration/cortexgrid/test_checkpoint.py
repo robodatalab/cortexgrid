@@ -5,7 +5,7 @@ import unittest
 import cortexgrid
 from parameterized import parameterized  # type: ignore
 
-from tests.integration.cortexflow._ray_run import (
+from tests.integration.cortexgrid._ray_run import (
     RUN_MODES,
     get_logger,
     run,

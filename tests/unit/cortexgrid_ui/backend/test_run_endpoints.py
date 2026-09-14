@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 
 from cortexgrid.jobs import JobLifecycle, LifecycleEvent
 from cortexgrid.ray_util import JobStatus
-from cortexflow_ui.backend.streams import experiments_stream as stream_mod
-from cortexflow_ui.backend.streams.job_details_stream import poll_job, tarball_exists
-from cortexflow_ui.backend.main import app
-from cortexflow_ui.backend.streams.run_jobs_stream import Job, list_run_jobs
+from cortexgrid_ui.backend.streams import experiments_stream as stream_mod
+from cortexgrid_ui.backend.streams.job_details_stream import poll_job, tarball_exists
+from cortexgrid_ui.backend.main import app
+from cortexgrid_ui.backend.streams.run_jobs_stream import Job, list_run_jobs
 
 
 class TestSimpleEndpoints(unittest.TestCase):
@@ -21,7 +21,7 @@ class TestSimpleEndpoints(unittest.TestCase):
         self.client = TestClient(app)
 
     @patch(
-        "cortexflow_ui.backend.main.get_ray_logs",
+        "cortexgrid_ui.backend.main.get_ray_logs",
         return_value="installing torch...\nDone\n",
     )
     def test_ray_job_logs_returns_logs(self, _mock: MagicMock) -> None:
@@ -29,8 +29,8 @@ class TestSimpleEndpoints(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"logs": "installing torch...\nDone\n"})
 
-    @patch("cortexflow_ui.backend.main.stop_experiment_run_jobs")
-    def test_stop_run_calls_cortexflow(self, mock_stop: MagicMock) -> None:
+    @patch("cortexgrid_ui.backend.main.stop_experiment_run_jobs")
+    def test_stop_run_calls_cortexgrid(self, mock_stop: MagicMock) -> None:
         response = self.client.post("/api/runs/run-1/stop")
 
         self.assertEqual(response.status_code, 200)
@@ -39,12 +39,12 @@ class TestSimpleEndpoints(unittest.TestCase):
 
 
 class TestListRunJobs(unittest.TestCase):
-    @patch("cortexflow_ui.backend.streams.run_jobs_stream.get_ray_job_status")
+    @patch("cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status")
     @patch(
-        "cortexflow_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
+        "cortexgrid_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
         return_value=[],
     )
-    @patch("cortexflow_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs")
+    @patch("cortexgrid_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs")
     def test_returns_list_with_status_per_job(
         self,
         mock_list: MagicMock,
@@ -68,14 +68,14 @@ class TestListRunJobs(unittest.TestCase):
         )
 
     @patch(
-        "cortexflow_ui.backend.streams.run_jobs_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch(
-        "cortexflow_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
+        "cortexgrid_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
         return_value=[],
     )
-    @patch("cortexflow_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs")
+    @patch("cortexgrid_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs")
     def test_queries_ray_list_once_regardless_of_job_count(
         self,
         mock_list: MagicMock,
@@ -94,19 +94,19 @@ class TestListRunJobs(unittest.TestCase):
 
 class TestPollJob(unittest.TestCase):
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url",
         return_value="http://test:8265/#/jobs/ray-1",
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
+    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_returns_lifecycle_and_ray_status(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -128,18 +128,18 @@ class TestPollJob(unittest.TestCase):
         self.assertEqual(data.history, [])
 
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["payload.pkl", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
+    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_returns_history_entries(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -175,20 +175,20 @@ class TestPollJob(unittest.TestCase):
         self.assertEqual(history[1].state, "running")
         self.assertIsNone(history[1].end)
 
-    @patch("cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["manifest.json", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
+    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_includes_readiness_when_healthy(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -211,7 +211,7 @@ class TestPollJob(unittest.TestCase):
         self.assertIsNone(readiness.lifecycle_error)
 
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=[],
     )
     def test_returns_pending_when_lifecycle_missing(
@@ -225,20 +225,20 @@ class TestPollJob(unittest.TestCase):
         self.assertIn("lifecycle.json", data.readiness.lifecycle_error)
         self.assertIsNone(data.history)
 
-    @patch("cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.tarball_exists", return_value=True)
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
+    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_code_not_ready_when_manifest_missing(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -261,21 +261,21 @@ class TestPollJob(unittest.TestCase):
         mock_tarball.assert_not_called()
 
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.tarball_exists", return_value=False
+        "cortexgrid_ui.backend.streams.job_details_stream.tarball_exists", return_value=False
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.list_run_artifacts",
+        "cortexgrid_ui.backend.streams.job_details_stream.list_run_artifacts",
         return_value=["manifest.json", "lifecycle.json"],
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexflow_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexflow.ray_util.list_ray_jobs_with_submission_id", return_value=[])
-    @patch("cortexflow_ui.backend.streams.job_details_stream.JobLifecycle")
+    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_code_not_ready_when_tarball_missing(
         self,
         mock_lifecycle_cls: MagicMock,
@@ -313,15 +313,15 @@ class TestTarballExists(unittest.TestCase):
 
         patchers = [
             patch(
-                "cortexflow_ui.backend.streams.job_details_stream.MlflowClient",
+                "cortexgrid_ui.backend.streams.job_details_stream.MlflowClient",
                 return_value=self.fake_mlflow,
             ),
             patch(
-                "cortexflow_ui.backend.streams.job_details_stream.get_mlflow_tracking_uri",
+                "cortexgrid_ui.backend.streams.job_details_stream.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
             patch(
-                "cortexflow_ui.backend.streams.job_details_stream.s3_util.get_s3_client",
+                "cortexgrid_ui.backend.streams.job_details_stream.s3_util.get_s3_client",
                 return_value=self.fake_s3,
             ),
         ]

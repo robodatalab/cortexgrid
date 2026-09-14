@@ -10,7 +10,7 @@ from playwright.sync_api import Page, sync_playwright
 
 def get_test_ui_url() -> str:
     load_dotenv()
-    return os.environ["CORTEXFLOW_UI_URL"]
+    return os.environ["CORTEXGRID_UI_URL"]
 
 
 class UITestCase(unittest.TestCase):

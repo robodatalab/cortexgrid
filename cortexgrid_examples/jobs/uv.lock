@@ -606,7 +606,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cortexflow"
+name = "cortexgrid"
 version = "0.2.15"
 source = { git = "https://github.com/paksas/robolab-infra.git#0b06f51a53d2634acd0ca86808b646efcd1d7118" }
 dependencies = [
@@ -626,15 +626,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "cortexflow-example-jobs"
+name = "cortexgrid-example-jobs"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "cortexflow" },
+    { name = "cortexgrid" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cortexflow", git = "https://github.com/paksas/robolab-infra.git" }]
+requires-dist = [{ name = "cortexgrid", git = "https://github.com/paksas/robolab-infra.git" }]
 
 [[package]]
 name = "cryptography"

@@ -15,17 +15,17 @@ class TestInfraReadsFromSm(unittest.TestCase):
     """mlflow + ray URIs and the S3 endpoint + bucket name all come from AWS
     Secrets Manager; no consumer has to export them as environment variables."""
 
-    @patch("cortexflow.infra.get_secret", return_value="http://100.111.172.6:30500")
+    @patch("cortexgrid.infra.get_secret", return_value="http://100.111.172.6:30500")
     def test_mlflow_tracking_uri(self, mock_secret: MagicMock) -> None:
         self.assertEqual(get_mlflow_tracking_uri(), "http://100.111.172.6:30500")
         mock_secret.assert_called_once_with("MLFLOW_TRACKING_URI")
 
-    @patch("cortexflow.infra.get_secret", return_value="http://100.111.172.6:30265")
+    @patch("cortexgrid.infra.get_secret", return_value="http://100.111.172.6:30265")
     def test_ray_job_server_uri(self, mock_secret: MagicMock) -> None:
         self.assertEqual(get_ray_job_server_uri(), "http://100.111.172.6:30265")
         mock_secret.assert_called_once_with("RAY_JOB_SERVER_URI")
 
-    @patch("cortexflow.infra.get_secret", return_value="")
+    @patch("cortexgrid.infra.get_secret", return_value="")
     def test_s3_endpoint_url_empty_means_real_aws_s3(
         self, mock_secret: MagicMock
     ) -> None:
@@ -35,7 +35,7 @@ class TestInfraReadsFromSm(unittest.TestCase):
         mock_secret.assert_called_once_with("S3_ENDPOINT_URL")
 
     @patch(
-        "cortexflow.infra.get_secret",
+        "cortexgrid.infra.get_secret",
         return_value="http://minio.minio.svc.cluster.local:9000",
     )
     def test_s3_endpoint_url_onprem_minio(self, _mock_secret: MagicMock) -> None:
@@ -43,8 +43,8 @@ class TestInfraReadsFromSm(unittest.TestCase):
             get_s3_endpoint_url(), "http://minio.minio.svc.cluster.local:9000"
         )
 
-    @patch("cortexflow.infra.MlflowClient")
-    @patch("cortexflow.infra.get_secret", return_value="http://100.111.172.6:30500")
+    @patch("cortexgrid.infra.MlflowClient")
+    @patch("cortexgrid.infra.get_secret", return_value="http://100.111.172.6:30500")
     def test_mlflow_run_url(
         self, _mock_secret: MagicMock, mock_mlflow_cls: MagicMock
     ) -> None:

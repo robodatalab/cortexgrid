@@ -6,7 +6,7 @@ import cortexgrid
 from cortexgrid.experiment import get_experiment_by_run_name
 from parameterized import parameterized  # type: ignore
 
-from tests.integration.cortexflow._ray_run import (
+from tests.integration.cortexgrid._ray_run import (
     RUN_MODES,
     get_logger,
     run,

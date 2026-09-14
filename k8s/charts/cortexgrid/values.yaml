@@ -12,18 +12,18 @@ postgres:
 
 services:
   mlflow:
-    host: mlflow.cortexflow.svc.cluster.local
+    host: mlflow.cortexgrid.svc.cluster.local
     port: 5000
     nodePort: 30500
     ingressHost: mlflow.robodatalab.com
   postgres:
-    host: postgres.cortexflow.svc.cluster.local
+    host: postgres.cortexgrid.svc.cluster.local
     port: 5432
   minio:
-    host: minio.cortexflow.svc.cluster.local
+    host: minio.cortexgrid.svc.cluster.local
     port: 9000
   ray:
-    headHost: ray-head.cortexflow.svc.cluster.local
+    headHost: ray-head.cortexgrid.svc.cluster.local
     headPort: 6379
     ingressHost: ray.robodatalab.com
   monitoring:

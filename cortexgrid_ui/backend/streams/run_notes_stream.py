@@ -7,9 +7,9 @@ per-item diff events (added/updated/removed) via Refresher.
 
 from __future__ import annotations
 
-from cortexflow_ui.backend.models.notes import RunNote, list_run_notes
-from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.models.notes import RunNote, list_run_notes
+from cortexgrid_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 RunName = str
 RunNoteId = str

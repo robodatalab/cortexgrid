@@ -2,7 +2,7 @@
 
 Setup: names the head's Tailscale machine robolab-head.
     The terraform/tailnet-dns module CNAMEs every public subdomain
-    (argo, mlflow, cortexflow, ...) at robolab-head.<tailnet>, so any
+    (argo, mlflow, cortexgrid, ...) at robolab-head.<tailnet>, so any
     head joining the tailnet must register under that name for DNS to
     resolve. AWS EC2 sets it via cloud-init; on-prem boxes default to
     their machine hostname.

@@ -8,7 +8,7 @@ import requests
 
 import cortexgrid
 
-from tests.integration.cortexflow._ray_run import (
+from tests.integration.cortexgrid._ray_run import (
     experiment_name,
     get_logger,
     run,

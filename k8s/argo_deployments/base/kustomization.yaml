@@ -5,8 +5,8 @@ resources:
   - arc_runner_set.yaml
   - argocd.yaml
   - cert_manager.yaml
-  - cortexflow.yaml
-  - cortexflow_ui.yaml
+  - cortexgrid.yaml
+  - cortexgrid_ui.yaml
   - monitoring.yaml
   - nvidia.yaml
   - secrets.yaml

@@ -5,13 +5,13 @@ from unittest.mock import patch
 
 from cortexgrid.model_serving import Deployment
 
-from cortexflow_ui.backend.streams import deployments_stream
+from cortexgrid_ui.backend.streams import deployments_stream
 
 
 class TestPollDeployments(unittest.TestCase):
     def test_returns_empty_when_no_deployments(self) -> None:
         with patch(
-            "cortexflow_ui.backend.streams.deployments_stream.list_deployed_models",
+            "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
             return_value=[],
         ):
             self.assertEqual(deployments_stream.poll_deployments(None), {})
@@ -25,7 +25,7 @@ class TestPollDeployments(unittest.TestCase):
             phase="running",
         )
         with patch(
-            "cortexflow_ui.backend.streams.deployments_stream.list_deployed_models",
+            "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
             return_value=[d],
         ):
             result = deployments_stream.poll_deployments(None)
@@ -51,7 +51,7 @@ class TestPollDeployments(unittest.TestCase):
             ),
         ]
         with patch(
-            "cortexflow_ui.backend.streams.deployments_stream.list_deployed_models",
+            "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
             return_value=deployments,
         ):
             result = deployments_stream.poll_deployments(None)

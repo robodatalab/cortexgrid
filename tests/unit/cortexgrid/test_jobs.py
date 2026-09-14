@@ -32,14 +32,14 @@ RUN_ID = "run-1"
 # their import paths, so the uploaded tarball mirrors the repo layout.
 _REPO = Path(__file__).resolve().parents[3]
 _SHIPPED = {
-    _REPO / "cortexflow/__init__.py",
-    _REPO / "cortexflow/experiment.py",
-    _REPO / "cortexflow/jobs.py",
-    _REPO / "cortexflow/ray_util.py",
+    _REPO / "cortexgrid/__init__.py",
+    _REPO / "cortexgrid/experiment.py",
+    _REPO / "cortexgrid/jobs.py",
+    _REPO / "cortexgrid/ray_util.py",
     _REPO / "tests/__init__.py",
     _REPO / "tests/unit/__init__.py",
-    _REPO / "tests/unit/cortexflow/__init__.py",
-    _REPO / "tests/unit/cortexflow/test_jobs.py",
+    _REPO / "tests/unit/cortexgrid/__init__.py",
+    _REPO / "tests/unit/cortexgrid/test_jobs.py",
 }
 
 
@@ -117,19 +117,19 @@ class TestRemote(unittest.TestCase):
         self.fake_s3 = FakeS3()
 
         patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
-            patch("cortexflow.jobs.s3_util", self.fake_s3),
+            patch("cortexgrid.jobs.s3_util", self.fake_s3),
             # Bundling is exercised in test_bundle; pin it here so the job path
             # is tested in isolation, without tracing all of torch/mlflow.
             patch(
-                "cortexflow.jobs.bundle",
+                "cortexgrid.jobs.bundle",
                 return_value=BundleDesc(local_files=set(_SHIPPED), tp_deps={}),
             ),
-            patch("cortexflow.jobs.worker_provides", return_value=frozenset()),
+            patch("cortexgrid.jobs.worker_provides", return_value=frozenset()),
         ]
         for p in patchers:
             p.start()
@@ -164,17 +164,17 @@ class TestRemote(unittest.TestCase):
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue(
-            (project_root / "tests" / "unit" / "cortexflow" / "test_jobs.py").is_file()
+            (project_root / "tests" / "unit" / "cortexgrid" / "test_jobs.py").is_file()
         )
         self.assertTrue((project_root / "tests" / "__init__.py").is_file())
         self.assertTrue((project_root / "tests" / "unit" / "__init__.py").is_file())
         self.assertTrue(
-            (project_root / "tests" / "unit" / "cortexflow" / "__init__.py").is_file()
+            (project_root / "tests" / "unit" / "cortexgrid" / "__init__.py").is_file()
         )
-        self.assertTrue((project_root / "cortexflow" / "__init__.py").is_file())
-        self.assertTrue((project_root / "cortexflow" / "experiment.py").is_file())
-        self.assertTrue((project_root / "cortexflow" / "jobs.py").is_file())
-        self.assertTrue((project_root / "cortexflow" / "ray_util.py").is_file())
+        self.assertTrue((project_root / "cortexgrid" / "__init__.py").is_file())
+        self.assertTrue((project_root / "cortexgrid" / "experiment.py").is_file())
+        self.assertTrue((project_root / "cortexgrid" / "jobs.py").is_file())
+        self.assertTrue((project_root / "cortexgrid" / "ray_util.py").is_file())
         self.assertFalse((project_root / ".venv").exists())
 
     def test_remote_ships_no_requirements_txt(self) -> None:
@@ -239,12 +239,12 @@ class TestPayloadSaveLoad(unittest.TestCase):
         (self.project_dir / "data" / "config.yaml").write_text("lr: 0.001")
 
         patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
-            patch("cortexflow.jobs.s3_util", self.fake_s3),
+            patch("cortexgrid.jobs.s3_util", self.fake_s3),
         ]
         for p in patchers:
             p.start()
@@ -342,7 +342,7 @@ class TestGetJobStatus(unittest.TestCase):
 
     def setUp(self) -> None:
         self.mock_get_ray_status = MagicMock()
-        patcher = patch("cortexflow.ray_util.get_ray_status", self.mock_get_ray_status)
+        patcher = patch("cortexgrid.ray_util.get_ray_status", self.mock_get_ray_status)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -380,9 +380,9 @@ class TestListExperimentRunJobs(unittest.TestCase):
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
         patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
         ]
@@ -450,7 +450,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_passed_list_is_used_without_querying_ray(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.ray_util.list_ray_jobs_with_submission_id"
+            "cortexgrid.ray_util.list_ray_jobs_with_submission_id"
         ) as mock_list:
             result = lifecycle.get_ray_job_id(
                 ["run-1-job-1-0", "run-1-job-1-1"]
@@ -462,7 +462,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_empty_passed_list_returns_none_without_querying_ray(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.ray_util.list_ray_jobs_with_submission_id"
+            "cortexgrid.ray_util.list_ray_jobs_with_submission_id"
         ) as mock_list:
             result = lifecycle.get_ray_job_id([])
 
@@ -472,7 +472,7 @@ class TestGetRayJobId(unittest.TestCase):
     def test_no_arg_queries_ray_live(self) -> None:
         lifecycle = self._lifecycle()
         with patch(
-            "cortexflow.ray_util.list_ray_jobs_with_submission_id",
+            "cortexgrid.ray_util.list_ray_jobs_with_submission_id",
             return_value=["run-1-job-1-0"],
         ) as mock_list:
             result = lifecycle.get_ray_job_id()
@@ -487,9 +487,9 @@ class TestStopExperimentRunJobs(unittest.TestCase):
     def setUp(self) -> None:
         self.fake_mlflow = FakeMLflow()
         patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
         ]

@@ -61,23 +61,23 @@ class TestModelServing(unittest.TestCase):
         self.state = FakeServeState()
         patches = [
             patch(
-                "cortexflow.model_serving.get_serve_details",
+                "cortexgrid.model_serving.get_serve_details",
                 side_effect=self.state.get_details,
             ),
             patch(
-                "cortexflow.model_serving.put_serve_applications",
+                "cortexgrid.model_serving.put_serve_applications",
                 side_effect=self.state.put,
             ),
             patch(
-                "cortexflow.model_serving.get_ray_serve_uri",
+                "cortexgrid.model_serving.get_ray_serve_uri",
                 return_value="http://ray:30000",
             ),
             patch(
-                "cortexflow.model_serving._build_application_spec",
+                "cortexgrid.model_serving._build_application_spec",
                 side_effect=_stub_build_spec,
             ),
             patch(
-                "cortexflow.model_serving._load_bundle_metadata",
+                "cortexgrid.model_serving._load_bundle_metadata",
                 return_value=_FAKE_META,
             ),
         ]
@@ -135,7 +135,7 @@ class TestModelServing(unittest.TestCase):
         self.state.status = "DEPLOY_FAILED"
         self.state.message = "replica died on import"
 
-        with patch("cortexflow.model_serving.time.sleep"):
+        with patch("cortexgrid.model_serving.time.sleep"):
             with self.assertRaises(RuntimeError) as ctx:
                 deploy_model("Qwen2", "instruct", "boogey-46", wait=True)
 
@@ -151,10 +151,10 @@ class TestWaitForApplicationRunning(unittest.TestCase):
         }
         patches = [
             patch(
-                "cortexflow.model_serving.get_serve_details",
+                "cortexgrid.model_serving.get_serve_details",
                 side_effect=self.state.get_details,
             ),
-            patch("cortexflow.model_serving.time.sleep"),
+            patch("cortexgrid.model_serving.time.sleep"),
         ]
         for p in patches:
             p.start()
@@ -196,7 +196,7 @@ class TestWaitForApplicationRunning(unittest.TestCase):
             return self.state.get_details()
 
         with patch(
-            "cortexflow.model_serving.get_serve_details", side_effect=get_details
+            "cortexgrid.model_serving.get_serve_details", side_effect=get_details
         ):
             _wait_for_application_running(
                 "Qwen2__instruct__boogey-46", timeout_s=None, interval_s=0.0
@@ -221,11 +221,11 @@ class TestModelServingStatus(unittest.TestCase):
         self.state = FakeServeState()
         patches = [
             patch(
-                "cortexflow.model_serving.get_serve_details",
+                "cortexgrid.model_serving.get_serve_details",
                 side_effect=self.state.get_details,
             ),
             patch(
-                "cortexflow.model_serving.get_ray_serve_uri",
+                "cortexgrid.model_serving.get_ray_serve_uri",
                 return_value="http://ray:30000",
             ),
         ]

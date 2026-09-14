@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: mlflow
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: mlflow
 spec:
   type: NodePort

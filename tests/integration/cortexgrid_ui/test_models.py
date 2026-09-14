@@ -8,7 +8,7 @@ import cortexgrid
 from playwright.sync_api import expect
 
 from tests.integration.stubs.serving import AddConstantServeApp, write_weights
-from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
+from tests.integration.cortexgrid_ui._base import get_test_ui_url, UITestCase
 
 
 def _experiment_name(test: UITestCase) -> str:

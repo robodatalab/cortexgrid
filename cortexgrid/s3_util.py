@@ -2,7 +2,7 @@
 
 Builds an S3 boto3 client from the S3_* entries in AWS Secrets Manager:
 S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_REGION, S3_ENDPOINT_URL. They are
-fetched at runtime via cortexflow.secrets.get_secret, so no consumer has to
+fetched at runtime via cortexgrid.secrets.get_secret, so no consumer has to
 export them as environment variables.
 
 On the AWS profile S3_ENDPOINT_URL is the regional s3.amazonaws.com URL and

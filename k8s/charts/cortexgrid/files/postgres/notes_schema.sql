@@ -1,4 +1,4 @@
--- Schema for the `notes` database, consumed by cortexflow_ui.backend.models.notes.
+-- Schema for the `notes` database, consumed by cortexgrid_ui.backend.models.notes.
 -- Applied by terraform via psql against an already-created `notes` database.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

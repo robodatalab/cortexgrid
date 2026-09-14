@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from cortexflow_ui.backend.models.infra_status import (
+from cortexgrid_ui.backend.models.infra_status import (
     _classify,
     _collect_unreachable_nodes,
     get_infra_status,
@@ -125,8 +125,8 @@ class TestClassify(unittest.TestCase):
 
 
 class TestGetInfraStatus(unittest.TestCase):
-    @patch("cortexflow_ui.backend.models.infra_status._load_kube_config")
-    @patch("cortexflow_ui.backend.models.infra_status.client.CoreV1Api")
+    @patch("cortexgrid_ui.backend.models.infra_status._load_kube_config")
+    @patch("cortexgrid_ui.backend.models.infra_status.client.CoreV1Api")
     def test_pod_on_dead_node_is_unhealthy(self, mock_api_cls, _mock_cfg):
         v1 = _v1_with(
             nodes=[
@@ -152,8 +152,8 @@ class TestGetInfraStatus(unittest.TestCase):
             by_name["ghost-pod"].health, "node-unreachable: NodeStatusUnknown"
         )
 
-    @patch("cortexflow_ui.backend.models.infra_status._load_kube_config")
-    @patch("cortexflow_ui.backend.models.infra_status.client.CoreV1Api")
+    @patch("cortexgrid_ui.backend.models.infra_status._load_kube_config")
+    @patch("cortexgrid_ui.backend.models.infra_status.client.CoreV1Api")
     def test_all_healthy_overall_true(self, mock_api_cls, _mock_cfg):
         v1 = _v1_with(
             nodes=[_make_node("alive")],

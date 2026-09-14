@@ -29,7 +29,7 @@ class TestMlflowUtil(unittest.TestCase):
         )
         self.client = MagicMock()
         self.patcher = patch(
-            "cortexflow.mlflow_util.get_mlflow_client",
+            "cortexgrid.mlflow_util.get_mlflow_client",
             return_value=self.client,
         )
         self.patcher.start()
@@ -93,8 +93,8 @@ class TestMlflowUtil(unittest.TestCase):
         result = list_run_artifacts(RUN_ID)
         self.assertEqual(result, ["model.pt", "job/job-1"])
 
-    @patch("cortexflow.experiment.MlflowClient")
-    @patch("cortexflow.experiment.get_mlflow_tracking_uri", return_value="http://test:5000")
+    @patch("cortexgrid.experiment.MlflowClient")
+    @patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="http://test:5000")
     def test_list_experiments_returns_experiment_objects(self, _mock_uri: MagicMock, mock_mlflow_cls: MagicMock) -> None:
         fake_client = MagicMock()
         mock_mlflow_cls.return_value = fake_client

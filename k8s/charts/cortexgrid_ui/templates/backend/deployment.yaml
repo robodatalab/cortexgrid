@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cortexflow-ui-backend
+  name: cortexgrid-ui-backend
   labels:
-    {{- include "cortexflow_ui.labels" . | nindent 4 }}
-    app: cortexflow-ui-backend
+    {{- include "cortexgrid_ui.labels" . | nindent 4 }}
+    app: cortexgrid-ui-backend
 spec:
   replicas: 1
   revisionHistoryLimit: 1
@@ -12,19 +12,19 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: cortexflow-ui-backend
+      app: cortexgrid-ui-backend
   template:
     metadata:
       labels:
-        app: cortexflow-ui-backend
+        app: cortexgrid-ui-backend
     spec:
       nodeSelector:
         role: head
-      serviceAccountName: cortexflow-ui-backend
+      serviceAccountName: cortexgrid-ui-backend
       imagePullSecrets:
         - name: ghcr-pull
       containers:
-        - name: cortexflow-ui-backend
+        - name: cortexgrid-ui-backend
           image: {{ .Values.images.backend }}
           env:
             - name: MLFLOW_HTTP_REQUEST_MAX_RETRIES
@@ -32,7 +32,7 @@ spec:
             - name: MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR
               value: "{{ .Values.backend.mlflowHttpBackoffFactor }}"
           envFrom:
-            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
+            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: sm-creds
             - secretRef:

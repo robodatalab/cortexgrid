@@ -1,11 +1,11 @@
-"""Notes storage for the cortexflow UI.
+"""Notes storage for the cortexgrid UI.
 
 Two independent tables in the `notes` Postgres database:
 - run_notes: notes attached to an MLflow run.
 - experiment_notes: meta-notes attached to an MLflow experiment, not tied
   to a specific run.
 
-Connection URI is resolved per-call via cortexflow.secrets.
+Connection URI is resolved per-call via cortexgrid.secrets.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cortexgrid.secrets import get_secret
-from cortexflow_ui.backend.streams.experiments_stream import (
+from cortexgrid_ui.backend.streams.experiments_stream import (
     resolve_run_id,
     resolve_run_name,
 )

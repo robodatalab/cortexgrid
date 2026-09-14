@@ -25,34 +25,34 @@ def _patched_infra(s3: FakeS3, mlflow: FakeMlflowClient, ray: FakeRay) -> ExitSt
     """Patch every adapter that reaches real infrastructure."""
     stack = ExitStack()
     stack.enter_context(
-        patch("cortexflow.s3_util.get_s3_client", return_value=s3)
+        patch("cortexgrid.s3_util.get_s3_client", return_value=s3)
     )
     stack.enter_context(
-        patch("cortexflow.s3_util.get_s3_bucket", return_value="test-bucket")
+        patch("cortexgrid.s3_util.get_s3_bucket", return_value="test-bucket")
     )
     stack.enter_context(
-        patch("cortexflow.experiment.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.experiment.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.experiment.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
-        patch("cortexflow.jobs.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.jobs.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.jobs.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
         patch(
-            "cortexflow.model_storage.get_mlflow_tracking_uri", return_value=""
+            "cortexgrid.model_storage.get_mlflow_tracking_uri", return_value=""
         )
     )
     stack.enter_context(
         patch(
-            "cortexflow.ray_util.get_ray_job_submission_client",
+            "cortexgrid.ray_util.get_ray_job_submission_client",
             return_value=ray,
         )
     )

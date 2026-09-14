@@ -6,7 +6,7 @@ metadata:
     tailscale.com/expose: "true"
     tailscale.com/hostname: ray
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: ray-head
 spec:
   type: NodePort

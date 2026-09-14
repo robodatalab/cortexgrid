@@ -1,14 +1,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Pristine chart lives at k8s/charts/cortexflow; this overlay supplies the
+# Pristine chart lives at k8s/charts/cortexgrid; this overlay supplies the
 # mutable bits (image tags) that CI writes to via yq. Mirrors the arc_runner
 # kustomize+helm pattern used elsewhere in this repo.
 helmGlobals:
   chartHome: ../../charts
 helmCharts:
-  - name: cortexflow
-    releaseName: cortexflow
-    namespace: cortexflow
+  - name: cortexgrid
+    releaseName: cortexgrid
+    namespace: cortexgrid
     valuesInline:
       images:
         mlflow: ghcr.io/robodatalab/mlflow:04228357687bb32056a323b63567d247d5182e53

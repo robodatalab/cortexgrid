@@ -1,6 +1,6 @@
 images:
-  backend: ghcr.io/robodatalab/cortexflow-ui-backend:latest
-  frontend: ghcr.io/robodatalab/cortexflow-ui-frontend:latest
+  backend: ghcr.io/robodatalab/cortexgrid-ui-backend:latest
+  frontend: ghcr.io/robodatalab/cortexgrid-ui-frontend:latest
 
 services:
   backend:
@@ -8,7 +8,7 @@ services:
   frontend:
     port: 80
     nodePort: 30088
-  ingressHost: cortexflow.robodatalab.com
+  ingressHost: cortexgrid.robodatalab.com
 
 ingress:
   className: traefik

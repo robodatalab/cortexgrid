@@ -17,7 +17,7 @@ class TestExperiment(unittest.TestCase):
         for p in (
             patch("boto3.client"),
             patch(
-                "cortexflow.experiment.MlflowClient",
+                "cortexgrid.experiment.MlflowClient",
                 return_value=self.fake_mlflow,
             ),
         ):
@@ -92,7 +92,7 @@ class TestExperiment(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_experiment_by_run_name("anything")
 
-    def test_get_jobs_lists_cortexflow_job_ids(self) -> None:
+    def test_get_jobs_lists_cortexgrid_job_ids(self) -> None:
         self.fake_mlflow.list_artifacts.return_value = [
             MagicMock(path="job/job-1", is_dir=True),
             MagicMock(path="job/job-2", is_dir=True),

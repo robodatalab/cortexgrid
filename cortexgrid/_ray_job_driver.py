@@ -1,4 +1,4 @@
-"""Cluster-side entrypoint. Run by Ray as: python -m cortexflow._ray_job_driver payload.pkl"""
+"""Cluster-side entrypoint. Run by Ray as: python -m cortexgrid._ray_job_driver payload.pkl"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from cortexgrid.checkpoint import set_cortexflow_job_id
+from cortexgrid.checkpoint import set_cortexgrid_job_id
 from cortexgrid.experiment import Experiment
 from cortexgrid.jobs import Payload
 
@@ -30,7 +30,7 @@ def main(payload_path: str) -> None:
     log.info("Payload loaded: %s", payload_path)
     log.info("Loading experiment: %s/%s", payload.experiment_name, payload.run_id)
 
-    set_cortexflow_job_id(payload.job_id)
+    set_cortexgrid_job_id(payload.job_id)
     Experiment.from_experiment(payload.experiment_name, payload.run_id)
     log.info("Experiment loaded: %s/%s", payload.experiment_name, payload.run_id)
 

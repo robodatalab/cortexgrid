@@ -4,7 +4,7 @@ kind: Service
 metadata:
   name: postgres
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: postgres
 spec:
   type: NodePort

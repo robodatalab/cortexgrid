@@ -25,17 +25,17 @@ from cortexgrid.secrets import (
     set_secret,
 )
 
-from cortexflow_ui.backend.models import (
+from cortexgrid_ui.backend.models import (
     notes,
 )
-from cortexflow_ui.backend.models.notes import (
+from cortexgrid_ui.backend.models.notes import (
     ExperimentNote,
     RunNote,
     delete_experiment_notes_for_experiment,
     delete_run_notes_for_run,
 )
-from cortexflow_ui.backend.models.infra_status import InfraStatus, get_infra_status
-from cortexflow_ui.backend.streams import (
+from cortexgrid_ui.backend.models.infra_status import InfraStatus, get_infra_status
+from cortexgrid_ui.backend.streams import (
     deployments_stream,
     experiment_notes_stream,
     experiments_stream,
@@ -45,15 +45,15 @@ from cortexflow_ui.backend.streams import (
     run_jobs_stream,
     run_notes_stream,
 )
-from cortexflow_ui.backend.utils.keyed_stream import (
+from cortexgrid_ui.backend.utils.keyed_stream import (
     serve_websocket,
     serve_websocket_multi,
 )
 
-log = logging.getLogger("cortexflow_ui_backend")
+log = logging.getLogger("cortexgrid_ui_backend")
 
 app = FastAPI(
-    title="CortexFlow UI",
+    title="CortexGrid UI",
     version="0.1.0",
 )
 

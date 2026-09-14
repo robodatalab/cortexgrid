@@ -18,7 +18,7 @@ from typing import Any, Callable, MutableMapping
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
-from cortexflow_ui.backend.utils.keyed_stream import (
+from cortexgrid_ui.backend.utils.keyed_stream import (
     AddedEvent,
     DiffEvent,
     KeyedCache,

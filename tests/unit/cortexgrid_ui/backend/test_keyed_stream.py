@@ -11,8 +11,8 @@ from starlette.websockets import WebSocketState
 
 from cortexgrid.jobs import JobLifecycle
 from cortexgrid.ray_util import JobStatus
-from cortexflow_ui.backend.streams import run_jobs_stream, run_notes_stream
-from cortexflow_ui.backend.utils.keyed_stream import serve_websocket
+from cortexgrid_ui.backend.streams import run_jobs_stream, run_notes_stream
+from cortexgrid_ui.backend.utils.keyed_stream import serve_websocket
 
 
 class FakeWebSocket(WebSocket):
@@ -70,15 +70,15 @@ class TestRunJobsRefresherServe(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self._patches = [
             patch(
-                "cortexflow_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
+                "cortexgrid_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
                 return_value=[],
             ),
             patch(
-                "cortexflow_ui.backend.streams.run_jobs_stream.get_ray_job_status",
+                "cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status",
                 return_value=JobStatus.RUNNING,
             ),
             patch(
-                "cortexflow_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs",
+                "cortexgrid_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs",
                 return_value=[
                     JobLifecycle(experiment_name="alpha", run_id="run-x", job_id="j1"),
                 ],
@@ -210,14 +210,14 @@ class TestRunNotesRefresherServe(unittest.IsolatedAsyncioTestCase):
             return _FakePgConn(rows)
 
         patcher = patch(
-            "cortexflow_ui.backend.models.notes._connect",
+            "cortexgrid_ui.backend.models.notes._connect",
             side_effect=fake_connect,
         )
         patcher.start()
         self.addCleanup(patcher.stop)
 
         resolve_patcher = patch(
-            "cortexflow_ui.backend.models.notes.resolve_run_id",
+            "cortexgrid_ui.backend.models.notes.resolve_run_id",
             side_effect=lambda run_name: run_name,
         )
         resolve_patcher.start()

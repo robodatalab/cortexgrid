@@ -35,7 +35,7 @@ def get_ray_job_submission_client() -> JobSubmissionClient:
     return _ray_job_submission_client
 
 
-def get_ray_job_id_for_cortexflow_job(
+def get_ray_job_id_for_cortexgrid_job(
     run_id: str, job_id: str, all_ray_submission_ids: list[str] | None = None
 ) -> str | None:
     if all_ray_submission_ids is None:

@@ -1,7 +1,7 @@
-"""Cortexflow wrappers around Ray Serve.
+"""Cortexgrid wrappers around Ray Serve.
 
 Caller stays HTTP-only: deploy/undeploy/list talk to the Ray dashboard's
-declarative `/api/serve/applications/` endpoint via [cortexflow.ray_util],
+declarative `/api/serve/applications/` endpoint via [cortexgrid.ray_util],
 never `ray.init`. The deployment class is bundled at `save_model` time, zipped,
 uploaded to MinIO under `serve-bundles/<run_name>/<family>__<suffix>.zip`, and
 referenced via `runtime_env.working_dir` so Ray workers fetch it from there.
@@ -12,7 +12,7 @@ holding the class object.
 Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
 This relies on family/suffix/run_name not containing the literal "__".
 
-See [docs/cortexflow/model-serving.md](../docs/cortexflow/model-serving.md) for
+See [docs/cortexgrid/model-serving.md](../docs/cortexgrid/model-serving.md) for
 the end-to-end design.
 """
 
@@ -131,9 +131,9 @@ def _build_application_spec(
         "route_prefix": _route_prefix(family, suffix, run_name),
         # Ray Serve REST requires import_path to point at an Application builder
         # (callable returning a bound node) or an already-bound node. A bare
-        # Deployment class is rejected, so cortexflow.deploy_model goes through
+        # Deployment class is rejected, so cortexgrid.deploy_model goes through
         # a generic builder that re-imports the user's class and binds it.
-        "import_path": "cortexflow._serve_entry:build",
+        "import_path": "cortexgrid._serve_entry:build",
         "args": {
             "class_import_path": meta.class_import_path,
             "family": family,
@@ -184,7 +184,7 @@ def _load_bundle_metadata(
     except KeyError as exc:
         raise ValueError(
             f"Saved model {family}/{suffix}/{run_name} is missing the deployment "
-            f"bundle tag {exc.args[0]!r}; re-save with `cortexflow.save_model`."
+            f"bundle tag {exc.args[0]!r}; re-save with `cortexgrid.save_model`."
         ) from exc
 
 
@@ -248,7 +248,7 @@ def deploy_model(
     """Schedule a Ray Serve app for a previously-saved model and return a
     handle carrying its base URL. The caller (e.g. model-gateway) builds
     whatever client the app's routes need - streaming, long timeouts, custom
-    request schemas - against that URL; cortexflow imposes no traffic contract.
+    request schemas - against that URL; cortexgrid imposes no traffic contract.
 
     The serve-app class is pulled from the MLflow ModelVersion tags `save_model`
     wrote at save time; the caller does not need to hold the class object.
@@ -311,7 +311,7 @@ class ServingStatus:
 
     This is the serving half of a model's life. The registry half (uploading /
     ready in MLflow) is a separate lifecycle reported by
-    `cortexflow.model_storage.model_registry_status`.
+    `cortexgrid.model_storage.model_registry_status`.
 
     `phase` is one of:
       - "not_deployed"  no Serve app: never deployed, or already undeployed
@@ -345,7 +345,7 @@ def model_serving_status(
     status ("deploying" while the replica pulls weights and builds the model on
     the worker, then "running"). See `ServingStatus` for the full vocabulary.
     The registry lifecycle is reported separately by
-    `cortexflow.model_storage.model_registry_status`.
+    `cortexgrid.model_storage.model_registry_status`.
     """
     app = get_serve_details().get("applications", {}).get(
         _app_name(family, suffix, run_name)

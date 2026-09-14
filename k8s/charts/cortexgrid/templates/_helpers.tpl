@@ -1,7 +1,7 @@
 {{/*
-Common labels applied to every resource in the cortexflow chart.
+Common labels applied to every resource in the cortexgrid chart.
 */}}
-{{- define "cortexflow.labels" -}}
-app.kubernetes.io/part-of: cortexflow
+{{- define "cortexgrid.labels" -}}
+app.kubernetes.io/part-of: cortexgrid
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}

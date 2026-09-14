@@ -83,7 +83,7 @@ class Experiment:
         return instance
 
     def get_jobs(self) -> list[str]:
-        """Return cortexflow job IDs submitted against this experiment+run."""
+        """Return cortexgrid job IDs submitted against this experiment+run."""
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         return [
             Path(f.path).name

@@ -13,9 +13,9 @@ from typing import Any
 from cortexgrid.experiment import get_mlflow_tracking_uri
 from cortexgrid.infra import get_mlflow_run_url
 from cortexgrid.mlflow_util import get_metric_history
-from cortexflow_ui.backend.streams.config import RUN_DASHBOARD_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.streams.experiments_stream import resolve_run_id
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import RUN_DASHBOARD_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.streams.experiments_stream import resolve_run_id
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 from mlflow.tracking import MlflowClient
 
 

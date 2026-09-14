@@ -1,4 +1,4 @@
-# CortexFlow UI — backend (FastAPI server + cortexflow library)
+# CortexGrid UI — backend (FastAPI server + cortexgrid library)
 
 FROM python:3.11-slim
 
@@ -14,11 +14,11 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --no-install-project --group ui
 
-COPY cortexflow/ ./cortexflow/
-COPY cortexflow_ui/backend/ ./cortexflow_ui/backend/
+COPY cortexgrid/ ./cortexgrid/
+COPY cortexgrid_ui/backend/ ./cortexgrid_ui/backend/
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked --group ui
 
-CMD ["/app/.venv/bin/uvicorn", "cortexflow_ui.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/uvicorn", "cortexgrid_ui.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

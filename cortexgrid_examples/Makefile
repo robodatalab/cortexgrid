@@ -1,13 +1,13 @@
-# Cortexflow examples — run from the repo root's .venv
+# Cortexgrid examples — run from the repo root's .venv
 #
 # Prerequisites:
 #   - DGX stack running (MLflow, Ray, MinIO, jobs control plane)
-#   - cortexflow installed in the active venv (pip install -e .)
+#   - cortexgrid installed in the active venv (pip install -e .)
 #
 # Usage:
-#   make -C cortexflow_examples first-experiment   # laptop only, needs MLflow
-#   make -C cortexflow_examples jobs               # needs full stack
-#   make -C cortexflow_examples checkpoints        # needs full stack + retry
+#   make -C cortexgrid_examples first-experiment   # laptop only, needs MLflow
+#   make -C cortexgrid_examples jobs               # needs full stack
+#   make -C cortexgrid_examples checkpoints        # needs full stack + retry
 
 PYTHON ?= python
 

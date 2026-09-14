@@ -9,7 +9,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: cortexflow-${{ github.event.pull_request.number }}
+  group: cortexgrid-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -17,11 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed_arc_runner: ${{steps.compute_dependency_fanout.outputs.changed_arc_runner}}
-      changed_cortexflow: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow}}
-      changed_cortexflow_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_integration}}
-      changed_cortexflow_ui_backend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_backend}}
-      changed_cortexflow_ui_frontend: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_frontend}}
-      changed_cortexflow_ui_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow_ui_integration}}
+      changed_cortexgrid: ${{steps.compute_dependency_fanout.outputs.changed_cortexgrid}}
+      changed_cortexgrid_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexgrid_integration}}
+      changed_cortexgrid_ui_backend: ${{steps.compute_dependency_fanout.outputs.changed_cortexgrid_ui_backend}}
+      changed_cortexgrid_ui_frontend: ${{steps.compute_dependency_fanout.outputs.changed_cortexgrid_ui_frontend}}
+      changed_cortexgrid_ui_integration: ${{steps.compute_dependency_fanout.outputs.changed_cortexgrid_ui_integration}}
       changed_jobs_control_plane: ${{steps.compute_dependency_fanout.outputs.changed_jobs_control_plane}}
       changed_k8s_seed: ${{steps.compute_dependency_fanout.outputs.changed_k8s_seed}}
       changed_mlflow: ${{steps.compute_dependency_fanout.outputs.changed_mlflow}}
@@ -34,23 +34,23 @@ jobs:
           filters: |
             arc_runner:
               - 'k8s/docker/arc_runner/**'
-            cortexflow:
-              - 'cortexflow/**'
-              - 'tests/unit/cortexflow/**'
-            cortexflow_integration:
-              - 'tests/integration/cortexflow/**'
-              - 'k8s/docker/integration_tests/cortexflow/**'
-            cortexflow_ui_backend:
-              - 'cortexflow_ui/backend/**'
-              - 'tests/unit/cortexflow_ui/backend/**'
-              - 'k8s/docker/cortexflow_ui/backend/**'
-            cortexflow_ui_frontend:
-              - 'cortexflow_ui/frontend/**'
-              - 'k8s/docker/cortexflow_ui/frontend/**'
-              - 'tests/unit/cortexflow_ui/frontend/**'
-            cortexflow_ui_integration:
-              - 'tests/integration/cortexflow_ui/**'
-              - 'k8s/docker/integration_tests/cortexflow_ui/**'
+            cortexgrid:
+              - 'cortexgrid/**'
+              - 'tests/unit/cortexgrid/**'
+            cortexgrid_integration:
+              - 'tests/integration/cortexgrid/**'
+              - 'k8s/docker/integration_tests/cortexgrid/**'
+            cortexgrid_ui_backend:
+              - 'cortexgrid_ui/backend/**'
+              - 'tests/unit/cortexgrid_ui/backend/**'
+              - 'k8s/docker/cortexgrid_ui/backend/**'
+            cortexgrid_ui_frontend:
+              - 'cortexgrid_ui/frontend/**'
+              - 'k8s/docker/cortexgrid_ui/frontend/**'
+              - 'tests/unit/cortexgrid_ui/frontend/**'
+            cortexgrid_ui_integration:
+              - 'tests/integration/cortexgrid_ui/**'
+              - 'k8s/docker/integration_tests/cortexgrid_ui/**'
             jobs_control_plane:
               - 'jobs_control_plane/**'
               - 'k8s/docker/jobs_control_plane/**'
@@ -66,47 +66,47 @@ jobs:
       - id: compute_dependency_fanout
         run: |
           changed_arc_runner=${{steps.filter.outputs.arc_runner}}
-          changed_cortexflow=${{steps.filter.outputs.cortexflow}}
-          changed_cortexflow_integration=${{steps.filter.outputs.cortexflow_integration}}
-          changed_cortexflow_ui_backend=${{steps.filter.outputs.cortexflow_ui_backend}}
-          changed_cortexflow_ui_frontend=${{steps.filter.outputs.cortexflow_ui_frontend}}
-          changed_cortexflow_ui_integration=${{steps.filter.outputs.cortexflow_ui_integration}}
+          changed_cortexgrid=${{steps.filter.outputs.cortexgrid}}
+          changed_cortexgrid_integration=${{steps.filter.outputs.cortexgrid_integration}}
+          changed_cortexgrid_ui_backend=${{steps.filter.outputs.cortexgrid_ui_backend}}
+          changed_cortexgrid_ui_frontend=${{steps.filter.outputs.cortexgrid_ui_frontend}}
+          changed_cortexgrid_ui_integration=${{steps.filter.outputs.cortexgrid_ui_integration}}
           changed_jobs_control_plane=${{steps.filter.outputs.jobs_control_plane}}
           changed_k8s_seed=${{steps.filter.outputs.k8s_seed}}
           changed_mlflow=${{steps.filter.outputs.mlflow}}
           changed_ray=${{steps.filter.outputs.ray}}
 
-          if [[ "$changed_cortexflow" == "true" ]]; then
-              changed_cortexflow_ui_backend=true
+          if [[ "$changed_cortexgrid" == "true" ]]; then
+              changed_cortexgrid_ui_backend=true
               changed_jobs_control_plane=true
-              changed_cortexflow_integration=true
-              changed_cortexflow_ui_integration=true
+              changed_cortexgrid_integration=true
+              changed_cortexgrid_ui_integration=true
           fi
 
           echo "changed_arc_runner=$changed_arc_runner" >> "$GITHUB_OUTPUT"
-          echo "changed_cortexflow=$changed_cortexflow" >> "$GITHUB_OUTPUT"
-          echo "changed_cortexflow_integration=$changed_cortexflow_integration" >> "$GITHUB_OUTPUT"
-          echo "changed_cortexflow_ui_backend=$changed_cortexflow_ui_backend"  >> "$GITHUB_OUTPUT"
-          echo "changed_cortexflow_ui_frontend=$changed_cortexflow_ui_frontend"  >> "$GITHUB_OUTPUT"
-          echo "changed_cortexflow_ui_integration=$changed_cortexflow_ui_integration" >> "$GITHUB_OUTPUT"
+          echo "changed_cortexgrid=$changed_cortexgrid" >> "$GITHUB_OUTPUT"
+          echo "changed_cortexgrid_integration=$changed_cortexgrid_integration" >> "$GITHUB_OUTPUT"
+          echo "changed_cortexgrid_ui_backend=$changed_cortexgrid_ui_backend"  >> "$GITHUB_OUTPUT"
+          echo "changed_cortexgrid_ui_frontend=$changed_cortexgrid_ui_frontend"  >> "$GITHUB_OUTPUT"
+          echo "changed_cortexgrid_ui_integration=$changed_cortexgrid_ui_integration" >> "$GITHUB_OUTPUT"
           echo "changed_jobs_control_plane=$changed_jobs_control_plane"  >> "$GITHUB_OUTPUT"
           echo "changed_k8s_seed=$changed_k8s_seed"  >> "$GITHUB_OUTPUT"
           echo "changed_mlflow=$changed_mlflow"  >> "$GITHUB_OUTPUT"
           echo "changed_ray=$changed_ray"  >> "$GITHUB_OUTPUT"
 
-  test_cortexflow:
+  test_cortexgrid:
     needs: detect
-    if: needs.detect.outputs.changed_cortexflow == 'true'
+    if: needs.detect.outputs.changed_cortexgrid == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv run --group test-torch python -m unittest discover -s tests/unit/cortexflow -v
+      - run: uv run --group test-torch python -m unittest discover -s tests/unit/cortexgrid -v
 
-  bump-cortexflow-version:
-    needs: test_cortexflow
+  bump-cortexgrid-version:
+    needs: test_cortexgrid
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,12 +128,12 @@ jobs:
 
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "bump cortexflow library version"
+          git commit -m "bump cortexgrid library version"
           git push
 
-  test_cortexflow_ui_backend:
+  test_cortexgrid_ui_backend:
     needs: detect
-    if: needs.detect.outputs.changed_cortexflow_ui_backend == 'true'
+    if: needs.detect.outputs.changed_cortexgrid_ui_backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,12 +142,12 @@ jobs:
           python-version: "3.11"
       - run: uv sync --group dev --group ui
       - env:
-          PYTHONPATH: cortexflow_ui/backend
-        run: uv run python -m unittest discover -s tests/unit/cortexflow_ui/backend -v
+          PYTHONPATH: cortexgrid_ui/backend
+        run: uv run python -m unittest discover -s tests/unit/cortexgrid_ui/backend -v
 
-  test_cortexflow_ui_frontend:
+  test_cortexgrid_ui_frontend:
     needs: detect
-    if: needs.detect.outputs.changed_cortexflow_ui_frontend == 'true'
+    if: needs.detect.outputs.changed_cortexgrid_ui_frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,15 +155,15 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: cortexflow_ui/frontend/package-lock.json
+          cache-dependency-path: cortexgrid_ui/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: cortexflow_ui/frontend
+        working-directory: cortexgrid_ui/frontend
 
       - name: Run frontend tests
         run: npm run test:run
-        working-directory: cortexflow_ui/frontend
+        working-directory: cortexgrid_ui/frontend
 
   test_jobs_control_plane:
     needs: detect
@@ -223,14 +223,14 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-  build_cortexflow_integration:
+  build_cortexgrid_integration:
     needs: detect
-    if: needs.detect.outputs.changed_cortexflow_integration == 'true'
+    if: needs.detect.outputs.changed_cortexgrid_integration == 'true'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-integration
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexgrid-integration
     steps:
       - uses: actions/checkout@v4
       - id: t
@@ -252,20 +252,20 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: k8s/docker/integration_tests/cortexflow/Dockerfile
+          file: k8s/docker/integration_tests/cortexgrid/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-  build_cortexflow_ui_backend:
-    needs: test_cortexflow_ui_backend
+  build_cortexgrid_ui_backend:
+    needs: test_cortexgrid_ui_backend
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-backend
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexgrid-ui-backend
     steps:
       - uses: actions/checkout@v4
       - id: t
@@ -287,20 +287,20 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: k8s/docker/cortexflow_ui/backend/Dockerfile
+          file: k8s/docker/cortexgrid_ui/backend/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-  build_cortexflow_ui_frontend:
-    needs: test_cortexflow_ui_frontend
+  build_cortexgrid_ui_frontend:
+    needs: test_cortexgrid_ui_frontend
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-frontend
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexgrid-ui-frontend
     steps:
       - uses: actions/checkout@v4
       - id: t
@@ -322,21 +322,21 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: k8s/docker/cortexflow_ui/frontend/Dockerfile
+          file: k8s/docker/cortexgrid_ui/frontend/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
 
-  build_cortexflow_ui_integration:
+  build_cortexgrid_ui_integration:
     needs: detect
-    if: needs.detect.outputs.changed_cortexflow_ui_integration == 'true'
+    if: needs.detect.outputs.changed_cortexgrid_ui_integration == 'true'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexflow-ui-integration
+      IMAGE: ghcr.io/${{ github.repository_owner }}/cortexgrid-ui-integration
     steps:
       - uses: actions/checkout@v4
       - id: t
@@ -358,7 +358,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: k8s/docker/integration_tests/cortexflow_ui/Dockerfile
+          file: k8s/docker/integration_tests/cortexgrid_ui/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:${{ steps.t.outputs.value }}
@@ -474,12 +474,12 @@ jobs:
   update_image_tags:
     needs:
       [
-        bump-cortexflow-version,
+        bump-cortexgrid-version,
         build_arc_runner,
-        build_cortexflow_integration,
-        build_cortexflow_ui_backend,
-        build_cortexflow_ui_frontend,
-        build_cortexflow_ui_integration,
+        build_cortexgrid_integration,
+        build_cortexgrid_ui_backend,
+        build_cortexgrid_ui_frontend,
+        build_cortexgrid_ui_integration,
         build_jobs_control_plane,
         build_mlflow,
         build_ray,
@@ -500,33 +500,33 @@ jobs:
             NEW_IMAGE="ghcr.io/$OWNER/arc-runner:${{ needs.build_arc_runner.outputs.tag }}" \
               yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/arc_runner_set/kustomization.yaml
           fi
-          if [[ "${{ needs.build_cortexflow_integration.result }}" == "success" ]]; then
-            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-integration:${{ needs.build_cortexflow_integration.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_integration_tests/job.yaml
+          if [[ "${{ needs.build_cortexgrid_integration.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexgrid-integration:${{ needs.build_cortexgrid_integration.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid_integration_tests/job.yaml
           fi
-          if [[ "${{ needs.build_cortexflow_ui_backend.result }}" == "success" ]]; then
-            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-backend:${{ needs.build_cortexflow_ui_backend.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.images.backend = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/kustomization.yaml
+          if [[ "${{ needs.build_cortexgrid_ui_backend.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexgrid-ui-backend:${{ needs.build_cortexgrid_ui_backend.outputs.tag }}" \
+              yq -i '.helmCharts[0].valuesInline.images.backend = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid_ui/kustomization.yaml
           fi
-          if [[ "${{ needs.build_cortexflow_ui_frontend.result }}" == "success" ]]; then
-            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-frontend:${{ needs.build_cortexflow_ui_frontend.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.images.frontend = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui/kustomization.yaml
+          if [[ "${{ needs.build_cortexgrid_ui_frontend.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexgrid-ui-frontend:${{ needs.build_cortexgrid_ui_frontend.outputs.tag }}" \
+              yq -i '.helmCharts[0].valuesInline.images.frontend = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid_ui/kustomization.yaml
           fi
-          if [[ "${{ needs.build_cortexflow_ui_integration.result }}" == "success" ]]; then
-            NEW_IMAGE="ghcr.io/$OWNER/cortexflow-ui-integration:${{ needs.build_cortexflow_ui_integration.outputs.tag }}" \
-              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexflow_ui_integration_tests/job.yaml
+          if [[ "${{ needs.build_cortexgrid_ui_integration.result }}" == "success" ]]; then
+            NEW_IMAGE="ghcr.io/$OWNER/cortexgrid-ui-integration:${{ needs.build_cortexgrid_ui_integration.outputs.tag }}" \
+              yq -i '.spec.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid_ui_integration_tests/job.yaml
           fi
           if [[ "${{ needs.build_jobs_control_plane.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/jobs-control-plane:${{ needs.build_jobs_control_plane.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.images.jobsControlPlane = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
+              yq -i '.helmCharts[0].valuesInline.images.jobsControlPlane = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid/kustomization.yaml
           fi
           if [[ "${{ needs.build_mlflow.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/mlflow:${{ needs.build_mlflow.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.images.mlflow = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
+              yq -i '.helmCharts[0].valuesInline.images.mlflow = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid/kustomization.yaml
           fi
           if [[ "${{ needs.build_ray.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/ray-head:${{ needs.build_ray.outputs.tag }}" \
-              yq -i '.helmCharts[0].valuesInline.images.ray = strenv(NEW_IMAGE)' k8s/workloads/cortexflow/kustomization.yaml
+              yq -i '.helmCharts[0].valuesInline.images.ray = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid/kustomization.yaml
           fi
 
 
@@ -538,17 +538,17 @@ jobs:
   all_checks_passed:
     needs:
       - detect
-      - test_cortexflow
-      - bump-cortexflow-version
-      - test_cortexflow_ui_backend
-      - test_cortexflow_ui_frontend
+      - test_cortexgrid
+      - bump-cortexgrid-version
+      - test_cortexgrid_ui_backend
+      - test_cortexgrid_ui_frontend
       - test_jobs_control_plane
       - test_k8s_seed
       - build_arc_runner
-      - build_cortexflow_integration
-      - build_cortexflow_ui_backend
-      - build_cortexflow_ui_frontend
-      - build_cortexflow_ui_integration
+      - build_cortexgrid_integration
+      - build_cortexgrid_ui_backend
+      - build_cortexgrid_ui_frontend
+      - build_cortexgrid_ui_integration
       - build_jobs_control_plane
       - build_mlflow
       - build_ray

@@ -7,9 +7,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from cortexgrid.experiment import list_experiments, set_instance
-from cortexflow_ui.backend.main import app
-from cortexflow_ui.backend.streams import experiments_stream
-from cortexflow_ui.backend.streams.experiments_stream import Run
+from cortexgrid_ui.backend.main import app
+from cortexgrid_ui.backend.streams import experiments_stream
+from cortexgrid_ui.backend.streams.experiments_stream import Run
 
 from tests.fakes import (
     FakeArtifact,
@@ -27,38 +27,38 @@ def _patched_infra(
 ) -> ExitStack:
     """Patch every adapter to real infrastructure used by the request path."""
     stack = ExitStack()
-    stack.enter_context(patch("cortexflow.s3_util.get_s3_client", return_value=s3))
+    stack.enter_context(patch("cortexgrid.s3_util.get_s3_client", return_value=s3))
     stack.enter_context(
-        patch("cortexflow.s3_util.get_s3_bucket", return_value="test-bucket")
+        patch("cortexgrid.s3_util.get_s3_bucket", return_value="test-bucket")
     )
     stack.enter_context(
-        patch("cortexflow.experiment.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.experiment.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.experiment.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
-        patch("cortexflow.jobs.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.jobs.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.jobs.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.jobs.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.model_storage.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
         patch(
-            "cortexflow.ray_util.get_ray_job_submission_client",
+            "cortexgrid.ray_util.get_ray_job_submission_client",
             return_value=ray,
         )
     )
     stack.enter_context(patch("psycopg.connect", return_value=db))
     stack.enter_context(
         patch(
-            "cortexflow_ui.backend.models.notes.get_secret",
+            "cortexgrid_ui.backend.models.notes.get_secret",
             return_value="postgres://test",
         )
     )

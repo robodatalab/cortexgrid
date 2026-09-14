@@ -6,7 +6,7 @@ import { deploymentId } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
 // Public ingress hosts on the Tailscale network. Both are also configured in
-// k8s/charts/cortexflow/values.yaml (ray) and k8s/argo_deployments/base/monitoring.yaml
+// k8s/charts/cortexgrid/values.yaml (ray) and k8s/argo_deployments/base/monitoring.yaml
 // (grafana); keep these in sync if either host changes.
 const RAY_DASHBOARD_HOST = "ray.robodatalab.com";
 const GRAFANA_HOST = "grafana.robodatalab.com";

@@ -11,9 +11,9 @@ from cortexgrid.s3_util import download, upload, upload_dir
 
 class TestS3Client(unittest.TestCase):
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.os.path.getsize", return_value=1024)
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_upload_default_dest_path_is_basename(
         self, mock_client_fn: MagicMock, _getsize: MagicMock, _bucket: MagicMock
     ) -> None:
@@ -28,9 +28,9 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://canonical/data.parquet")
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.os.path.getsize", return_value=1024)
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_upload_with_explicit_dest_path(
         self, mock_client_fn: MagicMock, _getsize: MagicMock, _bucket: MagicMock
     ) -> None:
@@ -44,10 +44,10 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://canonical/app/run/output.parquet")
 
-    @patch("cortexflow.s3_util.get_secret", return_value="eu-west-2")
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.os.path.getsize", return_value=1024)
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_secret", return_value="eu-west-2")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.os.path.getsize", return_value=1024)
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_upload_creates_bucket_when_missing(
         self,
         mock_client_fn: MagicMock,
@@ -75,8 +75,8 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "s3://canonical/file.parquet")
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_upload_dir_at_bucket_root(
         self, mock_client_fn: MagicMock, _bucket: MagicMock
     ) -> None:
@@ -91,8 +91,8 @@ class TestS3Client(unittest.TestCase):
 
         self.assertEqual(result, ["s3://canonical/f.txt"])
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_upload_dir_with_dest_path(
         self, mock_client_fn: MagicMock, _bucket: MagicMock
     ) -> None:
@@ -112,8 +112,8 @@ class TestS3Client(unittest.TestCase):
         self.assertIn("s3://canonical/app/model/a.txt", result)
         self.assertIn("s3://canonical/app/model/sub/b.txt", result)
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_download_default_local_path(
         self, mock_client_fn: MagicMock, _bucket: MagicMock
     ) -> None:
@@ -127,8 +127,8 @@ class TestS3Client(unittest.TestCase):
         )
         self.assertEqual(result, "file.csv")
 
-    @patch("cortexflow.s3_util.get_s3_bucket", return_value="canonical")
-    @patch("cortexflow.s3_util.get_s3_client")
+    @patch("cortexgrid.s3_util.get_s3_bucket", return_value="canonical")
+    @patch("cortexgrid.s3_util.get_s3_client")
     def test_download_explicit_local_path(
         self, mock_client_fn: MagicMock, _bucket: MagicMock
     ) -> None:

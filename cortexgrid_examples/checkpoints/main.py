@@ -1,6 +1,6 @@
 """Checkpoint + retry — the job crashes on first run, succeeds on second.
 
-The remote job keeps an execution counter via cortexflow.checkpoint().
+The remote job keeps an execution counter via cortexgrid.checkpoint().
 First execution: saves counter=1 to checkpoint, then raises.
 Second execution (retry): resumes from checkpoint, sees counter=1, logs success.
 
@@ -59,7 +59,7 @@ def main():
         "\nFirst attempt failed as expected; re-submitting to resume from checkpoint."
     )
 
-    # Attempt 2 — cortexflow.resume() should return the saved checkpoint.
+    # Attempt 2 — cortexgrid.resume() should return the saved checkpoint.
     second_job = cortexgrid.remote(crashy_job)
     print(f"Submitted second job: {second_job}")
     second_status = _wait_for_terminal(exp.run_id, second_job)

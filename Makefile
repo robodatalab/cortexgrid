@@ -52,21 +52,21 @@ env:
 	uv run python scripts/refresh_env.py
 
 install-frontend:
-	@if [ ! -d cortexflow_ui/frontend/node_modules ]; then \
+	@if [ ! -d cortexgrid_ui/frontend/node_modules ]; then \
 		echo "Installing frontend dependencies..."; \
-		cd cortexflow_ui/frontend && npm install; \
+		cd cortexgrid_ui/frontend && npm install; \
 	fi
 
 dev: env install-frontend ## Start backend + frontend dev servers (Ctrl+C stops both)
 	@trap 'kill 0' EXIT; \
 	set -a; . ./.env; set +a; \
-	( cd cortexflow_ui/backend && uv run --group ui uvicorn main:app --reload --host 0.0.0.0 --port 8000 ) & \
-	( cd cortexflow_ui/frontend && npm run dev ) & \
+	( cd cortexgrid_ui/backend && uv run --group ui uvicorn main:app --reload --host 0.0.0.0 --port 8000 ) & \
+	( cd cortexgrid_ui/frontend && npm run dev ) & \
 	wait
 
 dev-frontend-against: install-frontend ## Start frontend dev server against a remote backend (BACKEND=http://host:port required)
 	@[ -n "$(BACKEND)" ] || { echo "Error: BACKEND=http://host:port required"; exit 1; }
-	cd cortexflow_ui/frontend && VITE_API_TARGET=$(BACKEND) npm run dev
+	cd cortexgrid_ui/frontend && VITE_API_TARGET=$(BACKEND) npm run dev
 
 help:
 	@echo ""

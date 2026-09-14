@@ -1,6 +1,6 @@
 """Model registry backed by MLflow Model Registry; weights stored directly in S3.
 
-Mapping cortexflow taxonomy <-> MLflow Registry:
+Mapping cortexgrid taxonomy <-> MLflow Registry:
     family + suffix     -> RegisteredModel.name = "<family>/<suffix>"
     run_name            -> ModelVersion.tags["run_name"]
     family, suffix      -> ModelVersion.tags["family"], ["suffix"]   (denormalized)
@@ -10,7 +10,7 @@ Mapping cortexflow taxonomy <-> MLflow Registry:
 
 storage.py is pure: it takes run_id/run_name as explicit args and never reads
 the active Experiment singleton. The facade that fills those in lives in
-cortexflow/__init__.py.
+cortexgrid/__init__.py.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from cortexgrid.model_serving import (
 
 # MLflow ModelVersion tag holding the registry lifecycle phase, and its
 # values. This is a separate lifecycle from serving (Ray Serve); see
-# cortexflow.model_serving for that vocabulary.
+# cortexgrid.model_serving for that vocabulary.
 _LIFECYCLE_TAG = "lifecycle"
 _PHASE_UPLOADING = "uploading"
 _PHASE_READY = "ready"
@@ -137,7 +137,7 @@ def save_model(
     """Upload a weights directory to S3 and register a new MLflow ModelVersion
     paired with the serve-app that fronts it.
 
-    cortexflow stores the weights as an opaque directory: it never inspects,
+    cortexgrid stores the weights as an opaque directory: it never inspects,
     serializes, or reconstructs their contents, so the on-disk format
     (HuggingFace `save_pretrained`, `torch.save`, ONNX, anything) is entirely
     the caller's concern. That directory boundary is the open-closed extension
@@ -188,7 +188,7 @@ def save_model(
 def load_model(family: str, suffix: str, run_name: str) -> Path:
     """Download a saved model's weights to a local directory and return its Path.
 
-    cortexflow moves an opaque directory of bytes and never interprets its
+    cortexgrid moves an opaque directory of bytes and never interprets its
     contents; the serve-app reconstructs the model from it however it likes
     (`from_pretrained`, `torch.load`, ...). The returned directory persists
     after this call - the caller (typically a serve-app loading weights at
@@ -222,7 +222,7 @@ def model_registry_status(
     and serve bundle finish uploading, `"upload_failed"` if the upload errored,
     or `"broken"` if an upload has stayed in progress past _UPLOAD_DEADLINE
     (the writer is presumed dead). Serving is a separate lifecycle; see
-    `cortexflow.model_serving.model_serving_status`.
+    `cortexgrid.model_serving.model_serving_status`.
     """
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     versions = client.search_model_versions(

@@ -16,14 +16,14 @@ from dataclasses import dataclass
 
 from cortexgrid.infra import get_mlflow_tracking_uri
 from cortexgrid.ray_util import (
-    get_ray_job_id_for_cortexflow_job,
+    get_ray_job_id_for_cortexgrid_job,
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
 from mlflow.tracking import MlflowClient
 
-from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ def _build_run(
     jobs = []
     for job_id in job_ids:
         try:
-            ray_job_id = get_ray_job_id_for_cortexflow_job(
+            ray_job_id = get_ray_job_id_for_cortexgrid_job(
                 run_id, job_id, all_ray_submission_ids
             )
             status = get_ray_job_status(ray_job_id).value

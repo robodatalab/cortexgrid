@@ -20,7 +20,7 @@ from cortexgrid.checkpoint import (
     _checkpoint_prefix,
     checkpoint,
     resume,
-    set_cortexflow_job_id,
+    set_cortexgrid_job_id,
 )
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 
@@ -89,12 +89,12 @@ class TestCheckpointPrefix(unittest.TestCase):
         self.fake_mlflow = FakeMLflow()
         self.fake_s3 = FakeS3()
         patchers = [
-            patch("cortexflow.checkpoint.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.checkpoint.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.checkpoint.get_mlflow_tracking_uri",
+                "cortexgrid.checkpoint.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
-            patch("cortexflow.checkpoint.s3_util", self.fake_s3),
+            patch("cortexgrid.checkpoint.s3_util", self.fake_s3),
         ]
         for p in patchers:
             p.start()
@@ -102,13 +102,13 @@ class TestCheckpointPrefix(unittest.TestCase):
 
     def tearDown(self) -> None:
         clear_instance()
-        set_cortexflow_job_id("")
+        set_cortexgrid_job_id("")
 
     def test_prefix_is_global_when_no_job_id(self) -> None:
         self.assertEqual(_checkpoint_prefix(), "checkpoint/global")
 
     def test_prefix_includes_job_id_when_set(self) -> None:
-        set_cortexflow_job_id("job-99")
+        set_cortexgrid_job_id("job-99")
         self.assertEqual(_checkpoint_prefix(), "checkpoint/job-99")
 
     def test_persist_uploads_manifest_and_attributes(self) -> None:

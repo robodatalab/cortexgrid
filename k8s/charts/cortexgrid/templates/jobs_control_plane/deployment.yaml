@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: jobs-control-plane
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: jobs-control-plane
 spec:
   replicas: 1
@@ -26,15 +26,15 @@ spec:
         - name: jobs-control-plane
           image: {{ .Values.images.jobsControlPlane }}
           env:
-            - name: CORTEXFLOW_POLL_INTERVAL
+            - name: CORTEXGRID_POLL_INTERVAL
               value: "5"
             # Cap parallel job-submission subprocesses; sharing the head EC2 with
-            # argocd / mlflow / cortexflow-ui means burst CPU is the constrained
+            # argocd / mlflow / cortexgrid-ui means burst CPU is the constrained
             # resource. Bump higher only after measuring head CPU under load.
-            - name: CORTEXFLOW_STARTER_WORKERS
+            - name: CORTEXGRID_STARTER_WORKERS
               value: "2"
           envFrom:
-            # SM_* for cortexflow.secrets, S3_* for cortexflow.s3_util.
+            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: sm-creds
             - secretRef:

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from cortexflow_ui.backend.main import app
+from cortexgrid_ui.backend.main import app
 
 client = TestClient(app)
 

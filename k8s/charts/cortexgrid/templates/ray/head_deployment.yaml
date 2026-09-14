@@ -5,7 +5,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-options: Replace=true
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: ray-head
 spec:
   replicas: 1
@@ -72,8 +72,8 @@ spec:
           envFrom:
             - secretRef:
                 name: ray-env
-            # SM_* for cortexflow.secrets (used by serve-app builders and any
-            # user code the head invokes). S3_* for cortexflow.s3_util.
+            # SM_* for cortexgrid.secrets (used by serve-app builders and any
+            # user code the head invokes). S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: sm-creds
             - secretRef:

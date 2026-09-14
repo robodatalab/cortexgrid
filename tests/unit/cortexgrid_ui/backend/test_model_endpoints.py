@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from cortexflow_ui.backend.main import app
-from cortexflow_ui.backend.streams import models_stream
-from cortexflow_ui.backend.streams.models_stream import Model
+from cortexgrid_ui.backend.main import app
+from cortexgrid_ui.backend.streams import models_stream
+from cortexgrid_ui.backend.streams.models_stream import Model
 
 from tests.fakes import (
     FakeMlflowClient,
@@ -21,24 +21,24 @@ from tests.fakes import (
 
 def _patched_infra(s3: FakeS3, mlflow: FakeMlflowClient) -> ExitStack:
     stack = ExitStack()
-    stack.enter_context(patch("cortexflow.s3_util.get_s3_client", return_value=s3))
+    stack.enter_context(patch("cortexgrid.s3_util.get_s3_client", return_value=s3))
     stack.enter_context(
-        patch("cortexflow.s3_util.get_s3_bucket", return_value="test-bucket")
+        patch("cortexgrid.s3_util.get_s3_bucket", return_value="test-bucket")
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.model_storage.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
-        patch("cortexflow.model_storage.get_s3_bucket", return_value="test-bucket")
+        patch("cortexgrid.model_storage.get_s3_bucket", return_value="test-bucket")
     )
     stack.enter_context(
-        patch("cortexflow.experiment.MlflowClient", return_value=mlflow)
+        patch("cortexgrid.experiment.MlflowClient", return_value=mlflow)
     )
     stack.enter_context(
-        patch("cortexflow.experiment.get_mlflow_tracking_uri", return_value="")
+        patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
     )
     return stack
 

@@ -1,6 +1,6 @@
 // Display helpers for the two model lifecycle vocabularies the backend reports:
-// the registry phase (cortexflow.model_storage.SavedModel.phase) and the serving
-// phase (cortexflow.model_serving.ServingStatus / Deployment.phase). Kept in one
+// the registry phase (cortexgrid.model_storage.SavedModel.phase) and the serving
+// phase (cortexgrid.model_serving.ServingStatus / Deployment.phase). Kept in one
 // place so the trees and the detail cards render each phase identically.
 
 export type DotTier = "ok" | "warn" | "error";

@@ -8,12 +8,12 @@ multiplexes this stream with the per-run notes streams.
 
 from __future__ import annotations
 
-from cortexflow_ui.backend.models.notes import (
+from cortexgrid_ui.backend.models.notes import (
     ExperimentNote,
     list_experiment_notes,
 )
-from cortexflow_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import NOTES_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 
 ExperimentName = str

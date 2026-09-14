@@ -1,14 +1,14 @@
 [project]
-name = "cortexflow-example-checkpoints"
+name = "cortexgrid-example-checkpoints"
 version = "0.1.0"
-description = "Example: checkpoint and retry with cortexflow"
+description = "Example: checkpoint and retry with cortexgrid"
 requires-python = ">=3.11"
 dependencies = [
-    "cortexflow[training]",
+    "cortexgrid[training]",
 ]
 
 [tool.uv.sources]
-cortexflow = { git = "https://github.com/robodatalab/robolab-infra.git" }
+cortexgrid = { git = "https://github.com/robodatalab/robolab-infra.git" }
 
 [build-system]
 requires = ["hatchling"]

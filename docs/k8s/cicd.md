@@ -26,24 +26,24 @@ One diagram per case. Every node is tagged with the phase it runs in:
 
 All image builds tag `ghcr.io/<owner>/<service>:<head-sha>` and skip if that tag is already in GHCR; transient failures (network / registry / runner flake) are retried; terminal failures (Dockerfile error) fail the PR.
 
-Mixtures (e.g. `cortexflow/` + `cortexflow_ui/frontend/`) are the union of matching lanes. Every case ends at the same convergence diagram at the bottom.
+Mixtures (e.g. `cortexgrid/` + `cortexgrid_ui/frontend/`) are the union of matching lanes. Every case ends at the same convergence diagram at the bottom.
 
-### Case 1 — `cortexflow/**` (the library)
+### Case 1 — `cortexgrid/**` (the library)
 
 ```mermaid
 flowchart TB
-    src["cortexflow/** changed"]
+    src["cortexgrid/** changed"]
 
     subgraph S1["Stage 1: PR push (on every push to PR branch)"]
         direction TB
-        T1["cortexflow-tests.yml"]
-        T2["cortexflow-ui-tests.yml :: backend"]
+        T1["cortexgrid-tests.yml"]
+        T2["cortexgrid-ui-tests.yml :: backend"]
         T3["jobs-control-plane-tests.yml"]
-        B1["build cortexflow-ui-backend image"]
+        B1["build cortexgrid-ui-backend image"]
         B2["build jobs-control-plane image"]
-        E1["set new cortexflow-ui-backend image in its deployment"]
+        E1["set new cortexgrid-ui-backend image in its deployment"]
         E2["set new jobs-control-plane image in its deployment"]
-        E3["bump cortexflow library patch version"]
+        E3["bump cortexgrid library patch version"]
         C["commit changes to PR branch"]
         T1 --> B1
         T2 --> B1
@@ -70,14 +70,14 @@ flowchart TB
     subgraph S3["Stage 3: Argo CD reconcile on main"]
         direction TB
         Sync["Argo re-resolves all Apps to new main HEAD"]
-        Roll_uib["cortexflow-ui App rolls a new backend pod"]
+        Roll_uib["cortexgrid-ui App rolls a new backend pod"]
         Roll_jcp["jobs-control-plane App rolls a new pod"]
-        Agg_cf["cortexflow aggregator: Synced+Healthy"]
+        Agg_cf["cortexgrid aggregator: Synced+Healthy"]
         Agg_ui["ui aggregator: Synced+Healthy"]
-        N_cf["fires cortexflow-stack-deployed (once per revision)"]
-        N_ui["fires cortexflow-ui-stack-deployed (once per revision)"]
-        IT_cf["cortexflow-integration-tests.yml runs"]
-        IT_uic["cortexflow-ui-integration-tests.yml runs"]
+        N_cf["fires cortexgrid-stack-deployed (once per revision)"]
+        N_ui["fires cortexgrid-ui-stack-deployed (once per revision)"]
+        IT_cf["cortexgrid-integration-tests.yml runs"]
+        IT_uic["cortexgrid-ui-integration-tests.yml runs"]
 
         Sync --> Roll_uib
         Sync --> Roll_jcp
@@ -93,29 +93,29 @@ flowchart TB
 ```
 
 ### Test it
-- input: any `.py` under `cortexflow/`
-- on PR: `test-cortexflow`, `test-cortexflow-ui-backend`, `test-jobs-control-plane`, `build-cortexflow-ui-backend`, `build-jobs-control-plane`, `bump`
-- after squash-merge in Argo: `cortexflow-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexflow-ui jobs-control-plane -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REV:.status.sync.revision,SYNCED_AT:.status.operationState.finishedAt'`)
-- after ~10 min in GitHub Actions: one `cortexflow integration tests` run and one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+- input: any `.py` under `cortexgrid/`
+- on PR: `test-cortexgrid`, `test-cortexgrid-ui-backend`, `test-jobs-control-plane`, `build-cortexgrid-ui-backend`, `build-jobs-control-plane`, `bump`
+- after squash-merge in Argo: `cortexgrid-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexgrid-ui jobs-control-plane -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REV:.status.sync.revision,SYNCED_AT:.status.operationState.finishedAt'`)
+- after ~10 min in GitHub Actions: one `cortexgrid integration tests` run and one `cortexgrid-ui integration tests` run (`gh run list --limit 5`)
 
-### Case 2 — `cortexflow_ui` (code, Dockerfile, or manifest)
+### Case 2 — `cortexgrid_ui` (code, Dockerfile, or manifest)
 
 ```mermaid
 flowchart TB
-    b["cortexflow_ui/backend/** code changed"]
-    f["cortexflow_ui/frontend/** code changed"]
-    db["k8s/docker/cortexflow_ui/backend/** Dockerfile changed"]
-    df["k8s/docker/cortexflow_ui/frontend/** Dockerfile changed"]
-    wl["k8s/workloads/cortexflow_ui/** manifest direct-edit"]
+    b["cortexgrid_ui/backend/** code changed"]
+    f["cortexgrid_ui/frontend/** code changed"]
+    db["k8s/docker/cortexgrid_ui/backend/** Dockerfile changed"]
+    df["k8s/docker/cortexgrid_ui/frontend/** Dockerfile changed"]
+    wl["k8s/workloads/cortexgrid_ui/** manifest direct-edit"]
 
     subgraph S1["Stage 1: PR push (only when a code or Dockerfile change needs rebuilding)"]
         direction TB
-        T1["cortexflow-ui-tests.yml :: backend"]
-        T2["cortexflow-ui-tests.yml :: frontend"]
-        B1["build cortexflow-ui-backend image"]
-        B2["build cortexflow-ui-frontend image"]
-        E1["set new cortexflow-ui-backend image in its deployment"]
-        E2["set new cortexflow-ui-frontend image in its deployment"]
+        T1["cortexgrid-ui-tests.yml :: backend"]
+        T2["cortexgrid-ui-tests.yml :: frontend"]
+        B1["build cortexgrid-ui-backend image"]
+        B2["build cortexgrid-ui-frontend image"]
+        E1["set new cortexgrid-ui-backend image in its deployment"]
+        E2["set new cortexgrid-ui-frontend image in its deployment"]
         C["bot commit changes to PR branch"]
         T1 --> B1
         T2 --> B2
@@ -139,10 +139,10 @@ flowchart TB
     subgraph S3["Stage 3: Argo CD reconcile on main"]
         direction TB
         Sync["Argo re-resolves all Apps to new main HEAD"]
-        Roll_ui["cortexflow-ui App rolls new backend and/or frontend pod"]
+        Roll_ui["cortexgrid-ui App rolls new backend and/or frontend pod"]
         Agg_ui["ui aggregator: Synced+Healthy"]
-        N_ui["fires cortexflow-ui-stack-deployed"]
-        IT_uic["cortexflow-ui-integration-tests.yml runs"]
+        N_ui["fires cortexgrid-ui-stack-deployed"]
+        IT_uic["cortexgrid-ui-integration-tests.yml runs"]
 
         Sync --> Roll_ui
         Roll_ui --> Agg_ui
@@ -153,10 +153,10 @@ flowchart TB
 ```
 
 ### Test it
-- input: any `.py` or `.ts` under `cortexflow_ui/`
-- on PR: `test-cortexflow-ui-backend` and/or `test-cortexflow-ui-frontend`, `build-cortexflow-ui-backend` and/or `build-cortexflow-ui-frontend`
-- after squash-merge in Argo: `cortexflow-ui` synced (`kubectl -n argocd get app cortexflow-ui`)
-- after ~10 min in GitHub Actions: one `cortexflow-ui integration tests` run; `cortexflow integration tests` does NOT run (`gh run list --limit 5`)
+- input: any `.py` or `.ts` under `cortexgrid_ui/`
+- on PR: `test-cortexgrid-ui-backend` and/or `test-cortexgrid-ui-frontend`, `build-cortexgrid-ui-backend` and/or `build-cortexgrid-ui-frontend`
+- after squash-merge in Argo: `cortexgrid-ui` synced (`kubectl -n argocd get app cortexgrid-ui`)
+- after ~10 min in GitHub Actions: one `cortexgrid-ui integration tests` run; `cortexgrid integration tests` does NOT run (`gh run list --limit 5`)
 
 ### Case 3 — `jobs_control_plane` (code, Dockerfile, or manifest)
 
@@ -190,13 +190,13 @@ flowchart TB
         direction TB
         Sync["Argo re-resolves all Apps to new main HEAD"]
         Roll_jcp["jobs-control-plane App rolls a new pod"]
-        Agg_cf["cortexflow aggregator: Synced+Healthy"]
-        Agg_ui["ui aggregator: Synced+Healthy (cortexflow child rolled)"]
-        N_cf["fires cortexflow-stack-deployed"]
-        N_ui["fires cortexflow-ui-stack-deployed"]
-        IT_cf["cortexflow-integration-tests.yml runs"]
-        IT_uic["cortexflow-ui-integration-tests.yml runs
-        (UI consumes from cortexflow stack via cortexflow.jobs; jcp behavior change affects UI)"]
+        Agg_cf["cortexgrid aggregator: Synced+Healthy"]
+        Agg_ui["ui aggregator: Synced+Healthy (cortexgrid child rolled)"]
+        N_cf["fires cortexgrid-stack-deployed"]
+        N_ui["fires cortexgrid-ui-stack-deployed"]
+        IT_cf["cortexgrid-integration-tests.yml runs"]
+        IT_uic["cortexgrid-ui-integration-tests.yml runs
+        (UI consumes from cortexgrid stack via cortexgrid.jobs; jcp behavior change affects UI)"]
 
         Sync --> Roll_jcp
         Roll_jcp --> Agg_cf
@@ -213,7 +213,7 @@ flowchart TB
 - input: any `.py` under `jobs_control_plane/`
 - on PR: `test-jobs-control-plane`, `build-jobs-control-plane`
 - after squash-merge in Argo: `jobs-control-plane` synced (`kubectl -n argocd get app jobs-control-plane`)
-- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+- after ~10 min in GitHub Actions: one `cortexgrid integration tests` run AND one `cortexgrid-ui integration tests` run (`gh run list --limit 5`)
 
 ### Case 4 — `mlflow` (Dockerfile or manifest)
 
@@ -243,12 +243,12 @@ flowchart TB
         direction TB
         Sync["Argo re-resolves all Apps to new main HEAD"]
         Roll_ml["mlflow App rolls a new pod"]
-        Agg_cf["cortexflow aggregator: Synced+Healthy"]
+        Agg_cf["cortexgrid aggregator: Synced+Healthy"]
         Agg_ui["ui aggregator: Synced+Healthy"]
-        N_cf["fires cortexflow-stack-deployed"]
-        N_ui["fires cortexflow-ui-stack-deployed"]
-        IT_cf["cortexflow-integration-tests.yml runs"]
-        IT_uic["cortexflow-ui-integration-tests.yml runs"]
+        N_cf["fires cortexgrid-stack-deployed"]
+        N_ui["fires cortexgrid-ui-stack-deployed"]
+        IT_cf["cortexgrid-integration-tests.yml runs"]
+        IT_uic["cortexgrid-ui-integration-tests.yml runs"]
 
         Sync --> Roll_ml
         Roll_ml --> Agg_cf
@@ -265,7 +265,7 @@ flowchart TB
 - input: edit `k8s/docker/mlflow/Dockerfile`
 - on PR: `build-mlflow`
 - after squash-merge in Argo: `mlflow` synced (`kubectl -n argocd get app mlflow`)
-- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+- after ~10 min in GitHub Actions: one `cortexgrid integration tests` run AND one `cortexgrid-ui integration tests` run (`gh run list --limit 5`)
 
 ### Case 5 — `ray` (Dockerfile or manifest)
 
@@ -295,12 +295,12 @@ flowchart TB
         direction TB
         Sync["Argo re-resolves all Apps to new main HEAD"]
         Roll_ray["ray App rolls a new pod"]
-        Agg_cf["cortexflow aggregator: Synced+Healthy"]
+        Agg_cf["cortexgrid aggregator: Synced+Healthy"]
         Agg_ui["ui aggregator: Synced+Healthy"]
-        N_cf["fires cortexflow-stack-deployed"]
-        N_ui["fires cortexflow-ui-stack-deployed"]
-        IT_cf["cortexflow-integration-tests.yml runs"]
-        IT_uic["cortexflow-ui-integration-tests.yml runs"]
+        N_cf["fires cortexgrid-stack-deployed"]
+        N_ui["fires cortexgrid-ui-stack-deployed"]
+        IT_cf["cortexgrid-integration-tests.yml runs"]
+        IT_uic["cortexgrid-ui-integration-tests.yml runs"]
 
         Sync --> Roll_ray
         Roll_ray --> Agg_cf
@@ -317,7 +317,7 @@ flowchart TB
 - input: edit `k8s/docker/ray/Dockerfile`
 - on PR: `build-ray-head`
 - after squash-merge in Argo: `ray` synced (`kubectl -n argocd get app ray`)
-- after ~10 min in GitHub Actions: one `cortexflow integration tests` run AND one `cortexflow-ui integration tests` run (`gh run list --limit 5`)
+- after ~10 min in GitHub Actions: one `cortexgrid integration tests` run AND one `cortexgrid-ui integration tests` run (`gh run list --limit 5`)
 
 ### Case 6 — `arc-runner` (Dockerfile or kustomization)
 

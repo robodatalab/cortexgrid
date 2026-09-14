@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: minio
   labels:
-    {{- include "cortexflow.labels" . | nindent 4 }}
+    {{- include "cortexgrid.labels" . | nindent 4 }}
     app: minio
 spec:
   replicas: 1

@@ -43,7 +43,7 @@ def main():
         print("\nJob completed. Check MLflow for both main_metric and job_metric.")
     else:
         # Ray-reported errors live in Ray logs, not on the lifecycle.
-        # Check the Ray dashboard or use cortexflow.get_ray_logs(ray_job_id).
+        # Check the Ray dashboard or use cortexgrid.get_ray_logs(ray_job_id).
         lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
         ray_job_id = lifecycle.get_ray_job_id()
         print(f"\nJob failed. ray_job_id={ray_job_id}")

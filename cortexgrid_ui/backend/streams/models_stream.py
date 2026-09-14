@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 from cortexgrid.model_storage import list_models
 
-from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 
 ModelId = str

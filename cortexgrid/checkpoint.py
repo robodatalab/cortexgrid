@@ -1,18 +1,18 @@
-"""Durable checkpointing for cortexflow jobs.
+"""Durable checkpointing for cortexgrid jobs.
 
 Save arbitrary state (primitives, torch tensors, state_dicts) via MLflow
 artifacts and resume from the latest checkpoint on retry.
 
 Usage (save)::
 
-    with cortexflow.checkpoint() as ckpt:
+    with cortexgrid.checkpoint() as ckpt:
         ckpt.epoch = epoch
         ckpt.global_step = step
         ckpt.save_training_state(model, optimizer, scheduler)
 
 Usage (resume)::
 
-    ckpt = cortexflow.resume()
+    ckpt = cortexgrid.resume()
     if ckpt:
         ckpt.restore_training_state(model, optimizer, scheduler)
         start_epoch = ckpt.epoch + 1
@@ -33,7 +33,7 @@ from cortexgrid import s3_util
 from cortexgrid.experiment import Experiment, get_mlflow_tracking_uri
 
 log = logging.getLogger(__name__)
-_CORTEXFLOW_JOB_ID: str | None = None
+_CORTEXGRID_JOB_ID: str | None = None
 
 
 class Checkpoint:
@@ -42,13 +42,13 @@ class Checkpoint:
     Assign any cloudpickle-compatible value to an attribute and it will be
     saved when the context manager exits::
 
-        with cortexflow.checkpoint() as ckpt:
+        with cortexgrid.checkpoint() as ckpt:
             ckpt.epoch = 5
             ckpt.model_state = model.state_dict()
 
-    Read values back after calling ``cortexflow.resume()``::
+    Read values back after calling ``cortexgrid.resume()``::
 
-        ckpt = cortexflow.resume()
+        ckpt = cortexgrid.resume()
         if ckpt:
             model.load_state_dict(ckpt.model_state)
     """
@@ -168,31 +168,31 @@ class Checkpoint:
         return cls(prefix, _data=data)
 
 
-def set_cortexflow_job_id(job_id: str) -> None:
-    global _CORTEXFLOW_JOB_ID
-    _CORTEXFLOW_JOB_ID = job_id
+def set_cortexgrid_job_id(job_id: str) -> None:
+    global _CORTEXGRID_JOB_ID
+    _CORTEXGRID_JOB_ID = job_id
 
 
-def get_cortexflow_job_id() -> str | None:
+def get_cortexgrid_job_id() -> str | None:
     """Return the current job ID, or None if not running inside a job."""
-    global _CORTEXFLOW_JOB_ID
-    return _CORTEXFLOW_JOB_ID
+    global _CORTEXGRID_JOB_ID
+    return _CORTEXGRID_JOB_ID
 
 
 def _checkpoint_prefix() -> str:
-    job_id = get_cortexflow_job_id() or "global"
+    job_id = get_cortexgrid_job_id() or "global"
     return f"checkpoint/{job_id}"
 
 
 def checkpoint() -> Checkpoint:
     """Create a checkpoint for the current job. Use as a context manager.
 
-    Returns a no-op checkpoint if not running inside a cortexflow job,
+    Returns a no-op checkpoint if not running inside a cortexgrid job,
     so callers don't need to guard with ``if`` checks.
 
     Example::
 
-        with cortexflow.checkpoint() as ckpt:
+        with cortexgrid.checkpoint() as ckpt:
             ckpt.epoch = epoch
             ckpt.save_training_state(model, optimizer, scheduler)
     """
@@ -203,12 +203,12 @@ def checkpoint() -> Checkpoint:
 def resume() -> Checkpoint | None:
     """Load the latest checkpoint for the current job, or None.
 
-    Returns None if not running inside a cortexflow job or if no
+    Returns None if not running inside a cortexgrid job or if no
     checkpoint exists.
 
     Example::
 
-        ckpt = cortexflow.resume()
+        ckpt = cortexgrid.resume()
         if ckpt:
             ckpt.restore_training_state(model, optimizer, scheduler)
             start_epoch = ckpt.epoch + 1

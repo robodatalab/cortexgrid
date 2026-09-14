@@ -606,7 +606,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cortexflow"
+name = "cortexgrid"
 version = "0.2.85"
 source = { editable = "." }
 dependencies = [

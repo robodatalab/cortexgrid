@@ -19,7 +19,7 @@ from cortexgrid.experiment import Experiment
 from cortexgrid.jobs import JobLifecycle, LifecycleEvent, Payload
 from cortexgrid.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
-    _match_ray_jobs_to_cortexflow_jobs,
+    _match_ray_jobs_to_cortexgrid_jobs,
     _record_state,
     _submit_job_worker,
     poll_once,
@@ -126,10 +126,10 @@ class FakeS3:
         return local_path
 
 
-class TestMatchRayJobsToCortexflowJobs(unittest.TestCase):
-    """Exhaustive tests for ``_match_ray_jobs_to_cortexflow_jobs``.
+class TestMatchRayJobsToCortexgridJobs(unittest.TestCase):
+    """Exhaustive tests for ``_match_ray_jobs_to_cortexgrid_jobs``.
 
-    The match function takes the current set of cortexflow jobs and the
+    The match function takes the current set of cortexgrid jobs and the
     current set of Ray submission ids (queried internally) and returns a
     list of ``(cjob, latest_ray_submission_id_or_None)`` pairs.
     """
@@ -225,7 +225,7 @@ class TestMatchRayJobsToCortexflowJobs(unittest.TestCase):
             "jobs_control_plane.server.list_ray_jobs_with_submission_id",
             return_value=ray_submission_ids,
         ):
-            pairs = _match_ray_jobs_to_cortexflow_jobs(lifecycles)
+            pairs = _match_ray_jobs_to_cortexgrid_jobs(lifecycles)
         actual = [(lc.run_id, lc.job_id, sid) for lc, sid in pairs]
         self.assertEqual(actual, expected)
 
@@ -234,7 +234,7 @@ class TestPollOnce(unittest.TestCase):
     """Tests for ``poll_once`` covering the cjob × ray_state action matrix.
 
     The test rig patches the four boundary calls ``poll_once`` makes into
-    cortexflow (``list_experiments``, ``list_experiment_run_jobs``,
+    cortexgrid (``list_experiments``, ``list_experiment_run_jobs``,
     ``list_ray_jobs_with_submission_id``, ``get_ray_job_status``) and the
     one outbound side effect (``stop_ray_job``). The executor is a
     MagicMock whose ``submit`` records ``(run_id, job_id, attempt)``.
@@ -289,7 +289,7 @@ class TestPollOnce(unittest.TestCase):
                 "jobs_control_plane.server.stop_ray_job",
                 side_effect=self._stopped.append,
             ),
-            patch("cortexflow.jobs.JobLifecycle.save_to_mlflow"),
+            patch("cortexgrid.jobs.JobLifecycle.save_to_mlflow"),
         ]
         for p in patchers:
             p.start()
@@ -518,12 +518,12 @@ class TestSubmitJobWorker(unittest.TestCase):
             self.submitted.append(kwargs)
 
         patchers = [
-            patch("cortexflow.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
             patch(
-                "cortexflow.jobs.get_mlflow_tracking_uri",
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
                 return_value="http://test:5000",
             ),
-            patch("cortexflow.jobs.s3_util", self.fake_s3),
+            patch("cortexgrid.jobs.s3_util", self.fake_s3),
             patch(
                 "jobs_control_plane.server.submit_ray_job",
                 side_effect=_submit_ray_job,
@@ -610,7 +610,7 @@ class TestRecordState(unittest.TestCase):
 
     def setUp(self) -> None:
         patchers = [
-            patch("cortexflow.jobs.JobLifecycle.save_to_mlflow"),
+            patch("cortexgrid.jobs.JobLifecycle.save_to_mlflow"),
             patch("jobs_control_plane.server.get_ray_job_status"),
             patch("jobs_control_plane.server.get_ray_job_attempt"),
         ]

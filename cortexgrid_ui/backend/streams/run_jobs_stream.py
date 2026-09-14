@@ -15,8 +15,8 @@ from cortexgrid.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
-from cortexflow_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
-from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
+from cortexgrid_ui.backend.streams.config import RUN_JOBS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 RunId = str
 JobId = str

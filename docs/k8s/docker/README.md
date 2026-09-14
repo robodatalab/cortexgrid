@@ -24,6 +24,6 @@ Pushed by [mlflow.yml](../../../.github/workflows/mlflow.yml).
 
 ### jobs-control-plane — [jobs_control_plane/Dockerfile](../../../k8s/docker/jobs_control_plane/Dockerfile)
 
-Base: `python:3.11-slim` + `uv`. Builds the `jobs_control_plane` package from the repo (depends on `cortexflow`). Entrypoint runs the polling server that submits MLflow runs to Ray. Used by [../argo_deployments/jobs_control_plane/](../../../k8s/argo_deployments/aws/jobs_control_plane/).
+Base: `python:3.11-slim` + `uv`. Builds the `jobs_control_plane` package from the repo (depends on `cortexgrid`). Entrypoint runs the polling server that submits MLflow runs to Ray. Used by [../argo_deployments/jobs_control_plane/](../../../k8s/argo_deployments/aws/jobs_control_plane/).
 
 Pushed by [jobs-control-plane.yml](../../../.github/workflows/jobs-control-plane.yml).

@@ -1,25 +1,25 @@
-name: on_post_merge_cortexflow_ui
+name: on_post_merge_cortexgrid_ui
 
 on:
     push:
         branches: [main]
         paths:
-            - "k8s/workloads/cortexflow_integration_tests/job.yaml"
-            - "k8s/workloads/cortexflow/kustomization.yaml"
-            - "k8s/workloads/cortexflow_ui/kustomization.yaml"
-            - "k8s/workloads/cortexflow_ui_integration_tests/job.yaml"
+            - "k8s/workloads/cortexgrid_integration_tests/job.yaml"
+            - "k8s/workloads/cortexgrid/kustomization.yaml"
+            - "k8s/workloads/cortexgrid_ui/kustomization.yaml"
+            - "k8s/workloads/cortexgrid_ui_integration_tests/job.yaml"
             - "k8s/workloads/arc_runner_set/**"
-            - ".github/workflows/on_post_merge_cortexflow_ui.yaml"
+            - ".github/workflows/on_post_merge_cortexgrid_ui.yaml"
 
 concurrency:
-    group: cortexflow-ui-integration
+    group: cortexgrid-ui-integration
     cancel-in-progress: false
 
 permissions:
     contents: write
 
 jobs:
-    wait_for_cortexflow_deployment:
+    wait_for_cortexgrid_deployment:
         runs-on: arc-runners
         steps:
             - uses: actions/checkout@v4
@@ -27,17 +27,17 @@ jobs:
                   ref: main
                   fetch-depth: 0
             - run: |
-                  kubectl annotate -n argocd app cortexflow argocd.argoproj.io/refresh=normal --overwrite
+                  kubectl annotate -n argocd app cortexgrid argocd.argoproj.io/refresh=normal --overwrite
                   deadline=$(($(date +%s) + 600))
                   until git merge-base --is-ancestor "$GITHUB_SHA" \
-                        "$(kubectl get -n argocd app/cortexflow -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
+                        "$(kubectl get -n argocd app/cortexgrid -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
                       [ $(date +%s) -ge $deadline ] && { echo "timed out waiting for argo to deploy $GITHUB_SHA or a descendant"; exit 1; }
                       sleep 5
                   done
-                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
-                  kubectl wait -n argocd app/cortexflow --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
+                  kubectl wait -n argocd app/cortexgrid --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
+                  kubectl wait -n argocd app/cortexgrid --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
 
-    wait_for_cortexflow_ui_deployment:
+    wait_for_cortexgrid_ui_deployment:
         runs-on: arc-runners
         steps:
             - uses: actions/checkout@v4
@@ -45,33 +45,33 @@ jobs:
                   ref: main
                   fetch-depth: 0
             - run: |
-                  kubectl annotate -n argocd app cortexflow-ui argocd.argoproj.io/refresh=normal --overwrite
+                  kubectl annotate -n argocd app cortexgrid-ui argocd.argoproj.io/refresh=normal --overwrite
                   deadline=$(($(date +%s) + 600))
                   until git merge-base --is-ancestor "$GITHUB_SHA" \
-                        "$(kubectl get -n argocd app/cortexflow-ui -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
+                        "$(kubectl get -n argocd app/cortexgrid-ui -o jsonpath='{.status.sync.revision}')" 2>/dev/null; do
                       [ $(date +%s) -ge $deadline ] && { echo "timed out waiting for argo to deploy $GITHUB_SHA or a descendant"; exit 1; }
                       sleep 5
                   done
-                  kubectl wait -n argocd app/cortexflow-ui --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
-                  kubectl wait -n argocd app/cortexflow-ui --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
+                  kubectl wait -n argocd app/cortexgrid-ui --for=jsonpath='{.status.sync.status}'=Synced --timeout=600s
+                  kubectl wait -n argocd app/cortexgrid-ui --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
 
-    test_cortexflow_ui_integration:
+    test_cortexgrid_ui_integration:
         needs:
-            [wait_for_cortexflow_deployment, wait_for_cortexflow_ui_deployment]
+            [wait_for_cortexgrid_deployment, wait_for_cortexgrid_ui_deployment]
         runs-on: arc-runners
         steps:
             - uses: actions/checkout@v4
             - run: |
-                  trap 'kubectl delete -n cortexflow job/cortexflow-ui-integration-tests --ignore-not-found --wait=false' EXIT
-                  kubectl delete -n cortexflow job/cortexflow-ui-integration-tests --ignore-not-found --wait=true
-                  kubectl apply -f k8s/workloads/cortexflow_ui_integration_tests/job.yaml
-                  until kubectl get pod -n cortexflow -l job-name=cortexflow-ui-integration-tests --no-headers 2>/dev/null | grep -q .; do sleep 1; done
-                  kubectl wait -n cortexflow --for=condition=ready pod -l job-name=cortexflow-ui-integration-tests --timeout=600s
-                  kubectl logs -n cortexflow -f job/cortexflow-ui-integration-tests &
-                  kubectl wait -n cortexflow --for=condition=complete --timeout=15m job/cortexflow-ui-integration-tests
+                  trap 'kubectl delete -n cortexgrid job/cortexgrid-ui-integration-tests --ignore-not-found --wait=false' EXIT
+                  kubectl delete -n cortexgrid job/cortexgrid-ui-integration-tests --ignore-not-found --wait=true
+                  kubectl apply -f k8s/workloads/cortexgrid_ui_integration_tests/job.yaml
+                  until kubectl get pod -n cortexgrid -l job-name=cortexgrid-ui-integration-tests --no-headers 2>/dev/null | grep -q .; do sleep 1; done
+                  kubectl wait -n cortexgrid --for=condition=ready pod -l job-name=cortexgrid-ui-integration-tests --timeout=600s
+                  kubectl logs -n cortexgrid -f job/cortexgrid-ui-integration-tests &
+                  kubectl wait -n cortexgrid --for=condition=complete --timeout=15m job/cortexgrid-ui-integration-tests
 
     report:
-        needs: test_cortexflow_ui_integration
+        needs: test_cortexgrid_ui_integration
         if: always()
         runs-on: ubuntu-latest
         concurrency:
@@ -82,7 +82,7 @@ jobs:
               with:
                   ref: main
             - env:
-                  RESULT: ${{ needs.test_cortexflow_ui_integration.result }}
+                  RESULT: ${{ needs.test_cortexgrid_ui_integration.result }}
               run: |
                   if [ "$RESULT" = "skipped" ] || [ "$RESULT" = "cancelled" ]; then
                       exit 0
@@ -95,7 +95,7 @@ jobs:
                   git config user.name  "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git pull --rebase origin main
-                  sed -i -E "s|<!--s:test_cortexflow_ui_integration-->[^<]*<!--/s-->|<!--s:test_cortexflow_ui_integration-->${msg}<!--/s-->|" README.md
+                  sed -i -E "s|<!--s:test_cortexgrid_ui_integration-->[^<]*<!--/s-->|<!--s:test_cortexgrid_ui_integration-->${msg}<!--/s-->|" README.md
                   git add README.md
                   if git diff --cached --quiet; then
                       exit 0
