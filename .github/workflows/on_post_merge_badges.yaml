@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   promote:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     concurrency:
       group: badges-push
       cancel-in-progress: false

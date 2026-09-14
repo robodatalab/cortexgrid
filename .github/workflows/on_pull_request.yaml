@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   detect:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       changed_arc_runner: ${{steps.compute_dependency_fanout.outputs.changed_arc_runner}}
       changed_cortexflow: ${{steps.compute_dependency_fanout.outputs.changed_cortexflow}}
@@ -97,7 +97,7 @@ jobs:
   test_cortexflow:
     needs: detect
     if: needs.detect.outputs.changed_cortexflow == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -107,7 +107,7 @@ jobs:
 
   bump-cortexflow-version:
     needs: test_cortexflow
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -134,7 +134,7 @@ jobs:
   test_cortexflow_ui_backend:
     needs: detect
     if: needs.detect.outputs.changed_cortexflow_ui_backend == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -148,7 +148,7 @@ jobs:
   test_cortexflow_ui_frontend:
     needs: detect
     if: needs.detect.outputs.changed_cortexflow_ui_frontend == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -168,7 +168,7 @@ jobs:
   test_jobs_control_plane:
     needs: detect
     if: needs.detect.outputs.changed_jobs_control_plane == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -179,7 +179,7 @@ jobs:
   test_k8s_seed:
     needs: detect
     if: needs.detect.outputs.changed_k8s_seed == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -190,7 +190,7 @@ jobs:
   build_arc_runner:
     needs: detect
     if: needs.detect.outputs.changed_arc_runner == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -226,7 +226,7 @@ jobs:
   build_cortexflow_integration:
     needs: detect
     if: needs.detect.outputs.changed_cortexflow_integration == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -261,7 +261,7 @@ jobs:
 
   build_cortexflow_ui_backend:
     needs: test_cortexflow_ui_backend
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -296,7 +296,7 @@ jobs:
 
   build_cortexflow_ui_frontend:
     needs: test_cortexflow_ui_frontend
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -332,7 +332,7 @@ jobs:
   build_cortexflow_ui_integration:
     needs: detect
     if: needs.detect.outputs.changed_cortexflow_ui_integration == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -367,7 +367,7 @@ jobs:
 
   build_jobs_control_plane:
     needs: test_jobs_control_plane
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -403,7 +403,7 @@ jobs:
   build_mlflow:
     needs: detect
     if: needs.detect.outputs.changed_mlflow == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -439,7 +439,7 @@ jobs:
   build_ray:
     needs: detect
     if: needs.detect.outputs.changed_ray == 'true'
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.t.outputs.value }}
     env:
@@ -485,7 +485,7 @@ jobs:
         build_ray,
       ]
     if: ${{ always() && contains(needs.*.result, 'success') }}
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     env:
       OWNER: ${{ github.repository_owner }}
     steps:
@@ -554,7 +554,7 @@ jobs:
       - build_ray
       - update_image_tags
     if: always()
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     steps:
       - name: Verify no upstream failures
         run: |

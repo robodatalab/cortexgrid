@@ -73,7 +73,7 @@ jobs:
     report:
         needs: test_cortexflow_ui_integration
         if: always()
-        runs-on: arc-runners
+        runs-on: ubuntu-latest
         concurrency:
             group: badges-push
             cancel-in-progress: false

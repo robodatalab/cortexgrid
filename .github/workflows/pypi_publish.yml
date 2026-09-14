@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
@@ -27,7 +27,7 @@ jobs:
 
   publish:
     needs: build
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     environment:
       name: pypi
     permissions:
