@@ -9,7 +9,7 @@ keyed by `<family>/<suffix>/<run_name>` so the UI can join them against
 
 from __future__ import annotations
 
-from cortexflow.model_serving import Deployment, list_deployed_models
+from cortexgrid.model_serving import Deployment, list_deployed_models
 
 from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cortexflow.secrets import get_secret
+from cortexgrid.secrets import get_secret
 from cortexflow_ui.backend.streams.experiments_stream import (
     resolve_run_id,
     resolve_run_name,

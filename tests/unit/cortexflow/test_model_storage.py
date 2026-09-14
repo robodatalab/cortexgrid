@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 from mlflow.exceptions import MlflowException
 
-from cortexflow.model_serving import BundleMetadata
-from cortexflow.model_storage import (
+from cortexgrid.model_serving import BundleMetadata
+from cortexgrid.model_storage import (
     delete_model,
     delete_models_for_run,
     list_models,

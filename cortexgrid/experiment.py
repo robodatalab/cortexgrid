@@ -4,11 +4,11 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from cortexflow import s3_util
-from cortexflow.infra import get_mlflow_tracking_uri
-from cortexflow.jobs import stop_experiment_run_jobs
-from cortexflow.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
-from cortexflow.model_storage import delete_models_for_run
+from cortexgrid import s3_util
+from cortexgrid.infra import get_mlflow_tracking_uri
+from cortexgrid.jobs import stop_experiment_run_jobs
+from cortexgrid.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
+from cortexgrid.model_storage import delete_models_for_run
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 

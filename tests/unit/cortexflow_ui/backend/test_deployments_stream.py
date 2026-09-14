@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from cortexflow.model_serving import Deployment
+from cortexgrid.model_serving import Deployment
 
 from cortexflow_ui.backend.streams import deployments_stream
 

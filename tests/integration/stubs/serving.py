@@ -22,7 +22,7 @@ import requests
 from fastapi import FastAPI
 from ray import serve
 
-import cortexflow
+import cortexgrid
 
 
 _CONSTANT_FILE = "weights.json"
@@ -54,7 +54,7 @@ class AddConstantServeApp:
     num_replicas = 1
 
     def __init__(self, family: str, suffix: str, run_name: str) -> None:
-        self._constant = read_constant(cortexflow.load_model(family, suffix, run_name))
+        self._constant = read_constant(cortexgrid.load_model(family, suffix, run_name))
 
     @_app.post("/add")
     async def add(self, body: dict) -> dict:
@@ -69,7 +69,7 @@ def contact_deployment(
     Lives at module level so `cortexflow.remote()` can ship it to a Ray worker.
     Builds its own HTTP client against the Deployment URL - cortexflow no longer
     provides an inference proxy."""
-    deployed = cortexflow.deploy_model(family, suffix, run_name)
+    deployed = cortexgrid.deploy_model(family, suffix, run_name)
     response = requests.post(f"{deployed.url}/add", json={"x": x}, timeout=60)
     response.raise_for_status()
     result = response.json()["result"]

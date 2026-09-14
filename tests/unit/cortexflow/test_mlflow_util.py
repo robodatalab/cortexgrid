@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.experiment import Experiment, clear_instance, list_experiments, set_instance
-from cortexflow.mlflow_util import (
+from cortexgrid.experiment import Experiment, clear_instance, list_experiments, set_instance
+from cortexgrid.mlflow_util import (
     log_metric,
     log_metrics,
     log_params,

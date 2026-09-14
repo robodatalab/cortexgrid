@@ -27,15 +27,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from cortexflow.checkpoint import checkpoint, resume
-from cortexflow.experiment import (
+from cortexgrid.checkpoint import checkpoint, resume
+from cortexgrid.experiment import (
     Experiment,
     delete_experiment,
     delete_run,
     list_experiments,
 )
-from cortexflow.infra import get_ray_job_server_uri
-from cortexflow.jobs import (
+from cortexgrid.infra import get_ray_job_server_uri
+from cortexgrid.jobs import (
     schedule_remote_job,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
@@ -43,13 +43,13 @@ from cortexflow.jobs import (
     LifecycleEvent,
     Payload,
 )
-from cortexflow.secrets import (
+from cortexgrid.secrets import (
     delete_secret,
     get_secret,
     list_secrets,
     set_secret,
 )
-from cortexflow.mlflow_util import (
+from cortexgrid.mlflow_util import (
     log_metric,
     log_metrics,
     log_params,
@@ -60,7 +60,7 @@ from cortexflow.mlflow_util import (
     list_run_params,
     list_run_artifacts,
 )
-from cortexflow.ray_util import (
+from cortexgrid.ray_util import (
     get_ray_status,
     get_ray_logs,
     get_ray_job_url,
@@ -72,16 +72,16 @@ from cortexflow.ray_util import (
     get_ray_job_attempt,
     JobStatus,
 )
-from cortexflow.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
-from cortexflow.model_storage import (
+from cortexgrid.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
+from cortexgrid.model_storage import (
     SavedModel,
     delete_model,
     list_models,
     load_model,
     model_registry_status,
 )
-from cortexflow.model_storage import save_model as _save_model_storage
-from cortexflow.model_serving import (
+from cortexgrid.model_storage import save_model as _save_model_storage
+from cortexgrid.model_serving import (
     Deployment,
     ServingStatus,
     deploy_model,

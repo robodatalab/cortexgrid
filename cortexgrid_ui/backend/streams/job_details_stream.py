@@ -12,11 +12,11 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from cortexflow import s3_util
-from cortexflow.experiment import get_mlflow_tracking_uri
-from cortexflow.jobs import JobLifecycle
-from cortexflow.mlflow_util import list_run_artifacts
-from cortexflow.ray_util import get_ray_job_status, get_ray_job_url
+from cortexgrid import s3_util
+from cortexgrid.experiment import get_mlflow_tracking_uri
+from cortexgrid.jobs import JobLifecycle
+from cortexgrid.mlflow_util import list_run_artifacts
+from cortexgrid.ray_util import get_ray_job_status, get_ray_job_url
 from cortexflow_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 from mlflow.tracking import MlflowClient

@@ -15,14 +15,14 @@ try:
 except ImportError:
     HAS_TORCH = False
 
-from cortexflow.checkpoint import (
+from cortexgrid.checkpoint import (
     Checkpoint,
     _checkpoint_prefix,
     checkpoint,
     resume,
     set_cortexflow_job_id,
 )
-from cortexflow.experiment import Experiment, clear_instance, set_instance
+from cortexgrid.experiment import Experiment, clear_instance, set_instance
 
 
 def _make_experiment() -> Experiment:

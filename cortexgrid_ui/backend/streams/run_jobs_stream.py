@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cortexflow.jobs import list_experiment_run_jobs
-from cortexflow.ray_util import (
+from cortexgrid.jobs import list_experiment_run_jobs
+from cortexgrid.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )

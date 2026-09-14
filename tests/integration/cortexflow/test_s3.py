@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import cortexflow
+import cortexgrid
 from parameterized import parameterized  # type: ignore
 
 from tests.integration.cortexflow._ray_run import (
@@ -22,8 +22,8 @@ def _s3_roundtrip(prefix: str, payload: bytes) -> None:
         src = Path(tmp) / "src.bin"
         dst = Path(tmp) / "dst.bin"
         src.write_bytes(payload)
-        cortexflow.upload(str(src), f"{prefix}/file.bin")
-        cortexflow.download(f"{prefix}/file.bin", str(dst))
+        cortexgrid.upload(str(src), f"{prefix}/file.bin")
+        cortexgrid.download(f"{prefix}/file.bin", str(dst))
         if dst.read_bytes() != payload:
             raise RuntimeError("s3 roundtrip mismatch")
 
@@ -32,9 +32,9 @@ def _s3_dir_upload(prefix: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         (Path(tmp) / "a.txt").write_text("A")
         (Path(tmp) / "b.txt").write_text("B")
-        cortexflow.upload_dir(tmp, prefix)
-        a_back = cortexflow.download(f"{prefix}/a.txt", str(Path(tmp) / "a-back.txt"))
-        b_back = cortexflow.download(f"{prefix}/b.txt", str(Path(tmp) / "b-back.txt"))
+        cortexgrid.upload_dir(tmp, prefix)
+        a_back = cortexgrid.download(f"{prefix}/a.txt", str(Path(tmp) / "a-back.txt"))
+        b_back = cortexgrid.download(f"{prefix}/b.txt", str(Path(tmp) / "b-back.txt"))
         if Path(a_back).read_text() != "A":
             raise RuntimeError("a content wrong")
         if Path(b_back).read_text() != "B":
@@ -43,21 +43,21 @@ def _s3_dir_upload(prefix: str) -> None:
 
 class TestS3(unittest.TestCase):
     def setUp(self) -> None:
-        cortexflow.Experiment.close()
-        self.addCleanup(cortexflow.Experiment.close)
+        cortexgrid.Experiment.close()
+        self.addCleanup(cortexgrid.Experiment.close)
 
     @parameterized.expand(RUN_MODES)
     def test_upload_download_roundtrip(self, mode) -> None:
         name = experiment_name(self)
-        self.addCleanup(cortexflow.delete_prefix, name)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_prefix, name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        cortexgrid.Experiment.init(name)
         run(mode=mode, log=log, fn=_s3_roundtrip, prefix=name, payload=b"hello")
 
     @parameterized.expand(RUN_MODES)
     def test_upload_dir(self, mode) -> None:
         name = experiment_name(self)
-        self.addCleanup(cortexflow.delete_prefix, name)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_prefix, name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        cortexgrid.Experiment.init(name)
         run(mode=mode, log=log, fn=_s3_dir_upload, prefix=name)

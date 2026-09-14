@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cortexflow.model_storage import list_models
+from cortexgrid.model_storage import list_models
 
 from cortexflow_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 from cortexflow_ui.backend.utils.keyed_stream import KeyedCache, Refresher

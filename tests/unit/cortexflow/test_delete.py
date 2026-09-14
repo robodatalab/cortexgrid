@@ -4,7 +4,7 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
 
-from cortexflow.experiment import (
+from cortexgrid.experiment import (
     delete_experiment,
     delete_run,
     list_experiments,

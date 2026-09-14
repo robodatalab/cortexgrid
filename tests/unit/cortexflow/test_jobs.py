@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import cloudpickle  # type: ignore
 
-import cortexflow
-from cortexflow._bundle import BundleDesc
-from cortexflow.experiment import Experiment, clear_instance, set_instance
-from cortexflow.ray_util import JobStatus, get_ray_job_status
-from cortexflow.jobs import (
+import cortexgrid
+from cortexgrid._bundle import BundleDesc
+from cortexgrid.experiment import Experiment, clear_instance, set_instance
+from cortexgrid.ray_util import JobStatus, get_ray_job_status
+from cortexgrid.jobs import (
     JobLifecycle,
     LifecycleEvent,
     Payload,
@@ -141,7 +141,7 @@ class TestRemote(unittest.TestCase):
     def test_remote_returns_job_id_string(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         self.assertIsInstance(job_id, str)
         self.assertTrue(len(job_id) > 0)
@@ -149,7 +149,7 @@ class TestRemote(unittest.TestCase):
     def test_remote_uploads_payload_and_lifecycle(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue((project_root / "payload.pkl").exists())
@@ -160,7 +160,7 @@ class TestRemote(unittest.TestCase):
     def test_remote_uploads_project_code(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue(
@@ -181,7 +181,7 @@ class TestRemote(unittest.TestCase):
         # Dependencies travel as source in the tarball; nothing is pip-installed.
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertFalse((project_root / "requirements.txt").exists())
@@ -189,7 +189,7 @@ class TestRemote(unittest.TestCase):
     def test_initial_lifecycle_is_pending(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
@@ -200,7 +200,7 @@ class TestRemote(unittest.TestCase):
     def test_lifecycle_includes_retry_flag(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None, retry=True)
+        job_id = cortexgrid.remote(lambda: None, retry=True)
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
@@ -209,7 +209,7 @@ class TestRemote(unittest.TestCase):
     def test_payload_round_trips_through_cloudpickle(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
@@ -220,7 +220,7 @@ class TestRemote(unittest.TestCase):
     def test_payload_includes_resource_requests(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexflow.remote(lambda: None, num_gpus=2, num_cpus=4)
+        job_id = cortexgrid.remote(lambda: None, num_gpus=2, num_cpus=4)
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())

@@ -24,7 +24,7 @@ from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cortexflow import (
+from cortexgrid import (
     JobLifecycle,
     LifecycleEvent,
     get_ray_job_status,

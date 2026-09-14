@@ -25,9 +25,9 @@ from typing import Any
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
-from cortexflow import s3_util
-from cortexflow.infra import get_mlflow_tracking_uri, get_s3_bucket
-from cortexflow.model_serving import (
+from cortexgrid import s3_util
+from cortexgrid.infra import get_mlflow_tracking_uri, get_s3_bucket
+from cortexgrid.model_serving import (
     bundle_class,
     metadata_to_tags,
 )

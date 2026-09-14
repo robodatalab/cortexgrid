@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from cortexflow.infra import get_mlflow_tracking_uri
-from cortexflow.ray_util import (
+from cortexgrid.infra import get_mlflow_tracking_uri
+from cortexgrid.ray_util import (
     get_ray_job_id_for_cortexflow_job,
     get_ray_job_status,
     list_ray_jobs_with_submission_id,

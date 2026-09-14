@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import ANY, MagicMock, patch
 
 from botocore.exceptions import ClientError  # type: ignore
-from cortexflow.s3_util import download, upload, upload_dir
+from cortexgrid.s3_util import download, upload, upload_dir
 
 
 class TestS3Client(unittest.TestCase):

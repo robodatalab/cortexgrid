@@ -12,7 +12,7 @@ from typing import Any
 
 import requests  # type: ignore
 
-from cortexflow.infra import get_ray_job_server_uri, get_ray_serve_applications_uri
+from cortexgrid.infra import get_ray_job_server_uri, get_ray_serve_applications_uri
 from ray.job_submission import JobSubmissionClient
 
 

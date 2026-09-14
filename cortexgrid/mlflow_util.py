@@ -11,8 +11,8 @@ from typing import Any
 
 import requests
 
-from cortexflow.experiment import Experiment
-from cortexflow.infra import get_mlflow_tracking_uri
+from cortexgrid.experiment import Experiment
+from cortexgrid.infra import get_mlflow_tracking_uri
 from mlflow.entities import Metric
 from mlflow.tracking import MlflowClient
 

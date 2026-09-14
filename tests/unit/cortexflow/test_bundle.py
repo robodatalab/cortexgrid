@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cortexflow._bundle import BundleDesc, bundle, stage
+from cortexgrid._bundle import BundleDesc, bundle, stage
 
 
 class _Tree:

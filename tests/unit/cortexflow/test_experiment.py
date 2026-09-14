@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.experiment import (
+from cortexgrid.experiment import (
     Experiment,
     get_experiment_by_run_name,
     set_instance,

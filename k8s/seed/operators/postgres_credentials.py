@@ -26,7 +26,7 @@ import secrets
 import subprocess
 import textwrap
 
-from cortexflow.secrets import delete_secret, set_secret
+from cortexgrid.secrets import delete_secret, set_secret
 from k8s.seed import util
 from k8s.seed.pipeline import Operator
 

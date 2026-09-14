@@ -29,8 +29,8 @@ from typing import Any
 import cloudpickle  # type: ignore
 from mlflow.tracking import MlflowClient
 
-from cortexflow import s3_util
-from cortexflow.experiment import Experiment, get_mlflow_tracking_uri
+from cortexgrid import s3_util
+from cortexgrid.experiment import Experiment, get_mlflow_tracking_uri
 
 log = logging.getLogger(__name__)
 _CORTEXFLOW_JOB_ID: str | None = None

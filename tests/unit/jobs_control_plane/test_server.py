@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 import cloudpickle  # type: ignore
 from parameterized import parameterized
 
-from cortexflow.experiment import Experiment
-from cortexflow.jobs import JobLifecycle, LifecycleEvent, Payload
-from cortexflow.ray_util import JobStatus, ray_submission_id
+from cortexgrid.experiment import Experiment
+from cortexgrid.jobs import JobLifecycle, LifecycleEvent, Payload
+from cortexgrid.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
     _match_ray_jobs_to_cortexflow_jobs,
     _record_state,

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from cortexflow.experiment import list_experiments, set_instance
+from cortexgrid.experiment import list_experiments, set_instance
 from cortexflow_ui.backend.main import app
 from cortexflow_ui.backend.streams import experiments_stream
 from cortexflow_ui.backend.streams.experiments_stream import Run

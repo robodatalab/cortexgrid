@@ -14,10 +14,10 @@ import tarfile
 import tempfile
 from typing import Any, Callable
 
-from cortexflow import s3_util
-from cortexflow._bundle import bundle, stage, worker_provides
-from cortexflow.infra import get_mlflow_tracking_uri
-from cortexflow.ray_util import get_ray_job_id_for_cortexflow_job
+from cortexgrid import s3_util
+from cortexgrid._bundle import bundle, stage, worker_provides
+from cortexgrid.infra import get_mlflow_tracking_uri
+from cortexgrid.ray_util import get_ray_job_id_for_cortexflow_job
 from haikunator import Haikunator  # type: ignore
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict

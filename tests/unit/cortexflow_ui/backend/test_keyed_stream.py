@@ -9,8 +9,8 @@ from unittest.mock import patch
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
-from cortexflow.jobs import JobLifecycle
-from cortexflow.ray_util import JobStatus
+from cortexgrid.jobs import JobLifecycle
+from cortexgrid.ray_util import JobStatus
 from cortexflow_ui.backend.streams import run_jobs_stream, run_notes_stream
 from cortexflow_ui.backend.utils.keyed_stream import serve_websocket
 

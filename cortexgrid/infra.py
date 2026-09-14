@@ -1,4 +1,4 @@
-from cortexflow.secrets import get_secret
+from cortexgrid.secrets import get_secret
 from mlflow.tracking import MlflowClient
 
 

@@ -9,15 +9,15 @@ Requires the full DGX stack: MLflow, Ray, and the jobs control plane.
 
 import time
 
-import cortexflow
-from cortexflow.checkpoint import checkpoint, resume
+import cortexgrid
+from cortexgrid.checkpoint import checkpoint, resume
 
 
 def crashy_job():
     ckpt = resume()
     if ckpt:
         print(f"Resumed from checkpoint: execution_count={ckpt.execution_count}")
-        cortexflow.log_metric("final_execution_count", ckpt.execution_count + 1)
+        cortexgrid.log_metric("final_execution_count", ckpt.execution_count + 1)
         print("Second run succeeded!")
         return
 
@@ -28,20 +28,20 @@ def crashy_job():
     raise RuntimeError("Intentional crash to test retry")
 
 
-def _wait_for_terminal(run_id: str, job_id: str) -> cortexflow.JobStatus:
+def _wait_for_terminal(run_id: str, job_id: str) -> cortexgrid.JobStatus:
     """Poll the lifecycle until Ray reports a terminal state."""
     while True:
-        lifecycle = cortexflow.JobLifecycle.load_from_mlflow(run_id, job_id)
+        lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(run_id, job_id)
         ray_job_id = lifecycle.get_ray_job_id()
-        status = cortexflow.get_ray_job_status(ray_job_id)
+        status = cortexgrid.get_ray_job_status(ray_job_id)
         print(f"  status: {status.value}  ray_job: {ray_job_id or 'not yet scheduled'}")
-        if status in (cortexflow.JobStatus.FINISHED, cortexflow.JobStatus.FAILED):
+        if status in (cortexgrid.JobStatus.FINISHED, cortexgrid.JobStatus.FAILED):
             return status
         time.sleep(5)
 
 
 def main():
-    exp = cortexflow.Experiment.init("Examples-Checkpoints")
+    exp = cortexgrid.Experiment.init("Examples-Checkpoints")
     print(f"Experiment: {exp.experiment_name}")
     print(f"Run ID:     {exp.run_id}")
 
@@ -49,10 +49,10 @@ def main():
     # Automatic retry by the control plane is not currently implemented, so
     # this example drives the retry from the client side. The checkpoint is
     # scoped to the experiment run, so the second job sees it on resume.
-    first_job = cortexflow.remote(crashy_job)
+    first_job = cortexgrid.remote(crashy_job)
     print(f"Submitted first job: {first_job}")
     first_status = _wait_for_terminal(exp.run_id, first_job)
-    if first_status != cortexflow.JobStatus.FAILED:
+    if first_status != cortexgrid.JobStatus.FAILED:
         print(f"\nExpected first attempt to fail, got {first_status.value}.")
         return
     print(
@@ -60,11 +60,11 @@ def main():
     )
 
     # Attempt 2 — cortexflow.resume() should return the saved checkpoint.
-    second_job = cortexflow.remote(crashy_job)
+    second_job = cortexgrid.remote(crashy_job)
     print(f"Submitted second job: {second_job}")
     second_status = _wait_for_terminal(exp.run_id, second_job)
 
-    if second_status == cortexflow.JobStatus.FINISHED:
+    if second_status == cortexgrid.JobStatus.FINISHED:
         print("\nJob survived the crash and completed on re-submission!")
         print("Check MLflow for final_execution_count=2.")
     else:

@@ -4,7 +4,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import cortexflow
+import cortexgrid
 from playwright.sync_api import expect
 
 from tests.integration.stubs.serving import AddConstantServeApp, write_weights
@@ -20,7 +20,7 @@ def _save_stub_model(suffix: str, family: str, constant: int = 15) -> None:
     tree, not inference, so the weights content is irrelevant."""
     with tempfile.TemporaryDirectory() as d:
         write_weights(Path(d), constant)
-        cortexflow.save_model(
+        cortexgrid.save_model(
             Path(d), AddConstantServeApp, suffix=suffix, family=family
         )
 
@@ -28,8 +28,8 @@ def _save_stub_model(suffix: str, family: str, constant: int = 15) -> None:
 class TestModels(UITestCase):
     def test_model_appears_then_disappears_after_delete(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
         _save_stub_model(suffix="instruct", family="ft-fake")
 
@@ -55,14 +55,14 @@ class TestModels(UITestCase):
 
     def test_family_delete_removes_every_version_in_family(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
 
-        exp_a = cortexflow.Experiment.init(name)
+        exp_a = cortexgrid.Experiment.init(name)
         run_a = exp_a.run_name()
         _save_stub_model(suffix="instruct", family="ft-fake")
-        cortexflow.Experiment.close()
+        cortexgrid.Experiment.close()
 
-        exp_b = cortexflow.Experiment.init(name)
+        exp_b = cortexgrid.Experiment.init(name)
         run_b = exp_b.run_name()
         _save_stub_model(suffix="chat", family="ft-fake", constant=20)
 
@@ -89,8 +89,8 @@ class TestModels(UITestCase):
 
     def test_model_card_run_link_navigates_to_run(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
         _save_stub_model(suffix="instruct", family="ft-fake")
 
@@ -114,8 +114,8 @@ class TestModels(UITestCase):
 
     def test_run_dashboard_models_section_navigates_to_model_card(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
         _save_stub_model(suffix="instruct", family="ft-fake")
 

@@ -6,19 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cortexflow.experiment import (
+from cortexgrid.experiment import (
     delete_experiment,
     delete_run,
     get_experiment_by_run_name,
     get_mlflow_tracking_uri,
     list_run_ids_in_experiment,
 )
-from cortexflow.infra import get_ray_job_server_uri
-from cortexflow.jobs import stop_experiment_run_jobs
-from cortexflow.model_serving import deploy_model, undeploy_model
-from cortexflow.model_storage import delete_model
-from cortexflow.ray_util import get_ray_logs
-from cortexflow.secrets import (
+from cortexgrid.infra import get_ray_job_server_uri
+from cortexgrid.jobs import stop_experiment_run_jobs
+from cortexgrid.model_serving import deploy_model, undeploy_model
+from cortexgrid.model_storage import delete_model
+from cortexgrid.ray_util import get_ray_logs
+from cortexgrid.secrets import (
     delete_secret,
     get_secret,
     list_secrets,

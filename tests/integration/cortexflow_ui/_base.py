@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 
-import cortexflow
+import cortexgrid
 from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
 
@@ -17,8 +17,8 @@ class UITestCase(unittest.TestCase):
     page: Page
 
     def setUp(self) -> None:
-        cortexflow.Experiment.close()
-        self.addCleanup(cortexflow.Experiment.close)
+        cortexgrid.Experiment.close()
+        self.addCleanup(cortexgrid.Experiment.close)
         self.pw = sync_playwright().start()
         self.addCleanup(self.pw.stop)
         self.browser = self.pw.chromium.launch()

@@ -30,13 +30,13 @@ from typing import Any
 from mlflow.tracking import MlflowClient
 from ray.serve.schema import ApplicationStatus
 
-from cortexflow._bundle import bundle, stage, worker_provides
-from cortexflow.infra import get_mlflow_tracking_uri, get_ray_serve_uri
-from cortexflow.ray_util import (
+from cortexgrid._bundle import bundle, stage, worker_provides
+from cortexgrid.infra import get_mlflow_tracking_uri, get_ray_serve_uri
+from cortexgrid.ray_util import (
     get_serve_details,
     put_serve_applications,
 )
-from cortexflow.s3_util import upload
+from cortexgrid.s3_util import upload
 
 
 log = logging.getLogger(__name__)

@@ -20,7 +20,7 @@ Required deps (setup): profile, sm_access_key_id, sm_secret_access_key.
 
 import logging
 
-from cortexflow.secrets import delete_secret, set_secret
+from cortexgrid.secrets import delete_secret, set_secret
 from k8s.seed.pipeline import Operator
 
 

@@ -6,7 +6,7 @@ import unittest
 from typing import Any, Callable, Literal, get_args
 import uuid
 
-import cortexflow
+import cortexgrid
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -31,37 +31,37 @@ def _schedule_and_wait(
     """Submit fn as a Ray job; wait until it FINISHES. With retry=True, intermediate FAILED is ignored. STOPPED is always terminal."""
     timeout = 600
 
-    job_id = cortexflow.remote(fn, *args, retry=retry, **kwargs)
-    run_id = cortexflow.Experiment.get_instance().run_id
+    job_id = cortexgrid.remote(fn, *args, retry=retry, **kwargs)
+    run_id = cortexgrid.Experiment.get_instance().run_id
     deadline = time.monotonic() + timeout
     printed: set[str] = set()
     while time.monotonic() < deadline:
         match = next(
             (
                 job
-                for job in cortexflow.list_experiment_run_jobs(run_id)
+                for job in cortexgrid.list_experiment_run_jobs(run_id)
                 if job.job_id == job_id
             ),
             None,
         )
         ray_job_id = match.get_ray_job_id() if match else None
         if ray_job_id:
-            status = cortexflow.get_ray_job_status(ray_job_id)
+            status = cortexgrid.get_ray_job_status(ray_job_id)
             terminal = status in (
-                cortexflow.JobStatus.FINISHED,
-                cortexflow.JobStatus.FAILED,
-                cortexflow.JobStatus.STOPPED,
+                cortexgrid.JobStatus.FINISHED,
+                cortexgrid.JobStatus.FAILED,
+                cortexgrid.JobStatus.STOPPED,
             )
             if terminal and ray_job_id not in printed:
                 print(
-                    f"--- ray job {ray_job_id} logs ---\n{cortexflow.get_ray_logs(ray_job_id)}"
+                    f"--- ray job {ray_job_id} logs ---\n{cortexgrid.get_ray_logs(ray_job_id)}"
                 )
                 printed.add(ray_job_id)
-            if status == cortexflow.JobStatus.FINISHED:
+            if status == cortexgrid.JobStatus.FINISHED:
                 return
-            if status == cortexflow.JobStatus.STOPPED:
+            if status == cortexgrid.JobStatus.STOPPED:
                 raise AssertionError(f"job {job_id} ended in {status}")
-            if status == cortexflow.JobStatus.FAILED and not retry:
+            if status == cortexgrid.JobStatus.FAILED and not retry:
                 raise AssertionError(f"job {job_id} ended in {status}")
         time.sleep(5)
     raise AssertionError(f"job {job_id} did not finish within {timeout}s")

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from cortexflow.jobs import JobLifecycle, LifecycleEvent
-from cortexflow.ray_util import JobStatus
+from cortexgrid.jobs import JobLifecycle, LifecycleEvent
+from cortexgrid.ray_util import JobStatus
 from cortexflow_ui.backend.streams import experiments_stream as stream_mod
 from cortexflow_ui.backend.streams.job_details_stream import poll_job, tarball_exists
 from cortexflow_ui.backend.main import app

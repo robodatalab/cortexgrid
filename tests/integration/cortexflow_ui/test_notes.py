@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-import cortexflow
+import cortexgrid
 from playwright.sync_api import Page, expect
 
 from tests.integration.cortexflow_ui._base import get_test_ui_url, UITestCase
@@ -27,8 +27,8 @@ def _open_experiment(page: Page, experiment: str) -> None:
 class TestRunNotes(UITestCase):
     def test_run_note_add_edit_delete_cycle(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
         _open_run(self.page, name, run_name)
         panel = self.page.locator(".run-notes")
@@ -54,8 +54,8 @@ class TestRunNotes(UITestCase):
 class TestExperimentNotes(UITestCase):
     def test_experiment_note_add_edit_delete_cycle(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        cortexgrid.Experiment.init(name)
         _open_experiment(self.page, name)
         panel = self.page.locator(".experiment-dashboard")
 
@@ -83,8 +83,8 @@ class TestExperimentNotes(UITestCase):
 class TestNotesCrossContext(UITestCase):
     def test_run_note_appears_and_disappears_in_experiment_dashboard(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
 
         _open_run(self.page, name, run_name)
@@ -110,8 +110,8 @@ class TestNotesCrossContext(UITestCase):
 class TestNotesMultiUser(UITestCase):
     def test_note_added_by_one_user_appears_for_another_viewer(self) -> None:
         name = _experiment_name(self)
-        self.addCleanup(cortexflow.delete_experiment, name)
-        exp = cortexflow.Experiment.init(name)
+        self.addCleanup(cortexgrid.delete_experiment, name)
+        exp = cortexgrid.Experiment.init(name)
         run_name = exp.run_name()
 
         author = self.page

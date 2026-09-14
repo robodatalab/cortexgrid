@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from cortexflow.infra import (
+from cortexgrid.infra import (
     get_mlflow_run_url,
     get_mlflow_tracking_uri,
     get_ray_job_server_uri,

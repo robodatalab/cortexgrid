@@ -18,8 +18,8 @@ from typing import Any
 import boto3  # type: ignore
 from tqdm import tqdm  # type: ignore
 
-from cortexflow.infra import get_s3_bucket, get_s3_endpoint_url
-from cortexflow.secrets import get_secret
+from cortexgrid.infra import get_s3_bucket, get_s3_endpoint_url
+from cortexgrid.secrets import get_secret
 
 
 def get_s3_client() -> Any:

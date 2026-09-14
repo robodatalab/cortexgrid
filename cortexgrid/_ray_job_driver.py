@@ -7,9 +7,9 @@ import logging
 import sys
 from pathlib import Path
 
-from cortexflow.checkpoint import set_cortexflow_job_id
-from cortexflow.experiment import Experiment
-from cortexflow.jobs import Payload
+from cortexgrid.checkpoint import set_cortexflow_job_id
+from cortexgrid.experiment import Experiment
+from cortexgrid.jobs import Payload
 
 log = logging.getLogger("ray-job-driver")
 

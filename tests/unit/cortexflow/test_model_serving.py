@@ -4,7 +4,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from cortexflow.model_serving import (
+from cortexgrid.model_serving import (
     BundleMetadata,
     _wait_for_application_running,
     deploy_model,
