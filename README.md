@@ -10,7 +10,7 @@ component | unit test | docker image | integration test |
 | jobs control plane | <!--s:test_jobs_control_plane-->🔴 failing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
 | ray | - | <!--s:build_ray-->🔴 failing<!--/s--> | - |
-| arc runner | - | <!--s:build_arc_runner-->⚪ unknown<!--/s--> | - |
+| arc runner | - | <!--s:build_arc_runner-->🔴 failing<!--/s--> | - |
 | ui backend | <!--s:test_cortexgrid_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_backend-->🟢 passing<!--/s--> | - |
 | ui frontend | <!--s:test_cortexgrid_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | - |
 | k8s seed | <!--s:test_k8s_seed-->🔴 failing<!--/s--> | - | - |
