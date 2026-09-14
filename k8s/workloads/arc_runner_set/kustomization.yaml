@@ -30,7 +30,7 @@ helmCharts:
             - name: ghcr-pull
           containers:
             - name: runner
-              image: ghcr.io/robodatalab/arc-runner:04228357687bb32056a323b63567d247d5182e53
+              image: ghcr.io/robodatalab/arc-runner:64f9121cc2b79897a4532f6d3599e24f26f5be82
               command: ["/home/runner/run.sh"]
 patches:
   - target:
