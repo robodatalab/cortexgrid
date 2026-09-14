@@ -62,7 +62,7 @@ resource "null_resource" "notes_schema" {
   depends_on = [null_resource.notes_database]
 
   triggers = {
-    schema_sha = filesha256("${path.module}/../../../k8s/workloads/postgres/notes-schema.sql")
+    schema_sha = filesha256("${path.module}/../../../k8s/charts/cortexgrid/files/postgres/notes_schema.sql")
   }
 
   provisioner "local-exec" {
@@ -78,7 +78,7 @@ resource "null_resource" "notes_schema" {
         echo "Waiting for notes DB via tailnet..." >&2
         sleep 10
       done
-      psql "${local.notes_uri}" -v ON_ERROR_STOP=1 -f "${path.module}/../../../k8s/workloads/postgres/notes-schema.sql"
+      psql "${local.notes_uri}" -v ON_ERROR_STOP=1 -f "${path.module}/../../../k8s/charts/cortexgrid/files/postgres/notes_schema.sql"
     EOT
   }
 }

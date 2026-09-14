@@ -1,11 +1,11 @@
-output "head_instance_id" {
-  description = "EC2 instance ID of the k3s head"
-  value       = module.head.instance_id
+output "head_instance_ids" {
+  description = "Map of head node name to EC2 instance ID"
+  value       = module.head.instance_ids
 }
 
-output "head_ebs_volume_id" {
-  description = "EBS volume ID for /storage; use with `aws ec2 modify-volume` to resize"
-  value       = module.head.ebs_volume_id
+output "head_ebs_volume_ids" {
+  description = "Map of head node name to EBS volume ID for /storage; use with `aws ec2 modify-volume` to resize"
+  value       = module.head.ebs_volume_ids
 }
 
 output "s3_bucket_name" {
