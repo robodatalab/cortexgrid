@@ -64,8 +64,8 @@ spec:
             # below as $(S3_BUCKET_NAME).
             - secretRef:
                 name: s3-creds
-            # MLFLOW_BACKEND_STORE_URI composed and stored as a single SM entry by
-            # whoever provisions the backend store.
+            # MLFLOW_BACKEND_STORE_URI composed and published to the head secrets
+            # store by whoever provisions the backend store.
             - secretRef:
                 name: mlflow-config
           command:

@@ -26,6 +26,9 @@ spec:
         - name: jobs-control-plane
           image: {{ .Values.images.jobsControlPlane }}
           env:
+            # cortexgrid.secrets reads every secret from the head secrets server.
+            - name: CORTEXGRID_HEAD_URL
+              value: "{{ .Values.services.head.url }}"
             - name: CORTEXGRID_POLL_INTERVAL
               value: "5"
             # Cap parallel job-submission subprocesses; sharing the head EC2 with
@@ -34,9 +37,7 @@ spec:
             - name: CORTEXGRID_STARTER_WORKERS
               value: "2"
           envFrom:
-            # SM_* for cortexgrid.secrets, S3_* for cortexgrid.s3_util.
-            - secretRef:
-                name: sm-creds
+            # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
           livenessProbe:

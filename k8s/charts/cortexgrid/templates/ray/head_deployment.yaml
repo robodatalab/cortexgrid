@@ -42,6 +42,10 @@ spec:
             - --metrics-export-port=8080
             - --block
           env:
+            # cortexgrid.secrets (serve-app builders and any user code the head
+            # invokes) reads every secret from the head secrets server.
+            - name: CORTEXGRID_HEAD_URL
+              value: "{{ .Values.services.head.url }}"
             # Ray's runtime_env_agent uses unmodified boto3 to fetch s3://
             # working_dir URIs for Serve apps. boto3 only reads the standard
             # AWS_* env var names; map them from the s3-creds Secret's S3_*
@@ -72,10 +76,7 @@ spec:
           envFrom:
             - secretRef:
                 name: ray-env
-            # SM_* for cortexgrid.secrets (used by serve-app builders and any
-            # user code the head invokes). S3_* for cortexgrid.s3_util.
-            - secretRef:
-                name: sm-creds
+            # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
           ports:
