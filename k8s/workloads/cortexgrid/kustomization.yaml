@@ -3,6 +3,8 @@ kind: Kustomization
 # Pristine chart lives at k8s/charts/cortexgrid; this overlay supplies the
 # mutable bits (image tags) that CI writes to via yq. Mirrors the arc_runner
 # kustomize+helm pattern used elsewhere in this repo.
+resources:
+  - ci_rbac.yaml
 helmGlobals:
   chartHome: ../../charts
 helmCharts:

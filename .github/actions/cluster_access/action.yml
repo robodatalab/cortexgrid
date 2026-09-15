@@ -1,0 +1,27 @@
+name: cluster_access
+description: >
+  Join the tailnet as tag:ci via Tailscale workload identity federation and
+  point kubectl at the cluster API through the Tailscale operator's proxy.
+  The calling workflow needs `permissions: id-token: write`.
+
+inputs:
+  oauth-client-id:
+    description: Tailscale federated identity client ID
+    required: true
+  audience:
+    description: Tailscale federated identity audience
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: tailscale/github-action@v4
+      with:
+        oauth-client-id: ${{ inputs.oauth-client-id }}
+        audience: ${{ inputs.audience }}
+        tags: tag:ci
+        ping: tailscale-operator
+    - shell: bash
+      run: |
+        tailscale configure kubeconfig tailscale-operator
+        kubectl version

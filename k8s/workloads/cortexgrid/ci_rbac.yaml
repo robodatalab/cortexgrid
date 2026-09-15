@@ -1,0 +1,61 @@
+# Permissions for the post-merge integration-test workflows. GitHub-hosted
+# runners join the tailnet as tag:ci and reach the API through the Tailscale
+# operator's proxy, which impersonates them into the `cortexgrid-ci` group
+# (granted by the tailnet ACL).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cortexgrid-ci
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    resourceNames: [cortexgrid, cortexgrid-ui]
+    verbs: [get, patch]
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cortexgrid-ci
+  namespace: argocd
+subjects:
+  - kind: Group
+    name: cortexgrid-ci
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: cortexgrid-ci
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cortexgrid-ci
+  namespace: cortexgrid
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cortexgrid-ci
+  namespace: cortexgrid
+subjects:
+  - kind: Group
+    name: cortexgrid-ci
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: cortexgrid-ci
+  apiGroup: rbac.authorization.k8s.io

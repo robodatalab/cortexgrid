@@ -7,13 +7,24 @@ End-to-end tests that run against the deployed cluster after a workload changes 
 ```
 PR merges to main with a workload manifest change
   -> push event matches workflow `paths:` filter
-  -> arc-runners executes the workflow in-cluster
+  -> a GitHub-hosted runner joins the tailnet and executes the workflow
      1. wait until Argo has deployed $GITHUB_SHA (or a descendant) and is Synced+Healthy
      2. kubectl apply -f <test job manifest>
      3. kubectl wait --for=condition=complete job/<job>     (block on tests)
 ```
 
-The runner is an `arc-runners` pod inside the cluster, so `kubectl` is already authenticated.
+## Cluster access
+
+Each job that talks to the cluster runs [.github/actions/cluster_access](../../.github/actions/cluster_access/action.yml):
+
+1. `tailscale/github-action` joins the tailnet as `tag:ci` using workload identity federation (GitHub OIDC token, no long-lived secret).
+2. `tailscale configure kubeconfig tailscale-operator` points `kubectl` at the Tailscale operator's API server proxy.
+3. The proxy impersonates the caller into the `cortexgrid-ci` group granted by the tailnet ACL; [k8s/workloads/cortexgrid/ci_rbac.yaml](../../k8s/workloads/cortexgrid/ci_rbac.yaml) limits that group to refreshing/reading the `cortexgrid` and `cortexgrid-ui` Argo apps and running the test Jobs in the `cortexgrid` namespace.
+
+Setup outside the repo:
+
+- Tailscale: HTTPS certificates enabled; `tag:ci` in `tagOwners`; a federated identity trusting GitHub OIDC for `repo:robodatalab/cortexgrid:ref:refs/heads/main` with the `auth_keys` scope and `tag:ci`; a grant from `tag:ci` to `tag:k8s` on `tcp:443` with `tailscale.com/cap/kubernetes` impersonating group `cortexgrid-ci`.
+- GitHub repository secrets: `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE` from that federated identity.
 
 ## Wait-for-deployment mechanism
 

@@ -9,6 +9,7 @@ on:
             - "k8s/workloads/cortexgrid_ui/kustomization.yaml"
             - "k8s/workloads/cortexgrid_ui_integration_tests/job.yaml"
             - "k8s/workloads/arc_runner_set/**"
+            - ".github/actions/cluster_access/**"
             - ".github/workflows/on_post_merge_cortexgrid_ui.yaml"
 
 concurrency:
@@ -17,15 +18,20 @@ concurrency:
 
 permissions:
     contents: write
+    id-token: write
 
 jobs:
     wait_for_cortexgrid_deployment:
-        runs-on: arc-runners
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
               with:
                   ref: main
                   fetch-depth: 0
+            - uses: ./.github/actions/cluster_access
+              with:
+                  oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+                  audience: ${{ secrets.TS_AUDIENCE }}
             - run: |
                   kubectl annotate -n argocd app cortexgrid argocd.argoproj.io/refresh=normal --overwrite
                   deadline=$(($(date +%s) + 600))
@@ -38,12 +44,16 @@ jobs:
                   kubectl wait -n argocd app/cortexgrid --for=jsonpath='{.status.health.status}'=Healthy --timeout=600s
 
     wait_for_cortexgrid_ui_deployment:
-        runs-on: arc-runners
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
               with:
                   ref: main
                   fetch-depth: 0
+            - uses: ./.github/actions/cluster_access
+              with:
+                  oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+                  audience: ${{ secrets.TS_AUDIENCE }}
             - run: |
                   kubectl annotate -n argocd app cortexgrid-ui argocd.argoproj.io/refresh=normal --overwrite
                   deadline=$(($(date +%s) + 600))
@@ -58,9 +68,13 @@ jobs:
     test_cortexgrid_ui_integration:
         needs:
             [wait_for_cortexgrid_deployment, wait_for_cortexgrid_ui_deployment]
-        runs-on: arc-runners
+        runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+            - uses: ./.github/actions/cluster_access
+              with:
+                  oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+                  audience: ${{ secrets.TS_AUDIENCE }}
             - run: |
                   trap 'kubectl delete -n cortexgrid job/cortexgrid-ui-integration-tests --ignore-not-found --wait=false' EXIT
                   kubectl delete -n cortexgrid job/cortexgrid-ui-integration-tests --ignore-not-found --wait=true

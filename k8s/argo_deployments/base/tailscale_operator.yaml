@@ -40,6 +40,11 @@ spec:
         operatorConfig:
           defaultTags:
             - "tag:k8s"
+        # In-process API server proxy in auth mode: tailnet callers reach the
+        # cluster API at https://tailscale-operator and are impersonated into
+        # the groups granted by the tailnet ACL (tailscale.com/cap/kubernetes).
+        apiServerProxyConfig:
+          mode: "true"
   destination:
     server: https://kubernetes.default.svc
     namespace: tailscale
