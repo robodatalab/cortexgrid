@@ -343,6 +343,57 @@ def install_prereqs(c: Connection) -> None:
     )
 
 
+K3S_SERVER_UNIT = "k3s.service"
+K3S_AGENT_UNIT = "k3s-agent.service"
+
+# flannel's VXLAN device (flannel.1) is bound to tailscale0 (`flannel-iface`).
+# Restarting tailscaled - e.g. `tailscale update` - recreates tailscale0, which
+# deletes flannel.1, and k3s does not recreate it until k3s itself restarts:
+# cross-node pod traffic stays broken. PartOf propagates tailscaled's restarts
+# and stops to k3s; After/Wants start k3s only once tailscaled is up. k3s units
+# run with KillMode=process, so restarting k3s leaves running pods in place.
+K3S_TAILSCALE_DROPIN = textwrap.dedent("""\
+    # Written by the cortexgrid seed: k8s/seed/util.py bind_k3s_to_tailscale.
+    [Unit]
+    After=tailscaled.service
+    Wants=tailscaled.service
+    PartOf=tailscaled.service
+""")
+
+
+def k3s_tailscale_dropin_path(unit: str) -> str:
+    return f"/etc/systemd/system/{unit}.d/10-tailscale.conf"
+
+
+def bind_k3s_to_tailscale(c: Connection, unit: str) -> None:
+    """Install the K3S_TAILSCALE_DROPIN for the k3s `unit`. Safe to run before
+    the unit is installed: systemd applies the drop-in once the unit appears."""
+    path = k3s_tailscale_dropin_path(unit)
+    sudo_script(
+        c,
+        "set -euo pipefail\n"
+        f"mkdir -p {Path(path).parent}\n"
+        f"cat > {path} <<'EOF'\n"
+        f"{K3S_TAILSCALE_DROPIN}"
+        "EOF\n"
+        "systemctl daemon-reload\n",
+    )
+
+
+def unbind_k3s_from_tailscale(c: Connection, unit: str) -> None:
+    """Remove the drop-in `bind_k3s_to_tailscale` installed for `unit`."""
+    path = k3s_tailscale_dropin_path(unit)
+    sudo_script(
+        c,
+        textwrap.dedent(f"""\
+        set -euo pipefail
+        rm -f {path}
+        rmdir --ignore-fail-on-non-empty {Path(path).parent} 2>/dev/null || true
+        systemctl daemon-reload || true
+    """),
+    )
+
+
 def wipe_k3s_residue(c: Connection) -> None:
     """Remove directories k3s uninstallers do not always clean up."""
     sudo_script(

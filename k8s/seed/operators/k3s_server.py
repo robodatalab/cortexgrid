@@ -41,6 +41,9 @@ class K3sServer(Operator):
         log.info(f"Installing k3s server on {c.host} (profile={profile})...")
         rendered = self._render_bootstrap(bootstrap_file.read_bytes(), profile)
         bootstrap_b64 = base64.b64encode(rendered).decode()
+        # Before the install, so k3s's first start is already ordered after
+        # tailscaled; on a re-run it binds an already-installed k3s.
+        util.bind_k3s_to_tailscale(c, util.K3S_SERVER_UNIT)
         # `tls-san` adds node_ip to the API server's TLS cert SANs.
         # `node-ip` tells k3s to register the node under node_ip instead of the
         # default LAN interface; otherwise pod networking and every script
@@ -89,6 +92,7 @@ EOF
         """),
         )
         util.wipe_k3s_residue(c)
+        util.unbind_k3s_from_tailscale(c, util.K3S_SERVER_UNIT)
 
     def _await_bootstrap_applied(self, c) -> None:
         """Wait only until the argocd namespace exists.

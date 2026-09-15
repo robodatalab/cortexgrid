@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import configparser
 import json
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -299,6 +303,96 @@ class TestLoadHeadEnv(unittest.TestCase):
                 util.load_head_env()
         self.assertIn("GH_TOKEN", str(ctx.exception))
         self.assertIn("ROUTE53_SECRET_ACCESS_KEY", str(ctx.exception))
+
+
+class _ScriptRecorder:
+    """Fabric Connection stand-in that keeps the scripts sudo_script uploads."""
+
+    def __init__(self) -> None:
+        self.scripts: list[str] = []
+
+    def put(self, fileobj, remote: str) -> None:
+        self.scripts.append(fileobj.getvalue().decode())
+
+    def sudo(self, cmd: str, **_kwargs) -> MagicMock:
+        return MagicMock(stdout="")
+
+
+class TestK3sTailscaleBinding(unittest.TestCase):
+    """The drop-in ties a k3s unit to tailscaled; the scripts are run for real
+    with /etc/systemd/system redirected to a temp dir and systemctl stubbed."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root, True)
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        self.systemctl_log = self.root / "systemctl.log"
+        stub = bin_dir / "systemctl"
+        stub.write_text(f'#!/bin/sh\necho "$@" >> {self.systemctl_log}\n')
+        stub.chmod(0o755)
+        self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+    def _run(self, script: str) -> None:
+        script = script.replace("/etc/systemd/system", str(self.root / "systemd"))
+        subprocess.run(["bash", "-c", script], env=self.env, check=True)
+
+    def _dropin(self, unit: str) -> Path:
+        path = util.k3s_tailscale_dropin_path(unit)
+        return self.root / "systemd" / Path(path).relative_to("/etc/systemd/system")
+
+    def test_dropin_orders_k3s_after_tailscaled_and_ties_its_restarts(self) -> None:
+        parser = configparser.ConfigParser()
+        parser.optionxform = str  # type: ignore[assignment,method-assign]
+        parser.read_string(util.K3S_TAILSCALE_DROPIN)
+
+        self.assertEqual(
+            dict(parser["Unit"]),
+            {
+                "After": "tailscaled.service",
+                "Wants": "tailscaled.service",
+                "PartOf": "tailscaled.service",
+            },
+        )
+
+    def test_bind_installs_the_dropin_for_the_unit_and_reloads_systemd(self) -> None:
+        c = _ScriptRecorder()
+        util.bind_k3s_to_tailscale(c, util.K3S_AGENT_UNIT)  # type: ignore[arg-type]
+
+        self._run(c.scripts[0])
+
+        dropin = self._dropin(util.K3S_AGENT_UNIT)
+        self.assertEqual(dropin.parent.name, "k3s-agent.service.d")
+        self.assertEqual(dropin.read_text(), util.K3S_TAILSCALE_DROPIN)
+        self.assertIn("daemon-reload", self.systemctl_log.read_text())
+
+    def test_bind_is_idempotent(self) -> None:
+        c = _ScriptRecorder()
+        util.bind_k3s_to_tailscale(c, util.K3S_SERVER_UNIT)  # type: ignore[arg-type]
+        util.bind_k3s_to_tailscale(c, util.K3S_SERVER_UNIT)  # type: ignore[arg-type]
+
+        for script in c.scripts:
+            self._run(script)
+
+        self.assertEqual(
+            self._dropin(util.K3S_SERVER_UNIT).read_text(), util.K3S_TAILSCALE_DROPIN
+        )
+
+    def test_unbind_removes_the_dropin(self) -> None:
+        c = _ScriptRecorder()
+        util.bind_k3s_to_tailscale(c, util.K3S_SERVER_UNIT)  # type: ignore[arg-type]
+        util.unbind_k3s_from_tailscale(c, util.K3S_SERVER_UNIT)  # type: ignore[arg-type]
+
+        for script in c.scripts:
+            self._run(script)
+
+        self.assertFalse(self._dropin(util.K3S_SERVER_UNIT).exists())
+
+    def test_unbind_without_a_dropin_succeeds(self) -> None:
+        c = _ScriptRecorder()
+        util.unbind_k3s_from_tailscale(c, util.K3S_AGENT_UNIT)  # type: ignore[arg-type]
+
+        self._run(c.scripts[0])
 
 
 if __name__ == "__main__":
