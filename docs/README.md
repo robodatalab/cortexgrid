@@ -93,6 +93,8 @@ make head-aws-destroy                     # single terraform destroy of the plat
 
 Both `head-setup` and `worker-setup` bind k3s to Tailscale with a systemd drop-in (`/etc/systemd/system/k3s.service.d/10-tailscale.conf`, `k3s-agent.service.d` on workers; see `bind_k3s_to_tailscale` in [k8s/seed/util.py](../k8s/seed/util.py)): `After=`/`Wants=tailscaled.service` and `PartOf=tailscaled.service`. flannel's VXLAN device (`flannel.1`) is bound to `tailscale0`, and restarting tailscaled (e.g. `tailscale update`) recreates `tailscale0`, which deletes `flannel.1`; k3s does not recreate it until k3s restarts, so cross-node pod traffic silently breaks. With the drop-in, a tailscaled restart restarts k3s too (running pods stay up - k3s units use `KillMode=process`). `node-teardown` removes the drop-in.
 
+The head and every worker install the same k3s version, `K3S_VERSION` in [k8s/seed/util.py](../k8s/seed/util.py); a deferred worker gets it through the env file its join timer reads. Without the pin the installer takes k3s's current "stable" channel, so a worker joined later can run a newer Kubernetes than the server, which Kubernetes does not support. Setup skips a node that already has k3s installed, so bumping `K3S_VERSION` only takes effect on nodes that are torn down and set up again - the head included.
+
 ### Secrets management
 
 Every secret lives on the head in `/etc/cortexgrid/.env`, served by a small HTTP server ([cortexgrid_head.py](../k8s/seed/scripts/cortexgrid_head.py), systemd unit `cortexgrid-head`, port 7700). It runs on the host rather than in k8s, so it is up before the cluster, and teardown removes the service but keeps the file. There is no authentication: the server is only reachable over the tailnet.

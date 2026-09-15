@@ -75,7 +75,7 @@ node-ip: {node_ip}
 flannel-iface: tailscale0
 EOF
             if [[ ! -x /usr/local/bin/k3s-agent ]] && [[ ! -x /usr/local/bin/k3s ]]; then
-                curl -sfL https://get.k3s.io | K3S_URL={shlex.quote(f"https://{head_ip}:6443")} K3S_TOKEN={shlex.quote(head_token)} sh -
+                curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={shlex.quote(util.K3S_VERSION)} K3S_URL={shlex.quote(f"https://{head_ip}:6443")} K3S_TOKEN={shlex.quote(head_token)} sh -
             fi
         """),
         )
@@ -124,7 +124,11 @@ EOF
             WantedBy=timers.target
         """)
 
-        env_content = f'CORTEXGRID_HEAD_URL="{head_url}"\n'
+        # K3S_VERSION: the timer script cannot import util, so the pin travels here.
+        env_content = (
+            f'CORTEXGRID_HEAD_URL="{head_url}"\n'
+            f'K3S_VERSION="{util.K3S_VERSION}"\n'
+        )
 
         util.write_remote_file(c, env_content, util.JOIN_ENV_PATH, mode="600")
         util.write_remote_file(c, join_script, util.JOIN_SCRIPT_PATH, mode="755")
