@@ -607,7 +607,7 @@ wheels = [
 
 [[package]]
 name = "cortexgrid"
-version = "0.2.86"
+version = "0.2.87"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
