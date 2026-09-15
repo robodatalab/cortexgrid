@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
+import tempfile
 from types import SimpleNamespace
 import unittest
 from typing import Any
@@ -8,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 from ray import serve as ray_serve
+from ray._private.runtime_env.packaging import unzip_package
 
 from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
@@ -342,6 +345,42 @@ class TestServeDependencies(unittest.TestCase):
             bundle_class(_ServeApp, "Qwen2.5-0.5B", "Instruct", "run")
 
         self.assertEqual(uploaded, [("Qwen2.5-0.5B__Instruct.zip", True)])
+
+    def test_bundle_class_zip_unpacks_on_ray_with_packages_at_the_root(self) -> None:
+        # Ray strips the single top-level directory of a remote working_dir zip;
+        # a bundle of one package must still unpack with that package intact.
+        root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        package = root / "src" / "pkg"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        (package / "app.py").write_text("")
+        working_dir = root / "working_dir"
+
+        def fake_upload(local_path: str, dest_path: str) -> str:
+            unzip_package(
+                package_path=local_path,
+                target_dir=str(working_dir),
+                remove_top_level_directory=True,  # what Ray does for s3:// URIs
+                unlink_zip=False,
+            )
+            return "s3://b/x.zip"
+
+        desc = BundleDesc(
+            local_files={package / "__init__.py", package / "app.py"}, tp_deps={}
+        )
+        with (
+            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+        ):
+            bundle_class(_ServeApp, "fam", "suf", "run")
+
+        unpacked = {
+            f.relative_to(working_dir).as_posix()
+            for f in working_dir.rglob("*")
+            if f.is_file()
+        }
+        self.assertEqual(unpacked, {"pkg/__init__.py", "pkg/app.py"})
 
     def test_spec_installs_pip_requirements(self) -> None:
         meta = BundleMetadata(

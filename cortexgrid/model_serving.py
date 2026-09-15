@@ -131,10 +131,17 @@ def bundle_class(
             len(desc.local_files),
             pip_requirements,
         )
+        # Ray unpacks a remote (s3://) working_dir zip by stripping its
+        # top-level directory when there is exactly one, so a bundle of a single
+        # package (model_gateway/) would lose that directory and its import
+        # path. Zipping under code/ gives Ray that one directory to strip.
         # make_archive returns the path it wrote. Rebuilding it with
         # Path.with_suffix would cut dotted names ("Qwen2.5-0.5B" -> "Qwen2.zip").
         archive = shutil.make_archive(
-            str(Path(tmp) / f"{family}__{suffix}"), "zip", root_dir=str(code_root)
+            str(Path(tmp) / f"{family}__{suffix}"),
+            "zip",
+            root_dir=tmp,
+            base_dir=code_root.name,
         )
         bundle_url = upload(
             archive,
