@@ -10,6 +10,7 @@ from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
 from cortexgrid.model_storage import delete_models_for_run
 from haikunator import Haikunator  # type: ignore
+from mlflow.entities import Experiment as MlflowExperiment
 from mlflow.tracking import MlflowClient
 
 
@@ -122,7 +123,12 @@ def _try_create_experiment_and_run(
         experiment = name_gen.haikunate(token_length=2, token_chars="0123456789")
 
     client = MlflowClient(tracking_uri=mlflow_tracking_uri)
+    # get_experiment_by_name also returns deleted experiments. A deleted one
+    # cannot take new runs, so a fresh experiment is created under its name.
     experiment_obj = client.get_experiment_by_name(name=experiment)
+    if experiment_obj is not None and experiment_obj.lifecycle_stage != "active":
+        _release_deleted_experiment_name(client, experiment_obj)
+        experiment_obj = None
     if experiment_obj:
         experiment_id = experiment_obj.experiment_id
     else:
@@ -132,6 +138,33 @@ def _try_create_experiment_and_run(
     run = client.create_run(experiment_id=experiment_id, run_name=run_name)
 
     return (experiment, run.info.run_id)
+
+
+def _deleted_experiment_name(name: str, experiment_id: str) -> str:
+    """The name a deleted experiment is moved to, freeing `name` for reuse.
+    Unique because experiment ids are."""
+    return f"{name}__deleted__{experiment_id}"
+
+
+def _release_deleted_experiment_name(
+    client: MlflowClient, experiment: MlflowExperiment
+) -> None:
+    """Move a deleted experiment off its name, so a new experiment can take it.
+
+    MLflow keeps a deleted experiment's name reserved (experiment names are
+    unique across every lifecycle stage) and refuses to rename a deleted
+    experiment, so it is restored only for the rename and deleted again."""
+    log.info(
+        "Experiment %r (id %s) is deleted; renaming it to release the name",
+        experiment.name,
+        experiment.experiment_id,
+    )
+    client.restore_experiment(experiment.experiment_id)
+    client.rename_experiment(
+        experiment.experiment_id,
+        _deleted_experiment_name(experiment.name, experiment.experiment_id),
+    )
+    client.delete_experiment(experiment.experiment_id)
 
 
 def delete_run(run_id: str) -> None:
@@ -174,6 +207,10 @@ def list_run_ids_in_experiment(name: str) -> list[str]:
 def delete_experiment(name: str) -> None:
     """Soft-delete every run in the experiment, then the experiment itself.
 
+    The experiment is renamed (`<name>__deleted__<id>`) before it is deleted:
+    MLflow keeps a deleted experiment's name reserved, and the rename frees it
+    so `Experiment.init(name)` can create a new experiment under it.
+
     Idempotent: already-deleted experiments are treated as success."""
     log.info("delete_experiment(%r): start", name)
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
@@ -190,6 +227,9 @@ def delete_experiment(name: str) -> None:
     log.info("delete_experiment(%r): %d active run(s) to delete", name, len(runs))
     for run in runs:
         delete_run(run.info.run_id)
+    client.rename_experiment(
+        exp.experiment_id, _deleted_experiment_name(name, exp.experiment_id)
+    )
     client.delete_experiment(exp.experiment_id)
     log.info("delete_experiment(%r): done", name)
 

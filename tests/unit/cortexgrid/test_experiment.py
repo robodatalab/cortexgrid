@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from mlflow.tracking import MlflowClient
+
 from cortexgrid.experiment import (
     Experiment,
+    delete_experiment,
     get_experiment_by_run_name,
     set_instance,
 )
@@ -106,6 +111,98 @@ class TestExperiment(unittest.TestCase):
         )
         self.assertEqual(result, ["job-1", "job-2"])
 
+
+class TestDeletedExperimentNames(unittest.TestCase):
+    """Against a real MLflow store (SQLite), because its rules on deleted
+    experiments are what these paths work around: a deleted experiment keeps
+    its name reserved, cannot be renamed, and cannot take new runs."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.tracking_uri = f"sqlite:///{Path(cls._tmp.name) / 'mlflow.db'}"
+        cls.client = MlflowClient(tracking_uri=cls.tracking_uri)
+        cls.client.search_experiments()  # create the schema once for the class
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def setUp(self) -> None:
+        set_instance(None)
+        self.addCleanup(set_instance, None)
+        p = patch(
+            "cortexgrid.experiment.get_mlflow_tracking_uri",
+            return_value=self.tracking_uri,
+        )
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _run_experiment_id(self, exp: Experiment) -> str:
+        return self.client.get_run(exp.run_id).info.experiment_id
+
+    def test_init_adds_a_run_to_the_active_experiment_of_that_name(self) -> None:
+        experiment_id = self.client.create_experiment("reused")
+
+        exp = Experiment.init("reused")
+
+        self.assertEqual(self._run_experiment_id(exp), experiment_id)
+
+    def test_init_creates_a_new_experiment_when_the_named_one_was_deleted(
+        self,
+    ) -> None:
+        # Deleted outside cortexgrid (e.g. the MLflow UI), so still under its name.
+        old_id = self.client.create_experiment("reborn")
+        self.client.delete_experiment(old_id)
+
+        exp = Experiment.init("reborn")
+
+        new = self.client.get_experiment_by_name("reborn")
+        assert new is not None
+        self.assertNotEqual(new.experiment_id, old_id)
+        self.assertEqual(new.lifecycle_stage, "active")
+        self.assertEqual(self._run_experiment_id(exp), new.experiment_id)
+
+    def test_init_leaves_the_replaced_experiment_deleted_under_another_name(
+        self,
+    ) -> None:
+        old_id = self.client.create_experiment("replaced")
+        self.client.delete_experiment(old_id)
+
+        Experiment.init("replaced")
+
+        old = self.client.get_experiment(old_id)
+        self.assertEqual(old.lifecycle_stage, "deleted")
+        self.assertEqual(old.name, f"replaced__deleted__{old_id}")
+
+    def test_delete_experiment_releases_the_name(self) -> None:
+        old_id = self.client.create_experiment("released")
+
+        delete_experiment("released")
+
+        self.assertIsNone(self.client.get_experiment_by_name("released"))
+        old = self.client.get_experiment(old_id)
+        self.assertEqual(old.lifecycle_stage, "deleted")
+        self.assertEqual(old.name, f"released__deleted__{old_id}")
+
+    def test_init_after_delete_experiment_creates_a_new_experiment(self) -> None:
+        old_id = self.client.create_experiment("cycled")
+        delete_experiment("cycled")
+
+        exp = Experiment.init("cycled")
+
+        new = self.client.get_experiment_by_name("cycled")
+        assert new is not None
+        self.assertNotEqual(new.experiment_id, old_id)
+        self.assertEqual(self._run_experiment_id(exp), new.experiment_id)
+
+    def test_delete_experiment_twice_is_a_no_op(self) -> None:
+        self.client.create_experiment("twice")
+
+        delete_experiment("twice")
+        delete_experiment("twice")
+
+        self.assertIsNone(self.client.get_experiment_by_name("twice"))
 
 
 if __name__ == "__main__":
