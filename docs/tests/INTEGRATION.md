@@ -23,7 +23,7 @@ Each job that talks to the cluster runs [.github/actions/cluster_access](../../.
 
 Setup outside the repo:
 
-- Tailscale: HTTPS certificates enabled; `tag:ci` in `tagOwners`; a federated identity trusting GitHub OIDC for `repo:robodatalab/cortexgrid:ref:refs/heads/main` with the `auth_keys` scope and `tag:ci`; a grant from `tag:ci` to `tag:k8s` on `tcp:443` with `tailscale.com/cap/kubernetes` impersonating group `cortexgrid-ci`.
+- Tailscale: HTTPS certificates enabled; `tag:ci` in `tagOwners`; a federated identity trusting GitHub OIDC for subject `repo:robodatalab@283442170/cortexgrid@1193122421:ref:refs/heads/main` (the repo uses GitHub's immutable subject claims, which embed the owner and repo IDs) with the `auth_keys` scope and `tag:ci`; a grant from `tag:ci` to `tag:k8s` on `tcp:443` with `tailscale.com/cap/kubernetes` impersonating group `cortexgrid-ci`.
 - GitHub repository secrets: `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE` from that federated identity.
 
 ## Wait-for-deployment mechanism
