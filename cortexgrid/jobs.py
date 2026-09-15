@@ -63,6 +63,9 @@ class JobLifecycle:
     retry: bool = False  # static flag set at job creation
     num_gpus: int = 0
     num_cpus: int = 1
+    # static: pinned third-party requirements the worker pip-installs (the
+    # bundle's distributions the Ray image does not already provide)
+    pip_requirements: list[str] = field(default_factory=list)
     history: list[LifecycleEvent] = field(default_factory=list)
 
     def to_json(self) -> str:
@@ -229,11 +232,17 @@ def schedule_remote_job(
     job_id = Haikunator().haikunate(token_length=2, token_chars="0123456789")
     entry_file = Path(inspect.getfile(fn)).resolve()
     driver_file = Path(__file__).with_name("_ray_job_driver.py")
-    files = bundle(entry_file).merge(bundle(driver_file)).local_files - worker_provides()
+    desc = bundle(entry_file).merge(bundle(driver_file))
+    pip_requirements = desc.pip_requirements(worker_provides())
     with tempfile.TemporaryDirectory() as tmp:
         code_root = Path(tmp, "project_code_root")
-        stage(files, code_root)
-        log.info("Submitting job %s (%d files)", job_id, len(files))
+        stage(desc.local_files, code_root)
+        log.info(
+            "Submitting job %s (%d files, pip: %s)",
+            job_id,
+            len(desc.local_files),
+            pip_requirements,
+        )
         Payload(
             experiment_name=experiment_name,
             run_id=run_id,
@@ -252,6 +261,7 @@ def schedule_remote_job(
             retry=retry,
             num_gpus=num_gpus,
             num_cpus=num_cpus,
+            pip_requirements=pip_requirements,
         ).save_to_mlflow()
     return job_id
 

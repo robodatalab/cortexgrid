@@ -19,11 +19,12 @@ the end-to-end design.
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,9 @@ class BundleMetadata:
 
     bundle_url: str
     class_import_path: str
+    # pinned third-party requirements the replica pip-installs (the bundle's
+    # distributions the Ray image does not already provide)
+    pip_requirements: list[str] = field(default_factory=list)
 
 
 def bundle_class(
@@ -103,12 +107,18 @@ def bundle_class(
     without holding the class object."""
     entry_file = Path(inspect.getfile(cls)).resolve()
     serve_entry = Path(__file__).with_name("_serve_entry.py")
-    files = bundle(entry_file).merge(bundle(serve_entry)).local_files - worker_provides()
+    desc = bundle(entry_file).merge(bundle(serve_entry))
+    pip_requirements = desc.pip_requirements(worker_provides())
     with tempfile.TemporaryDirectory() as tmp:
         code_root = Path(tmp) / "code"
-        stage(files, code_root)
+        stage(desc.local_files, code_root)
         log.info(
-            "Serve bundle for %s/%s/%s: %d files", family, suffix, run_name, len(files)
+            "Serve bundle for %s/%s/%s: %d files, pip: %s",
+            family,
+            suffix,
+            run_name,
+            len(desc.local_files),
+            pip_requirements,
         )
         zip_base = Path(tmp) / f"{family}__{suffix}"
         shutil.make_archive(str(zip_base), "zip", root_dir=str(code_root))
@@ -119,6 +129,7 @@ def bundle_class(
     return BundleMetadata(
         bundle_url=bundle_url,
         class_import_path=f"{cls.__module__}:{cls.__name__}",
+        pip_requirements=pip_requirements,
     )
 
 
@@ -126,6 +137,13 @@ def _build_application_spec(
     family: str, suffix: str, run_name: str, meta: BundleMetadata
 ) -> dict[str, Any]:
     """Assemble a Ray Serve application schema from pre-bundled metadata."""
+    # working_dir carries the serve-app's own source; Ray pip-installs the
+    # third-party distributions the image lacks into a per-node cached
+    # virtualenv layered on the image. No pip key when there are none, so Ray
+    # builds no virtualenv.
+    runtime_env: dict[str, Any] = {"working_dir": meta.bundle_url}
+    if meta.pip_requirements:
+        runtime_env["pip"] = meta.pip_requirements
     return {
         "name": _app_name(family, suffix, run_name),
         "route_prefix": _route_prefix(family, suffix, run_name),
@@ -140,9 +158,7 @@ def _build_application_spec(
             "suffix": suffix,
             "run_name": run_name,
         },
-        # Every dependency ships as source inside the bundle, so working_dir
-        # alone makes the serve app importable; nothing is pip-installed.
-        "runtime_env": {"working_dir": meta.bundle_url},
+        "runtime_env": runtime_env,
     }
 
 
@@ -150,6 +166,7 @@ def _build_application_spec(
 # `deploy_model` reads back.
 _CLASS_IMPORT_PATH_TAG = "class_import_path"
 _BUNDLE_URL_TAG = "serve_bundle_url"
+_PIP_REQUIREMENTS_TAG = "serve_pip_requirements"
 
 
 def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
@@ -159,6 +176,7 @@ def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
     return {
         _CLASS_IMPORT_PATH_TAG: meta.class_import_path,
         _BUNDLE_URL_TAG: meta.bundle_url,
+        _PIP_REQUIREMENTS_TAG: json.dumps(meta.pip_requirements),
     }
 
 
@@ -180,6 +198,8 @@ def _load_bundle_metadata(
         return BundleMetadata(
             bundle_url=tags[_BUNDLE_URL_TAG],
             class_import_path=tags[_CLASS_IMPORT_PATH_TAG],
+            # Absent on models saved before dependencies were pip-installed.
+            pip_requirements=json.loads(tags.get(_PIP_REQUIREMENTS_TAG, "[]")),
         )
     except KeyError as exc:
         raise ValueError(

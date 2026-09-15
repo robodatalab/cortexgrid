@@ -23,6 +23,7 @@ import time
 from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from cortexgrid import (
     JobLifecycle,
@@ -72,13 +73,18 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         project_code_root = lifecycle.download_project_code_root()
         log.info("Submitting a job (%s/%s) - project code downloaded", run_id, job_id)
 
-        # The bundle ships every dependency as source, so working_dir alone makes
-        # the code importable; nothing is pip-installed on the worker.
+        # working_dir carries the job's own source; Ray pip-installs the
+        # third-party distributions the image lacks into a per-node cached
+        # virtualenv layered on the image. No pip key when there are none, so
+        # Ray builds no virtualenv.
+        runtime_env: dict[str, Any] = {"working_dir": project_code_root}
+        if lifecycle.pip_requirements:
+            runtime_env["pip"] = lifecycle.pip_requirements
         log.info("Submitting a job (%s/%s) - submitting ray job", run_id, job_id)
         submit_ray_job(
             submission_id=submission_id,
             entrypoint="python -m cortexgrid._ray_job_driver payload.pkl",
-            runtime_env={"working_dir": project_code_root},
+            runtime_env=runtime_env,
             num_gpus=lifecycle.num_gpus,
             num_cpus=lifecycle.num_cpus,
         )

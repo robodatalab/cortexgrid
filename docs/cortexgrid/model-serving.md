@@ -103,7 +103,7 @@ No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_U
 `save_model(weights_dir, serve_app, family, suffix)` does two things:
 
 1. **Weights:** uploads `weights_dir` as-is to `s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/` and records that path as the MLflow `ModelVersion.source`. cortexgrid never inspects the contents - the on-disk format is the caller's concern.
-2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexgrid/_bundle.py) `cortexgrid.remote` uses), minus what the worker image already has (`worker_provides()`), ships every needed file as source, zips the staging dir, and uploads to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`. Nothing is `pip`-installed on the replica.
+2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexgrid/_bundle.py) `cortexgrid.remote` uses). Local modules ship as source: the staging dir is zipped and uploaded to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`. Third-party distributions are pinned to their installed versions, minus what the worker image already has (`worker_provides()`), and pip-installed on the replica by Ray.
 
 The bundle URL and the serve-app import path are persisted as MLflow tags on the new `ModelVersion`:
 
@@ -111,6 +111,7 @@ The bundle URL and the serve-app import path are persisted as MLflow tags on the
 |---|---|
 | `serve_bundle_url` | `s3://...` URL of the zipped staging dir |
 | `class_import_path` | `<module>:<ClassName>` of the serve-app to import on the replica |
+| `serve_pip_requirements` | JSON list of pinned pip requirements (`["tqdm==4.67.3", ...]`) the replica installs; absent on models saved before this existed, which then install nothing |
 
 `deploy_model` reads those tags back; it does not need the class object, so deployment can happen from any environment that can hit MLflow + the Ray dashboard.
 
@@ -271,7 +272,7 @@ Re-PUTs the applications list without this app; the controller tears down the re
 
 | symptom | cause | fix |
 |---|---|---|
-| `deploy_model(wait=True)` raises `RuntimeError: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time, or is neither bundled nor baked into the ray image), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
+| `deploy_model(wait=True)` raises `RuntimeError: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
 | `deploy_model(wait=True)` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
 | `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing. |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
@@ -292,7 +293,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
   },
   "runtime_env": {
     "working_dir": "s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip",
-    "pip": ["--extra-index-url https://download.pytorch.org/whl/cu128", "..."]
+    "pip": ["tqdm==4.67.3", "..."]
   }
 }
 ```
@@ -310,7 +311,7 @@ caller (laptop / arc-runner / training job)
   |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, size_bytes, lifecycle=uploading})
   |   2. upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
   |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip
-  |   4. set tags {serve_bundle_url, class_import_path}; flip lifecycle=ready
+  |   4. set tags {serve_bundle_url, class_import_path, serve_pip_requirements}; flip lifecycle=ready
   v
 S3 (weights + zipped bundle)
 MLflow Model Registry (ModelVersion + tags)
@@ -322,7 +323,7 @@ caller
   |   2. PUT /api/serve/applications/  (full applications list)
   v
 Ray Serve controller on the cluster
-  fetches the bundle zip via runtime_env.working_dir (every dependency is inside it, as source)
+  fetches the bundle zip via runtime_env.working_dir and pip-installs runtime_env.pip into a cached virtualenv
   imports cortexgrid._serve_entry:build, which re-imports the serve-app class
   binds serve.deployment(ServeApp) -> __init__ calls cortexgrid.load_model(...) -> Path
   exposes the serve-app's own routes under /r/<family>/<suffix>/<run_name>
@@ -347,7 +348,7 @@ cortexgrid secrets used:
 - Existing `MLFLOW_TRACKING_URI`, `S3_*` for the registry side and for staging bundles.
 - No `RAY_ADDRESS` - the caller does not become a Ray driver.
 
-The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...) travel **as source** inside the bundle, collected from the environment that ran `save_model` by walking the serve-app's import graph -- minus whatever the ray worker image already bakes in (`worker_provides()`). Nothing is `pip`-installed on the replica, so any compiled dependency must be baked into the image (see [k8s/docker/ray/Dockerfile](../../k8s/docker/ray/Dockerfile)). cortexgrid core does not depend on them.
+The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...) are collected by walking the serve-app's import graph in the environment that ran `save_model`, pinned to the versions installed there, and pip-installed on the replica -- minus whatever the ray worker image already bakes in (`worker_provides()`). Pip fetches wheels for the replica's own platform, so compiled dependencies work across laptop and cluster architectures, provided the pinned version is on PyPI. cortexgrid core does not depend on them.
 
 ## Pending work
 
