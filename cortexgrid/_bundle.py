@@ -107,10 +107,14 @@ def stage(files: set[Path], dest: Path) -> None:
         shutil.copy2(file, target)
 
 
-# What the Ray worker image pip-installs (k8s/docker/ray/Dockerfile), as the
-# Dockerfile spells it; keep the two in sync. They and their dependency trees
-# are on the worker already, so they are never installed there again -- a
-# second copy in the job's virtualenv would shadow the image's.
+# What the Ray worker image pip-installs, as the Dockerfile spells it. They and
+# their dependency trees are on the worker already, so they are never installed
+# there again -- a second copy in the job's virtualenv would shadow the image's.
+#
+# KEEP IN SYNC with k8s/docker/ray/Dockerfile, by hand: every package it
+# pip-installs must be listed here. A package missing here gets installed a
+# second time on the worker; one listed here but no longer in the image is
+# never installed at all.
 _WORKER_BAKED = (
     "ray[default,serve]",
     "smart_open[s3]",
