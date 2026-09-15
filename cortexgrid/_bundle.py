@@ -3,26 +3,37 @@
 `bundle(seed)` describes what is needed to run the module at `seed`: the local
 files it reaches -- following its import graph and each package's __init__
 chain, resolving imports the way the interpreter does -- and the third-party
-dependencies those files import. A file is local unless it lives in an installed
-package location (site-packages / dist-packages); imports that resolve into one
-are not followed. The standard library is excluded (it ships with the
-interpreter). Bundles of several seeds combine with `BundleDesc.merge`.
+distributions those files import. A file is local unless it lives in an installed
+package location (site-packages / dist-packages). An import that resolves into
+one is recorded as the distribution that installed the file, at its installed
+version, and is not followed: installing that distribution brings its own
+dependencies. The standard library is excluded (it ships with the interpreter).
+Bundles of several seeds combine with `BundleDesc.merge`.
 
 `stage(files, dest)` lays a bundle out under `dest` at each file's import path,
 so `dest` on sys.path (e.g. a Ray working_dir) makes every module importable.
+
+`BundleDesc.pip_requirements(worker_provides())` pins the third-party
+distributions the Ray worker image does not already have, for a Ray `pip`
+runtime_env to install on the worker.
 """
 
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 import functools
 import importlib.machinery
+import importlib.metadata
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 import sys
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 
 ThirdPartyDependencyName = str
@@ -39,17 +50,43 @@ class BundleDesc:
             tp_deps={**self.tp_deps, **other.tp_deps},
         )
 
+    def pip_requirements(
+        self, provided: frozenset[ThirdPartyDependencyName]
+    ) -> list[str]:
+        """The third-party distributions, pinned (`name==version`) and sorted,
+        minus the `provided` ones."""
+        return sorted(
+            f"{name}=={version}"
+            for name, version in self.tp_deps.items()
+            if name not in provided
+        )
+
+
+class UnownedDependencyError(LookupError):
+    """An import resolved into an installed package location, but no installed
+    distribution owns the file, so it can be neither shipped nor installed."""
+
 
 def bundle(seed: Path) -> BundleDesc:
     """What is needed to run the module at `seed`: its local files, each at its
-    real path. Third-party dependency detection is not implemented yet, so
-    `tp_deps` is always empty."""
+    real path, and the third-party distributions they import, keyed by
+    canonical name, each at its installed version.
+
+    Raises UnownedDependencyError for an import that resolves into an installed
+    package location no distribution owns."""
     seed = seed.resolve()
     files: set[Path] = set()
+    tp_deps: dict[ThirdPartyDependencyName, ThirdPartyDependencyVersion] = {}
+    visited: set[Path] = set()
     queue: list[Path] = [seed]
     while queue:
         file = queue.pop()
-        if file in files or not _is_local(file):
+        if file in visited:
+            continue
+        visited.add(file)
+        if not _is_local(file):
+            dist = _owning_distribution(file)
+            tp_deps[canonicalize_name(dist.metadata["Name"])] = dist.version
             continue
         files.add(file)
         queue.extend(_init_chain(file))  # importing a module runs its __init__ chain
@@ -58,7 +95,7 @@ def bundle(seed: Path) -> BundleDesc:
                 dep = _module_file(name)
                 if dep is not None:
                     queue.append(dep)
-    return BundleDesc(local_files=files, tp_deps={})
+    return BundleDesc(local_files=files, tp_deps=tp_deps)
 
 
 def stage(files: set[Path], dest: Path) -> None:
@@ -70,23 +107,120 @@ def stage(files: set[Path], dest: Path) -> None:
         shutil.copy2(file, target)
 
 
-# Distributions already present in the Ray worker image (k8s/docker/ray/Dockerfile).
-# They and their whole dependency trees -- torch's CUDA stack, sympy, numpy, ray,
-# mlflow, ... -- are on the worker already, so a caller subtracts them from a
-# bundle rather than shipping them again.
-_WORKER_BAKED = ("ray", "mlflow", "torch", "smart_open", "dotenv", "psutil")
+# What the Ray worker image pip-installs, as the Dockerfile spells it. They and
+# their dependency trees are on the worker already, so they are never installed
+# there again -- a second copy in the job's virtualenv would shadow the image's.
+#
+# KEEP IN SYNC with k8s/docker/ray/Dockerfile, by hand: every package it
+# pip-installs must be listed here. A package missing here gets installed a
+# second time on the worker; one listed here but no longer in the image is
+# never installed at all.
+_WORKER_BAKED = (
+    "ray[default,serve]",
+    "smart_open[s3]",
+    "mlflow",
+    "python-dotenv",
+    "psutil",
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+    "nvidia-cuda-nvrtc-cu12",
+    "nvidia-cuda-runtime-cu12",
+    "nvidia-cuda-cupti-cu12",
+    "nvidia-cufft-cu12",
+    "nvidia-curand-cu12",
+    "nvidia-cusolver-cu12",
+    "nvidia-cusparse-cu12",
+    "nvidia-cusparselt-cu12",
+    "nvidia-nccl-cu12",
+    "nvidia-nvshmem-cu12",
+    "nvidia-nvtx-cu12",
+    "nvidia-nvjitlink-cu12",
+    "nvidia-cufile-cu12",
+    "cuda-bindings",
+    "triton",
+    "torch",
+    "filelock",
+    "typing-extensions",
+    "sympy",
+    "networkx",
+    "jinja2",
+    "fsspec",
+)
 
 
 @functools.lru_cache(maxsize=1)
-def worker_provides() -> frozenset[Path]:
-    """Every file the Ray worker image already provides. Subtract from a bundle
-    before shipping: `bundle(entry).local_files - worker_provides()`."""
-    provided: set[Path] = set()
-    for name in _WORKER_BAKED:
-        origin = _module_file(name)
-        if origin is not None:
-            provided |= bundle(origin).local_files
-    return frozenset(provided)
+def worker_provides() -> frozenset[ThirdPartyDependencyName]:
+    """Every distribution the Ray worker image already provides:
+    `distribution_closure(_WORKER_BAKED)`."""
+    return distribution_closure(_WORKER_BAKED)
+
+
+def distribution_closure(
+    requirements: Iterable[str],
+) -> frozenset[ThirdPartyDependencyName]:
+    """Canonical names of the distributions `requirements` name plus everything
+    they depend on, transitively, as this environment's installed metadata
+    declares it -- extras followed where requested, environment markers
+    evaluated here. A requirement not installed here contributes only its own
+    name: its dependencies are unknown."""
+    names: set[ThirdPartyDependencyName] = set()
+    seen: set[tuple[str, frozenset[str]]] = set()
+    queue = [Requirement(spec) for spec in requirements]
+    while queue:
+        requirement = queue.pop()
+        name = canonicalize_name(requirement.name)
+        key = (name, frozenset(requirement.extras))
+        if key in seen:
+            continue
+        seen.add(key)
+        names.add(name)
+        try:
+            dist = importlib.metadata.distribution(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        extras = requirement.extras or {""}
+        for spec in dist.requires or ():
+            dependency = Requirement(spec)
+            if dependency.marker is None or any(
+                dependency.marker.evaluate({"extra": extra}) for extra in extras
+            ):
+                queue.append(dependency)
+    return frozenset(names)
+
+
+def _owning_distribution(file: Path) -> importlib.metadata.Distribution:
+    """The installed distribution whose file list (RECORD) contains `file`.
+    Rebuilds the index once on a miss, in case something was installed since it
+    was built."""
+    path = tuple(sys.path)
+    dist = _distribution_index(path).get(file)
+    if dist is None:
+        _distribution_index.cache_clear()
+        dist = _distribution_index(path).get(file)
+    if dist is None:
+        raise UnownedDependencyError(
+            f"{file} is imported from an installed package location, but no "
+            "installed distribution lists it among its files, so it can be "
+            "neither shipped nor pip-installed on the worker. Install it with "
+            "pip or uv so it carries distribution metadata."
+        )
+    return dist
+
+
+@functools.lru_cache(maxsize=1)
+def _distribution_index(
+    path: tuple[str, ...],
+) -> dict[Path, importlib.metadata.Distribution]:
+    """Every file installed by a distribution found on `path` (sys.path, which
+    the cache is keyed on), mapped to that distribution. Each distribution's
+    root is resolved once; its files are joined onto it lexically, which keeps
+    this fast for environments with tens of thousands of files."""
+    index: dict[Path, importlib.metadata.Distribution] = {}
+    for dist in importlib.metadata.distributions(path=list(path)):
+        root = Path(dist.locate_file("")).resolve()
+        for file in dist.files or ():
+            index[Path(os.path.normpath(root / file))] = dist
+    return index
 
 
 def _is_local(file: Path) -> bool:

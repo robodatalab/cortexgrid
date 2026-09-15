@@ -88,9 +88,10 @@ print(f"Submitted: {job_id}")
 A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
 Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](https://github.com/robodatalab/cortexgrid/blob/main/cortexgrid/_bundle.py)):
-- `bundle(entry)` traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`), and returns every file needed to run it -- your own modules and third-party packages alike, wherever they live. The standard library is excluded (it ships with the interpreter)
-- Everything ships **as source**: the bundle is staged at each file's import path and tarred into the Ray `working_dir`. Nothing is `pip`-installed on the worker
-- Dependencies the worker image already has are subtracted rather than shipped: `bundle(entry) - worker_provides()`, where `worker_provides()` is the bundle of the packages baked into the ray image (torch and its CUDA stack, ray, mlflow, ...). See [k8s/docker/ray/Dockerfile](https://github.com/robodatalab/cortexgrid/blob/main/k8s/docker/ray/Dockerfile)
+- `bundle(entry)` traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`). The standard library is excluded (it ships with the interpreter)
+- Your own modules -- anything outside site-packages / dist-packages -- ship **as source**: they are staged at their import paths and tarred into the Ray `working_dir`
+- Third-party packages are recorded as the installed distribution that owns the imported file, pinned to its installed version (`tqdm==4.67.3`), and Ray **pip-installs** them on the worker into a per-node cached virtualenv layered on the image (`runtime_env["pip"]`). An import into site-packages that no installed distribution owns fails `cortexgrid.remote` with `UnownedDependencyError`
+- Distributions the worker image already has are not installed again: `worker_provides()` is the dependency closure of the packages baked into the ray image (torch and its CUDA stack, ray, mlflow, ...), and is subtracted from the pip list. See [k8s/docker/ray/Dockerfile](https://github.com/robodatalab/cortexgrid/blob/main/k8s/docker/ray/Dockerfile) and `_WORKER_BAKED` in `_bundle.py`, which must list the same packages
 - Injects MLflow/S3 credentials so task code running on the DGX can reach all services
 
 ##### Retries

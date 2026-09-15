@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
+    _build_application_spec,
+    _load_bundle_metadata,
     _wait_for_application_running,
+    bundle_class,
     deploy_model,
     list_deployed_models,
+    metadata_to_tags,
     model_serving_status,
     undeploy_model,
 )
@@ -278,6 +285,75 @@ class TestModelServingStatus(unittest.TestCase):
         self.assertEqual(
             model_serving_status("fam", "suf", "run").phase, "failed"
         )
+
+
+class _ServeApp:
+    pass
+
+
+class TestServeDependencies(unittest.TestCase):
+    def test_bundle_class_records_pip_requirements_the_worker_lacks(self) -> None:
+        desc = BundleDesc(
+            local_files={Path(__file__).resolve()},
+            tp_deps={"tqdm": "4.67.3", "ray": "2.55.1"},
+        )
+        with (
+            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch(
+                "cortexgrid.model_serving.worker_provides",
+                return_value=frozenset({"ray"}),
+            ),
+            patch("cortexgrid.model_serving.upload", return_value="s3://b/x.zip"),
+        ):
+            meta = bundle_class(_ServeApp, "fam", "suf", "run")
+
+        self.assertEqual(meta.pip_requirements, ["tqdm==4.67.3"])
+
+    def test_spec_installs_pip_requirements(self) -> None:
+        meta = BundleMetadata(
+            bundle_url="s3://b/x.zip",
+            class_import_path="stub:Stub",
+            pip_requirements=["tqdm==4.67.3"],
+        )
+
+        spec = _build_application_spec("fam", "suf", "run", meta)
+
+        self.assertEqual(
+            spec["runtime_env"],
+            {"working_dir": "s3://b/x.zip", "pip": ["tqdm==4.67.3"]},
+        )
+
+    def test_spec_without_pip_requirements_has_no_pip_key(self) -> None:
+        # A pip key, even an empty one, makes Ray build a virtualenv.
+        spec = _build_application_spec("fam", "suf", "run", _FAKE_META)
+
+        self.assertEqual(spec["runtime_env"], {"working_dir": _FAKE_META.bundle_url})
+
+    def _load_with_tags(self, tags: dict[str, str]) -> BundleMetadata:
+        client = MagicMock()
+        client.search_model_versions.return_value = [SimpleNamespace(tags=tags)]
+        with (
+            patch("cortexgrid.model_serving.MlflowClient", return_value=client),
+            patch(
+                "cortexgrid.model_serving.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+        ):
+            return _load_bundle_metadata("fam", "suf", "run")
+
+    def test_bundle_metadata_round_trips_through_tags(self) -> None:
+        meta = BundleMetadata(
+            bundle_url="s3://b/x.zip",
+            class_import_path="stub:Stub",
+            pip_requirements=["haikunator==2.1.0", "tqdm==4.67.3"],
+        )
+
+        self.assertEqual(self._load_with_tags(metadata_to_tags(meta)), meta)
+
+    def test_model_saved_without_pip_tag_loads_with_no_requirements(self) -> None:
+        tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
+
+        self.assertEqual(self._load_with_tags(tags).pip_requirements, [])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ def _make_lifecycle(
     job_id: str = JOB_ID,
     stop_requested: bool = False,
     retry: bool = False,
+    pip_requirements: list[str] | None = None,
 ) -> JobLifecycle:
     return JobLifecycle(
         experiment_name=EXPERIMENT_NAME,
@@ -43,6 +44,7 @@ def _make_lifecycle(
         job_id=job_id,
         stop_requested=stop_requested,
         retry=retry,
+        pip_requirements=pip_requirements or [],
     )
 
 
@@ -540,8 +542,11 @@ class TestSubmitJobWorker(unittest.TestCase):
         self,
         stop_requested: bool = False,
         with_payload: bool = True,
+        pip_requirements: list[str] | None = None,
     ) -> None:
-        lifecycle = _make_lifecycle(stop_requested=stop_requested)
+        lifecycle = _make_lifecycle(
+            stop_requested=stop_requested, pip_requirements=pip_requirements
+        )
         payload = None
         if with_payload:
             payload = Payload(
@@ -575,6 +580,23 @@ class TestSubmitJobWorker(unittest.TestCase):
             self.submitted[0]["submission_id"],
             ray_submission_id(RUN_ID, JOB_ID, 3),
         )
+
+    def test_pip_requirements_are_installed_through_the_runtime_env(self) -> None:
+        self._seed(pip_requirements=["haikunator==2.1.0", "tqdm==4.67.3"])
+
+        _submit_job_worker(RUN_ID, JOB_ID, 0)
+
+        runtime_env = self.submitted[0]["runtime_env"]
+        self.assertIn("working_dir", runtime_env)
+        self.assertEqual(runtime_env["pip"], ["haikunator==2.1.0", "tqdm==4.67.3"])
+
+    def test_no_pip_key_when_there_are_no_requirements(self) -> None:
+        # A pip key, even an empty one, makes Ray build a virtualenv.
+        self._seed()
+
+        _submit_job_worker(RUN_ID, JOB_ID, 0)
+
+        self.assertEqual(set(self.submitted[0]["runtime_env"]), {"working_dir"})
 
     def test_stop_requested_short_circuits_before_submitting(self) -> None:
         self._seed(stop_requested=True)

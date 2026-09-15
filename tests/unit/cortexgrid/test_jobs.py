@@ -178,7 +178,7 @@ class TestRemote(unittest.TestCase):
         self.assertFalse((project_root / ".venv").exists())
 
     def test_remote_ships_no_requirements_txt(self) -> None:
-        # Dependencies travel as source in the tarball; nothing is pip-installed.
+        # Third-party requirements travel on the lifecycle, not in the tarball.
         set_instance(_make_experiment())
 
         job_id = cortexgrid.remote(lambda: None)
@@ -205,6 +205,27 @@ class TestRemote(unittest.TestCase):
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
         self.assertTrue(lifecycle.retry)
+
+    def test_lifecycle_carries_pip_requirements_the_worker_lacks(self) -> None:
+        set_instance(_make_experiment())
+        desc = BundleDesc(
+            local_files=set(_SHIPPED), tp_deps={"tqdm": "4.67.3", "ray": "2.55.1"}
+        )
+
+        with (
+            patch("cortexgrid.jobs.bundle", return_value=desc),
+            patch("cortexgrid.jobs.worker_provides", return_value=frozenset({"ray"})),
+        ):
+            job_id = cortexgrid.remote(lambda: None)
+
+        raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
+        self.assertEqual(JobLifecycle.from_json(raw).pip_requirements, ["tqdm==4.67.3"])
+
+    def test_lifecycle_saved_without_pip_requirements_loads_with_none(self) -> None:
+        # Lifecycles written before pip requirements existed lack the field.
+        raw = json.dumps({"experiment_name": EXPERIMENT_NAME, "run_id": RUN_ID, "job_id": "j"})
+
+        self.assertEqual(JobLifecycle.from_json(raw).pip_requirements, [])
 
     def test_payload_round_trips_through_cloudpickle(self) -> None:
         set_instance(_make_experiment())

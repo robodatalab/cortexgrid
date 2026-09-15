@@ -14,7 +14,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cortexgrid._bundle import BundleDesc, bundle, stage
+from cortexgrid._bundle import (
+    BundleDesc,
+    UnownedDependencyError,
+    bundle,
+    distribution_closure,
+    stage,
+)
 
 
 class _Tree:
@@ -47,6 +53,25 @@ class _Tree:
             if name not in self._modules_before:
                 sys.modules.pop(name, None)
         shutil.rmtree(self.root, ignore_errors=True)
+
+
+def _dist_info(
+    site: str,
+    name: str,
+    version: str,
+    files: tuple[str, ...] = (),
+    requires: tuple[str, ...] = (),
+) -> dict[str, str]:
+    """The metadata an installer leaves in `site` for distribution `name`: its
+    METADATA (with Requires-Dist lines) and a RECORD listing `files`, relative
+    to `site`."""
+    info = f"{site}/{name.replace('-', '_')}-{version}.dist-info"
+    metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    metadata += "".join(f"Requires-Dist: {spec}\n" for spec in requires)
+    return {
+        f"{info}/METADATA": metadata,
+        f"{info}/RECORD": "".join(f"{file},,\n" for file in files),
+    }
 
 
 class TestBundle(unittest.TestCase):
@@ -183,13 +208,13 @@ class TestBundle(unittest.TestCase):
                 "app/main.py": "import lib\n",
                 "helper.py": "h = 1\n",
                 "site-packages/lib/__init__.py": "import helper\n",
+                **_dist_info("site-packages", "lib", "1.0", ("lib/__init__.py",)),
             },
             roots=("", "site-packages"),
         )
-        self.assertEqual(
-            tree.rel(bundle(tree.path("app/main.py")).local_files),
-            {"app/__init__.py", "app/main.py"},
-        )
+        desc = bundle(tree.path("app/main.py"))
+        self.assertEqual(tree.rel(desc.local_files), {"app/__init__.py", "app/main.py"})
+        self.assertEqual(desc.tp_deps, {"lib": "1.0"})
 
     def test_dependency_in_dist_packages_is_not_followed(self) -> None:
         tree = self._tree(
@@ -198,13 +223,13 @@ class TestBundle(unittest.TestCase):
                 "app/main.py": "import lib\n",
                 "helper.py": "h = 1\n",
                 "dist-packages/lib/__init__.py": "import helper\n",
+                **_dist_info("dist-packages", "lib", "1.0", ("lib/__init__.py",)),
             },
             roots=("", "dist-packages"),
         )
-        self.assertEqual(
-            tree.rel(bundle(tree.path("app/main.py")).local_files),
-            {"app/__init__.py", "app/main.py"},
-        )
+        desc = bundle(tree.path("app/main.py"))
+        self.assertEqual(tree.rel(desc.local_files), {"app/__init__.py", "app/main.py"})
+        self.assertEqual(desc.tp_deps, {"lib": "1.0"})
 
     def test_bundling_does_not_import_packages(self) -> None:
         # Resolving `pkg.sub` must not execute pkg/__init__.py -- an installed
@@ -327,52 +352,138 @@ class TestBundle(unittest.TestCase):
 
     def test_entry_defined_in_an_installed_package(self) -> None:
         # The same shape installed into site-packages: the entry is itself
-        # third-party, so nothing ships as a local file.
+        # third-party, so nothing ships as a local file -- its distribution is
+        # installed instead.
         tree = self._tree(
             {
                 "site-packages/mypkg/__init__.py": "from mypkg.core import go\nfrom mypkg import extra\n",
                 "site-packages/mypkg/core.py": "def go(): pass\n",
                 "site-packages/mypkg/extra.py": "y = 1\n",
+                **_dist_info(
+                    "site-packages",
+                    "mypkg",
+                    "1.0",
+                    ("mypkg/__init__.py", "mypkg/core.py", "mypkg/extra.py"),
+                ),
             },
             roots=("site-packages",),
         )
-        self.assertEqual(
-            tree.rel(bundle(tree.path("site-packages/mypkg/core.py")).local_files),
-            set(),
-        )
+        desc = bundle(tree.path("site-packages/mypkg/core.py"))
+        self.assertEqual(desc.local_files, set())
+        self.assertEqual(desc.tp_deps, {"mypkg": "1.0"})
 
-    def test_subtraction_drops_a_dependency(self) -> None:
+    def test_third_party_dependency_is_keyed_by_canonical_distribution_name(self) -> None:
+        # The import name (yaml) differs from the distribution name (PyYAML);
+        # pip needs the distribution.
+        tree = self._tree(
+            {
+                "main.py": "import yaml\n",
+                "site-packages/yaml/__init__.py": "",
+                **_dist_info("site-packages", "PyYAML", "6.0.1", ("yaml/__init__.py",)),
+            },
+            roots=("", "site-packages"),
+        )
+        self.assertEqual(bundle(tree.path("main.py")).tp_deps, {"pyyaml": "6.0.1"})
+
+    def test_third_party_single_file_module(self) -> None:
+        tree = self._tree(
+            {
+                "main.py": "from six import moves\n",
+                "site-packages/six.py": "",
+                **_dist_info("site-packages", "six", "1.16.0", ("six.py",)),
+            },
+            roots=("", "site-packages"),
+        )
+        self.assertEqual(bundle(tree.path("main.py")).tp_deps, {"six": "1.16.0"})
+
+    def test_third_party_dependency_of_a_transitive_local_import(self) -> None:
         tree = self._tree(
             {
                 "app/__init__.py": "",
-                "app/main.py": "import lib\n",
-                "lib/__init__.py": "from lib.core import c\n",
-                "lib/core.py": "c = 1\n",
-            }
+                "app/main.py": "from app import util\n",
+                "app/util.py": "import lib.sub\n",
+                "site-packages/lib/__init__.py": "",
+                "site-packages/lib/sub.py": "",
+                **_dist_info(
+                    "site-packages", "lib", "2.3", ("lib/__init__.py", "lib/sub.py")
+                ),
+            },
+            roots=("", "site-packages"),
         )
-        needed = bundle(tree.path("app/main.py")).local_files
-        baked = bundle(tree.path("lib/__init__.py")).local_files
+        desc = bundle(tree.path("app/main.py"))
         self.assertEqual(
-            tree.rel(needed - baked), {"app/__init__.py", "app/main.py"}
+            tree.rel(desc.local_files), {"app/__init__.py", "app/main.py", "app/util.py"}
         )
+        self.assertEqual(desc.tp_deps, {"lib": "2.3"})
 
-    def test_subtraction_also_drops_the_dependencys_own_deps(self) -> None:
-        # Subtracting a baked package removes its whole subtree -- the reason a
-        # baked package like torch also takes sympy/numpy off the ship list.
+    def test_installed_namespace_package_portion_maps_to_its_distribution(self) -> None:
         tree = self._tree(
             {
-                "app/__init__.py": "",
-                "app/main.py": "import lib\n",
-                "lib/__init__.py": "import lib.core\n",
-                "lib/core.py": "import lib.deep\n",
-                "lib/deep.py": "d = 1\n",
+                "main.py": "import ns.plugin\n",
+                "site-packages/ns/plugin/__init__.py": "",
+                **_dist_info(
+                    "site-packages", "ns-plugin", "0.4", ("ns/plugin/__init__.py",)
+                ),
+            },
+            roots=("", "site-packages"),
+        )
+        self.assertEqual(bundle(tree.path("main.py")).tp_deps, {"ns-plugin": "0.4"})
+
+    def test_installed_file_no_distribution_owns_raises(self) -> None:
+        tree = self._tree(
+            {"main.py": "import lib\n", "site-packages/lib/__init__.py": ""},
+            roots=("", "site-packages"),
+        )
+        with self.assertRaises(UnownedDependencyError):
+            bundle(tree.path("main.py"))
+
+
+
+class TestDistributionClosure(unittest.TestCase):
+    def _site(self, files: dict[str, str]) -> None:
+        tree = _Tree(files, roots=("site-packages",))
+        self.addCleanup(tree.cleanup)
+
+    def test_includes_transitive_dependencies(self) -> None:
+        self._site(
+            {
+                **_dist_info("site-packages", "cg-a", "1.0", requires=("cg-b>=1",)),
+                **_dist_info("site-packages", "cg-b", "1.0", requires=("cg-c",)),
+                **_dist_info("site-packages", "cg-c", "1.0"),
             }
         )
-        needed = bundle(tree.path("app/main.py")).local_files
-        baked = bundle(tree.path("lib/__init__.py")).local_files
-        self.assertEqual(
-            tree.rel(needed - baked), {"app/__init__.py", "app/main.py"}
+        self.assertEqual(distribution_closure(["cg-a"]), {"cg-a", "cg-b", "cg-c"})
+
+    def test_extra_dependencies_only_when_the_extra_is_requested(self) -> None:
+        self._site(
+            {
+                **_dist_info(
+                    "site-packages", "cg-a", "1.0", requires=('cg-s3; extra == "s3"',)
+                ),
+                **_dist_info("site-packages", "cg-s3", "1.0"),
+            }
         )
+        self.assertEqual(distribution_closure(["cg-a"]), {"cg-a"})
+        self.assertEqual(distribution_closure(["cg-a[s3]"]), {"cg-a", "cg-s3"})
+
+    def test_dependency_with_a_false_environment_marker_is_skipped(self) -> None:
+        self._site(
+            {
+                **_dist_info(
+                    "site-packages", "cg-a", "1.0", requires=('cg-old; python_version < "3"',)
+                ),
+                **_dist_info("site-packages", "cg-old", "1.0"),
+            }
+        )
+        self.assertEqual(distribution_closure(["cg-a"]), {"cg-a"})
+
+    def test_requirement_not_installed_contributes_only_its_name(self) -> None:
+        self.assertEqual(
+            distribution_closure(["cg-not-installed[extra]>=2"]), {"cg-not-installed"}
+        )
+
+    def test_names_are_canonical(self) -> None:
+        self.assertEqual(distribution_closure(["CG_Mixed.Case"]), {"cg-mixed-case"})
 
 
 class TestBundleDescMerge(unittest.TestCase):
@@ -407,6 +518,18 @@ class TestBundleDescMerge(unittest.TestCase):
         self.assertEqual(
             b, BundleDesc(local_files={Path("/b.py")}, tp_deps={"requests": "2.31.0"})
         )
+
+
+class TestBundleDescPipRequirements(unittest.TestCase):
+    def test_pins_and_sorts(self) -> None:
+        desc = BundleDesc(local_files=set(), tp_deps={"tqdm": "4.67.3", "haikunator": "2.1.0"})
+        self.assertEqual(
+            desc.pip_requirements(frozenset()), ["haikunator==2.1.0", "tqdm==4.67.3"]
+        )
+
+    def test_excludes_provided_distributions(self) -> None:
+        desc = BundleDesc(local_files=set(), tp_deps={"tqdm": "4.67.3", "ray": "2.55.1"})
+        self.assertEqual(desc.pip_requirements(frozenset({"ray"})), ["tqdm==4.67.3"])
 
 
 class TestStage(unittest.TestCase):
