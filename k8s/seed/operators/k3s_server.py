@@ -26,11 +26,6 @@ from k8s.seed.pipeline import Operator
 
 log = logging.getLogger("k8s.seed.operators.k3s_server")
 
-# Pin k3s. Without this, the installer pulls the current "stable" channel,
-# so successive seeds silently bump the cluster's k8s minor and can break
-# Argo CD's bundled OpenAPI (e.g. unknown Deployment .status fields).
-K3S_VERSION = "v1.35.4+k3s1"
-
 
 class K3sServer(Operator):
     def setup(self, deps: dict) -> None:
@@ -74,7 +69,7 @@ node-label:
   - role=head
 EOF
             if [[ ! -x /usr/local/bin/k3s ]]; then
-                curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={shlex.quote(K3S_VERSION)} sh -
+                curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={shlex.quote(util.K3S_VERSION)} sh -
             fi
         """),
         )

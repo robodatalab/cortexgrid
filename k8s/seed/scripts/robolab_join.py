@@ -8,8 +8,9 @@ install command, disables the timer, and removes its own files.
 
 Runtime deps: python3 (pre-installed on Ubuntu); standard library only.
 
-The head server URL is read from /etc/default/robolab-bootstrap (mode 0600),
-which JoinCluster._deferred_join writes at setup time.
+The head server URL and the k3s version to install are read from
+/etc/default/robolab-bootstrap (mode 0600), which JoinCluster._deferred_join
+writes at setup time.
 """
 
 import json
@@ -66,6 +67,7 @@ def main() -> None:
         sys.exit(0)
 
     head_url = os.environ["CORTEXGRID_HEAD_URL"].rstrip("/")
+    k3s_version = os.environ["K3S_VERSION"]
     token = _get_secret(head_url, K3S_TOKEN_SECRET)
     head_ip = _get_secret(head_url, CONTROL_PLANE_IP_SECRET)
     if not token or not head_ip:
@@ -73,6 +75,7 @@ def main() -> None:
 
     subprocess.run(
         f"curl -sfL https://get.k3s.io | "
+        f"INSTALL_K3S_VERSION='{k3s_version}' "
         f"K3S_URL='https://{head_ip}:6443' K3S_TOKEN='{token}' sh -",
         shell=True,
         check=True,

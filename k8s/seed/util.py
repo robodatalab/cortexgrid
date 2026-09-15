@@ -343,6 +343,14 @@ def install_prereqs(c: Connection) -> None:
     )
 
 
+# Pin k3s, for the head and every worker alike. Without this, the installer
+# pulls the current "stable" channel, so successive seeds silently bump the
+# cluster's k8s minor and can break Argo CD's bundled OpenAPI (e.g. unknown
+# Deployment .status fields), and a worker joined later can run a newer k8s
+# than the server, which Kubernetes does not support. The installers skip
+# nodes that already have k3s, so bumping this also means re-seeding them.
+K3S_VERSION = "v1.35.4+k3s1"
+
 K3S_SERVER_UNIT = "k3s.service"
 K3S_AGENT_UNIT = "k3s-agent.service"
 
