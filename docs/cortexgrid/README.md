@@ -127,9 +127,24 @@ s3_client = cortexgrid.get_s3_client()           # boto3 S3 client
 
 #### Model registry and serving
 
-Save a trained model's weights together with the serve-app that fronts it, then deploy it as a Ray Serve application:
+Save a trained model's weights together with the serve-app that fronts it, then deploy it as a Ray Serve application. A serve-app is a class fronted by a FastAPI app, marked with cortexgrid's `serve.ingress` (not Ray's):
 
 ```python
+from cortexgrid import serve
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@serve.ingress(app)
+class MyServeApp:
+    num_gpus = 1
+
+    def __init__(self, family: str, suffix: str, run_name: str) -> None:
+        self._weights_dir = cortexgrid.load_model(family, suffix, run_name)
+
+    @app.post("/complete")
+    async def complete(self, body: dict): ...
+
 saved = cortexgrid.save_model(weights_dir, MyServeApp, family="qwen", suffix="instruct")
 deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name, wait=True)
 print(deployed.url)

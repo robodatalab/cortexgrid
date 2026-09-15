@@ -2,7 +2,8 @@
 
 Ray Serve's REST `import_path` resolves to `cortexgrid._serve_entry:build`.
 On the cluster replica, `build` imports the serve-app class bundled at
-`save_model` time (its import path was stored as an MLflow tag), reads its
+`save_model` time (its import path was stored as an MLflow tag), applies Ray's
+ingress with the app it was marked with by `cortexgrid.serve.ingress`, reads its
 `num_gpus`/`num_replicas` class attributes for actor placement, wraps it as a
 Ray Serve deployment, and binds it with the (family, suffix, run_name)
 identifiers.
@@ -27,10 +28,17 @@ from typing import Any
 from ray import serve
 from ray.serve.deployment import Application
 
+from cortexgrid.serve import ingress_app
+
 
 def build(args: dict[str, Any]) -> Application:
     module_name, class_name = args["class_import_path"].split(":")
     serve_app = getattr(importlib.import_module(module_name), class_name)
+    # Models saved with a class wrapped by ray.serve.ingress itself carry no
+    # mark and are deployed as they are.
+    app = ingress_app(serve_app)
+    if app is not None:
+        serve_app = serve.ingress(app)(serve_app)
     num_gpus = getattr(serve_app, "num_gpus", 0)
     num_replicas = getattr(serve_app, "num_replicas", 1)
     return serve.deployment(serve_app).options(

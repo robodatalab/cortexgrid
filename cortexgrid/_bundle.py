@@ -100,7 +100,10 @@ def bundle(seed: Path) -> BundleDesc:
 
 def stage(files: set[Path], dest: Path) -> None:
     """Copy `files` under `dest`, each at its import path (relative to the
-    sys.path entry it lives under), so `dest` on sys.path imports them all."""
+    sys.path entry it lives under), so `dest` on sys.path imports them all.
+    `dest` is created even when `files` is empty (e.g. code that lives entirely
+    in installed distributions)."""
+    dest.mkdir(parents=True, exist_ok=True)
     for file in files:
         target = dest / file.relative_to(_sys_path_root(file))
         target.parent.mkdir(parents=True, exist_ok=True)

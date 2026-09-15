@@ -143,7 +143,8 @@ def save_model(
     the caller's concern. That directory boundary is the open-closed extension
     point - new model kinds need no change here.
 
-    `serve_app` is the Ray Serve ingress class that will front these weights.
+    `serve_app` is the `cortexgrid.serve.ingress` class that will front these
+    weights.
     Its code is bundled and its import path, bundle URL, and pip list are
     stored as tags on the ModelVersion so `deploy_model` can bind it later
     without the caller holding the class object."""

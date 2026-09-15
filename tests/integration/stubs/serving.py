@@ -6,8 +6,8 @@ separate objects:
   - the stored "weights" are an opaque directory - here a single weights.json
     holding one integer constant, the kind of artifact a training job produces
     before `cortexgrid.save_model(weights_dir, ...)`;
-  - the serve-app is a Ray Serve ingress class that downloads that directory at
-    startup via `cortexgrid.load_model` and exposes its own route.
+  - the serve-app is a `cortexgrid.serve.ingress` class that downloads that
+    directory at startup via `cortexgrid.load_model` and exposes its own route.
 
 `contact_deployment` exercises the deploy-then-call path end-to-end and lives
 at module level so `cortexgrid.remote()` can ship it to a Ray worker.
@@ -20,9 +20,9 @@ from pathlib import Path
 
 import requests
 from fastapi import FastAPI
-from ray import serve
 
 import cortexgrid
+from cortexgrid import serve
 
 
 _CONSTANT_FILE = "weights.json"

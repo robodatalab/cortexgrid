@@ -6,6 +6,9 @@ import unittest
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+from fastapi import FastAPI
+from ray import serve as ray_serve
+
 from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
@@ -291,6 +294,11 @@ class _ServeApp:
     pass
 
 
+@ray_serve.ingress(FastAPI())
+class _RayIngressServeApp:
+    pass
+
+
 class TestServeDependencies(unittest.TestCase):
     def test_bundle_class_records_pip_requirements_the_worker_lacks(self) -> None:
         desc = BundleDesc(
@@ -308,6 +316,15 @@ class TestServeDependencies(unittest.TestCase):
             meta = bundle_class(_ServeApp, "fam", "suf", "run")
 
         self.assertEqual(meta.pip_requirements, ["tqdm==4.67.3"])
+
+    def test_bundle_class_rejects_a_class_wrapped_by_ray_ingress(self) -> None:
+        with (
+            patch("cortexgrid.model_serving.bundle") as bundle,
+            self.assertRaisesRegex(ValueError, "cortexgrid.serve.ingress"),
+        ):
+            bundle_class(_RayIngressServeApp, "fam", "suf", "run")
+
+        bundle.assert_not_called()
 
     def test_spec_installs_pip_requirements(self) -> None:
         meta = BundleMetadata(

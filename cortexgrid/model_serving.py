@@ -104,7 +104,18 @@ def bundle_class(
 
     Returns the metadata `deploy_model` needs later; callers (typically
     `save_model`) persist it on the ModelVersion so the deploy step can run
-    without holding the class object."""
+    without holding the class object.
+
+    Raises ValueError for a class wrapped by `ray.serve.ingress`: that wrapper
+    is a subclass Ray defines in its own module, and on older Ray (e.g. 2.9) it
+    reports that module as its own, so the class's source and import path would
+    resolve to Ray instead of the serve-app. `cortexgrid.serve.ingress` leaves
+    the class unwrapped."""
+    if any(klass.__module__.startswith("ray.serve") for klass in cls.__mro__):
+        raise ValueError(
+            f"{cls.__name__} is wrapped by ray.serve.ingress; decorate it with "
+            "cortexgrid.serve.ingress instead (from cortexgrid import serve)"
+        )
     entry_file = Path(inspect.getfile(cls)).resolve()
     serve_entry = Path(__file__).with_name("_serve_entry.py")
     desc = bundle(entry_file).merge(bundle(serve_entry))

@@ -563,6 +563,15 @@ class TestStage(unittest.TestCase):
         # lib/ from site-packages, side by side.
         self.assertEqual(staged, {"app/__init__.py", "app/main.py", "lib/__init__.py"})
 
+    def test_stage_creates_dest_even_with_no_files(self) -> None:
+        root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        dest = root / "code"
+
+        stage(set(), dest)
+
+        self.assertTrue(dest.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
