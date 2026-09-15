@@ -13,7 +13,7 @@ component | unit test | docker image | integration test |
 | arc runner | - | <!--s:build_arc_runner-->🔴 failing<!--/s--> | - |
 | ui backend | <!--s:test_cortexgrid_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_backend-->🟢 passing<!--/s--> | - |
 | ui frontend | <!--s:test_cortexgrid_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | - |
-| k8s seed | <!--s:test_k8s_seed-->🔴 failing<!--/s--> | - | - |
+| k8s seed | <!--s:test_k8s_seed-->🟢 passing<!--/s--> | - | - |
 
 
 > **Run any Python function on your own GPUs — no Dockerfile, no decorator, no commit.**
