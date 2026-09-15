@@ -27,7 +27,7 @@ import cortexgrid
 cortexgrid.init(experiment="weather-forecast")
 ```
 
-That single call reads the service URLs from the head's secrets server at `$CORTEXGRID_HEAD_URL` and connects to all services through them. It also creates (or finds) the named MLflow experiment and starts a new run inside it. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
+That single call reads the service URLs from the head's secrets server at `$CORTEXGRID_HEAD_URL` and connects to all services through them. It also creates (or finds) the named MLflow experiment and starts a new run inside it. If an experiment of that name was deleted (e.g. from the UI), a new experiment is created under the name: MLflow keeps a deleted experiment's name reserved, so the deleted one is renamed to `<name>__deleted__<id>` first (`delete_experiment` does that rename at deletion). Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
 
 **One experiment per binary run.** `cortexgrid.init()` may only be called once per process. Every subsequent `cortexgrid.log_metric`, `cortexgrid.log_artifact`, checkpoint, and `cortexgrid.remote()` submission is scoped to that experiment+run. Remote jobs dispatched by the control plane inherit the experiment+run via the pickled payload, so their logging flows into the same MLflow run as the parent binary.
 

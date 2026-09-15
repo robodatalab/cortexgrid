@@ -172,10 +172,20 @@ class FakeMlflowClient:
         raise KeyError(run_id)
 
     def get_experiment_by_name(self, name: str) -> FakeMlflowExperiment | None:
+        # Like mlflow: deleted experiments are returned too.
         for e in self.experiments:
-            if e.name == name and e.lifecycle_stage == "active":
+            if e.name == name:
                 return e
         return None
+
+    def rename_experiment(self, experiment_id: str, new_name: str) -> None:
+        e = self.get_experiment(experiment_id)
+        if e.lifecycle_stage != "active":
+            raise ValueError("Cannot rename a non-active experiment.")
+        e.name = new_name
+
+    def restore_experiment(self, experiment_id: str) -> None:
+        self.get_experiment(experiment_id).lifecycle_stage = "active"
 
     def delete_run(self, run_id: str) -> None:
         for r in self.runs:
