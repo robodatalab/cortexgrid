@@ -91,6 +91,8 @@ make head-aws-destroy                     # single terraform destroy of the plat
 
 `head-setup` starts the head secrets server and publishes `.env.head` (plus terraform outputs on AWS) to it, installs k3s, stages [k8s/argocd.yaml](../k8s/argocd.yaml), publishes the k3s token + service URLs to the secrets server, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo_deployments/](../k8s/argo_deployments/) from `main`. Topology is recorded in [infra-config.yaml](../infra-config.yaml) at the repo root.
 
+Both `head-setup` and `worker-setup` bind k3s to Tailscale with a systemd drop-in (`/etc/systemd/system/k3s.service.d/10-tailscale.conf`, `k3s-agent.service.d` on workers; see `bind_k3s_to_tailscale` in [k8s/seed/util.py](../k8s/seed/util.py)): `After=`/`Wants=tailscaled.service` and `PartOf=tailscaled.service`. flannel's VXLAN device (`flannel.1`) is bound to `tailscale0`, and restarting tailscaled (e.g. `tailscale update`) recreates `tailscale0`, which deletes `flannel.1`; k3s does not recreate it until k3s restarts, so cross-node pod traffic silently breaks. With the drop-in, a tailscaled restart restarts k3s too (running pods stay up - k3s units use `KillMode=process`). `node-teardown` removes the drop-in.
+
 ### Secrets management
 
 Every secret lives on the head in `/etc/cortexgrid/.env`, served by a small HTTP server ([cortexgrid_head.py](../k8s/seed/scripts/cortexgrid_head.py), systemd unit `cortexgrid-head`, port 7700). It runs on the host rather than in k8s, so it is up before the cluster, and teardown removes the service but keeps the file. There is no authentication: the server is only reachable over the tailnet.

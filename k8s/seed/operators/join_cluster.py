@@ -43,6 +43,9 @@ class JoinCluster(Operator):
     def setup(self, deps: dict) -> None:
         c = deps["connection"]
         node_ip = deps["node_ip"]
+        # Before either join path installs the agent (now, or later from the
+        # deferred timer), so its first start is already ordered after tailscaled.
+        util.bind_k3s_to_tailscale(c, util.K3S_AGENT_UNIT)
         if self.mode == "direct":
             self._direct_join(c, node_ip, deps["head_ip"], deps["head_token"])
         else:
@@ -52,6 +55,7 @@ class JoinCluster(Operator):
         c = deps["connection"]
         self._uninstall_agent(c)
         self._remove_deferred_timer(c)
+        util.unbind_k3s_from_tailscale(c, util.K3S_AGENT_UNIT)
 
     def _direct_join(self, c, node_ip: str, head_ip: str, head_token: str) -> None:
         log.info(f"Installing k3s agent on {c.host} → control-plane at {head_ip}...")
