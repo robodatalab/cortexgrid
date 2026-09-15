@@ -326,6 +326,23 @@ class TestServeDependencies(unittest.TestCase):
 
         bundle.assert_not_called()
 
+    def test_bundle_class_uploads_the_zip_of_a_dotted_model_name(self) -> None:
+        uploaded: list[tuple[str, bool]] = []
+
+        def fake_upload(local_path: str, dest_path: str) -> str:
+            # the temp dir is gone after bundle_class returns; check it now
+            uploaded.append((Path(local_path).name, Path(local_path).is_file()))
+            return "s3://b/x.zip"
+
+        desc = BundleDesc(local_files={Path(__file__).resolve()}, tp_deps={})
+        with (
+            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+        ):
+            bundle_class(_ServeApp, "Qwen2.5-0.5B", "Instruct", "run")
+
+        self.assertEqual(uploaded, [("Qwen2.5-0.5B__Instruct.zip", True)])
+
     def test_spec_installs_pip_requirements(self) -> None:
         meta = BundleMetadata(
             bundle_url="s3://b/x.zip",
