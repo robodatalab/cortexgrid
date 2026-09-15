@@ -113,9 +113,11 @@ jobs:
         with:
           ref: ${{ github.head_ref }}
       - run: |
+          set -o pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          git fetch --depth=1 origin main
           MAIN_VERSION=$(git show origin/main:pyproject.toml | grep -E '^version = ' | head -1 | sed -E 's/version = "([^"]+)"/\1/')
           CURRENT=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
           if [ "$CURRENT" = "$MAIN_VERSION" ]; then
