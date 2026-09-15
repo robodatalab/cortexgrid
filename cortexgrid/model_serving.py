@@ -131,10 +131,13 @@ def bundle_class(
             len(desc.local_files),
             pip_requirements,
         )
-        zip_base = Path(tmp) / f"{family}__{suffix}"
-        shutil.make_archive(str(zip_base), "zip", root_dir=str(code_root))
+        # make_archive returns the path it wrote. Rebuilding it with
+        # Path.with_suffix would cut dotted names ("Qwen2.5-0.5B" -> "Qwen2.zip").
+        archive = shutil.make_archive(
+            str(Path(tmp) / f"{family}__{suffix}"), "zip", root_dir=str(code_root)
+        )
         bundle_url = upload(
-            str(zip_base.with_suffix(".zip")),
+            archive,
             dest_path=f"serve-bundles/{run_name}/{family}__{suffix}.zip",
         )
     return BundleMetadata(
