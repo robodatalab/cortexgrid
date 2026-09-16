@@ -42,9 +42,24 @@ class TestBuild(unittest.TestCase):
             build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
 
         ray_serve.ingress.assert_called_once_with(_APP)
-        ray_serve.ingress.return_value.assert_called_once_with(_MarkedServeApp)
+        (on_replica,) = ray_serve.ingress.return_value.call_args.args
+        self.assertTrue(issubclass(on_replica, _MarkedServeApp))
+        self.assertEqual(on_replica.__name__, _MarkedServeApp.__name__)
         wrapped = ray_serve.ingress.return_value.return_value
         ray_serve.deployment.assert_called_once_with(wrapped)
+
+    def test_replica_instance_creation_reapplies_ray_ingress(self) -> None:
+        with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
+            ray_serve.ingress.return_value.side_effect = lambda cls: cls
+            build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
+            (on_replica,) = ray_serve.deployment.call_args.args
+            ray_serve.ingress.reset_mock()
+
+            instance = on_replica.__new__(on_replica)
+
+        ray_serve.ingress.assert_called_once_with(_APP)
+        ray_serve.ingress.return_value.assert_called_once_with(_MarkedServeApp)
+        self.assertIsInstance(instance, _MarkedServeApp)
 
     def test_reads_resources_from_the_class(self) -> None:
         with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
