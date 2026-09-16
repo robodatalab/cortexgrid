@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { DeploymentDashboard } from '../src/components/DeploymentDashboard'
 import type { Deployment } from '../src/components/ModelsTree'
 
@@ -18,10 +18,11 @@ function renderCard(
     onStop: (d: Deployment) => void
     onNavigateToModel: (id: string) => void
   }> = {},
+  d: Deployment = deployment,
 ) {
   render(
     <DeploymentDashboard
-      deployment={deployment}
+      deployment={d}
       modelInRepository={modelInRepository}
       onNavigateToModel={handlers.onNavigateToModel ?? vi.fn()}
       onStop={handlers.onStop ?? vi.fn()}
@@ -29,7 +30,23 @@ function renderCard(
   )
 }
 
+function stubFetch(body: unknown) {
+  const fetch = vi.fn(() =>
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(body),
+    } as Response),
+  )
+  vi.stubGlobal('fetch', fetch)
+  return fetch
+}
+
 describe('DeploymentDashboard', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('shows the serving phase', () => {
     renderCard(true)
     expect(screen.getByText('Running')).toBeInTheDocument()
@@ -57,5 +74,27 @@ describe('DeploymentDashboard', () => {
     expect(
       screen.queryByRole('button', { name: 'View in repository' }),
     ).toBeNull()
+  })
+
+  it('shows the Ray messages of a failed deployment', async () => {
+    const fetch = stubFetch([
+      { source: 'application', status: 'DEPLOY_FAILED', message: 'Traceback: boom' },
+      { source: 'Model', status: 'UNHEALTHY', message: 'replica crashed' },
+    ])
+    renderCard(true, {}, { ...deployment, phase: 'failed' })
+
+    expect(await screen.findByText('Traceback: boom')).toBeInTheDocument()
+    expect(screen.getByText('application · DEPLOY_FAILED')).toBeInTheDocument()
+    expect(screen.getByText('replica crashed')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/deployments/Qwen2/instruct/boogey-46/messages',
+      expect.anything(),
+    )
+  })
+
+  it('does not fetch messages for a running deployment', () => {
+    const fetch = stubFetch([])
+    renderCard(true)
+    expect(fetch).not.toHaveBeenCalled()
   })
 })
