@@ -83,11 +83,13 @@ from cortexgrid.model_storage import (
 from cortexgrid.model_storage import save_model as _save_model_storage
 from cortexgrid.model_serving import (
     Deployment,
+    ModelDeployFailed,
     ServingStatus,
     deploy_model,
     list_deployed_models,
     model_serving_status,
     undeploy_model,
+    wait_for_model_serving,
 )
 
 
@@ -185,8 +187,10 @@ __all__ = [
     "delete_model",
     # Model serving
     "Deployment",
+    "ModelDeployFailed",
     "ServingStatus",
     "deploy_model",
+    "wait_for_model_serving",
     "model_serving_status",
     "undeploy_model",
     "list_deployed_models",

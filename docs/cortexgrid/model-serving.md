@@ -162,12 +162,13 @@ All exported from `cortexgrid.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `deploy_model(family, suffix, run_name, wait=False, timeout=300.0) -> Deployment` | Read bundle metadata from MLflow, PUT the Serve app spec. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. With `wait=True`, blocks until the controller reports the app `RUNNING`, capped at `timeout` seconds (default 300). `DEPLOY_FAILED` raises; exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded, until a terminal status (`RUNNING` or `DEPLOY_FAILED`); an app that never reaches a terminal state hangs forever. Returns a `Deployment` carrying the app URL. |
+| `deploy_model(family, suffix, run_name, wait=False, timeout=300.0) -> Deployment` | Read bundle metadata from MLflow, PUT the Serve app spec. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. A `DEPLOY_FAILED` app from an earlier attempt is undeployed and, like an app still `deleting`, waited out before the PUT, so the retry starts afresh. With `wait=True`, then blocks as `wait_for_model_serving` does. `timeout` (default 300) caps the whole call. Returns a `Deployment` carrying the app URL. |
+| `wait_for_model_serving(family, suffix, run_name, timeout=None)` | Block until the controller reports the app `RUNNING`. Raises `ModelDeployFailed` on `DEPLOY_FAILED` (with the controller's message) and as soon as no app exists for the model; exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded; an app that never leaves `deploying` hangs forever. |
 | `undeploy_model(family, suffix, run_name)` | Re-PUT the applications list with this app removed. |
 | `model_serving_status(family, suffix, run_name) -> ServingStatus` | The serving lifecycle of one model from the Ray Serve controller; `not_deployed` when no app exists (never raises for a missing app). See [Model serving lifecycle](#model-serving-lifecycle). |
 | `list_deployed_models() -> list[Deployment]` | GET `/api/serve/applications/` and return records whose name matches `<family>__<suffix>__<run_name>`, each carrying its serving `phase`. |
 
-`Deployment`: `family`, `suffix`, `run_name`, `url`, `phase`. `ServingStatus`: `family`, `suffix`, `run_name`, `phase`, `message`, `url`. cortexgrid returns these handles and no more; the caller builds whatever HTTP client the serve-app's routes need.
+`Deployment`: `family`, `suffix`, `run_name`, `url`, `phase`. `ServingStatus`: `family`, `suffix`, `run_name`, `phase`, `message`, `url`. `ModelDeployFailed` subclasses `RuntimeError`. cortexgrid returns these handles and no more; the caller builds whatever HTTP client the serve-app's routes need.
 
 The Ray Serve app name is `<family>__<suffix>__<run_name>`; the route prefix is `/r/<family>/<suffix>/<run_name>`. The serve-app's own routes hang off that prefix (e.g. `{url}/complete`, `{url}/generate`). `family`, `suffix`, `run_name` must not contain `/` or `__`.
 
@@ -255,7 +256,7 @@ d = cortexgrid.deploy_model("qwen", "instruct", run_name, wait=True, timeout=300
 print(d.url, d.phase)
 ```
 
-`deploy_model` PUTs the Serve app spec and returns a `Deployment` immediately when `wait=False` (default). With `wait=True` it blocks until the controller reports `RUNNING`, capped at `timeout` seconds; `DEPLOY_FAILED` raises `RuntimeError`, and exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded until a terminal status. It is idempotent on the triple - re-deploying replaces the app. The model must be registered and `ready`.
+`deploy_model` PUTs the Serve app spec and returns a `Deployment` immediately when `wait=False` (default). With `wait=True` it blocks until the controller reports `RUNNING`, capped at `timeout` seconds; `DEPLOY_FAILED` or a missing app raises `ModelDeployFailed`, and exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded. To wait on a deploy started elsewhere, call `wait_for_model_serving(family, suffix, run_name, timeout=...)` directly. It is idempotent on the triple - re-deploying replaces the app. Re-deploying a `failed` app first undeploys it and waits until it is gone: Ray only restarts a failed deployment that was deleted first, so PUTting the same spec over it would report `DEPLOY_FAILED` again without retrying. `timeout` caps that wait too. The model must be registered and `ready`.
 
 ### Getting serving status
 
@@ -282,9 +283,10 @@ Re-PUTs the applications list without this app; the controller tears down the re
 
 | symptom | cause | fix |
 |---|---|---|
-| `deploy_model(wait=True)` raises `RuntimeError: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
-| `deploy_model(wait=True)` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
-| `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing. |
+| `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
+| `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
+| `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... does not exist` | the app was never deployed, was undeployed, or was dropped by a concurrent `deploy_model` (each deploy PUTs the whole applications list, so a later PUT can drop an app an earlier one added) | check `list_deployed_models`; deploy again. |
+| `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing (`deploy_model` clears the failed app itself). |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
 | deployed but a route returns 404 | wrong route prefix, or hitting the app before `running` | routes hang off `{d.url}` = `/r/<family>/<suffix>/<run_name>`; confirm `phase == "running"` first. |
 

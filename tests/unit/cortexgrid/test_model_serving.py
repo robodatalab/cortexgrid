@@ -15,9 +15,9 @@ from ray._private.runtime_env.packaging import unzip_package
 from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
+    ModelDeployFailed,
     _build_application_spec,
     _load_bundle_metadata,
-    _wait_for_application_running,
     bundle_class,
     deploy_model,
     list_deployed_models,
@@ -25,6 +25,7 @@ from cortexgrid.model_serving import (
     model_serving_messages,
     model_serving_status,
     undeploy_model,
+    wait_for_model_serving,
 )
 
 
@@ -150,14 +151,92 @@ class TestModelServing(unittest.TestCase):
         self.state.message = "replica died on import"
 
         with patch("cortexgrid.model_serving.time.sleep"):
-            with self.assertRaises(RuntimeError) as ctx:
+            with self.assertRaises(ModelDeployFailed) as ctx:
                 deploy_model("Qwen2", "instruct", "boogey-46", wait=True)
 
         self.assertIn("DEPLOY_FAILED", str(ctx.exception))
         self.assertIn("replica died on import", str(ctx.exception))
 
+    def test_redeploying_a_failed_app_removes_it_before_putting_it_back(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        self.state.apps[name] = {"name": name}
+        self.state.status = "DEPLOY_FAILED"
+        puts: list[list[str]] = []
 
-class TestWaitForApplicationRunning(unittest.TestCase):
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications", side_effect=put
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [[], [name]])
+
+    def test_redeploying_waits_until_a_deleting_app_is_gone(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        self.state.apps[name] = {"name": name}
+        self.state.status = "DELETING"
+        polls_until_gone = 3
+        still_deleting_at_put: list[bool] = []
+
+        def get_details() -> dict[str, Any]:
+            nonlocal polls_until_gone
+            polls_until_gone -= 1
+            if polls_until_gone == 0:
+                self.state.apps.pop(name)
+            return self.state.get_details()
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            still_deleting_at_put.append(polls_until_gone > 0)
+            self.state.put(applications)
+
+        with (
+            patch("cortexgrid.model_serving.time.sleep"),
+            patch(
+                "cortexgrid.model_serving.get_serve_details", side_effect=get_details
+            ),
+            patch(
+                "cortexgrid.model_serving.put_serve_applications", side_effect=put
+            ),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(still_deleting_at_put, [False])
+
+    def test_redeploying_times_out_while_the_old_app_is_still_deleting(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        self.state.apps[name] = {"name": name}
+        self.state.status = "DELETING"
+
+        with (
+            patch("cortexgrid.model_serving.time.sleep"),
+            self.assertRaises(TimeoutError),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46", timeout=0.05)
+
+        self.assertEqual(self.state.apps, {name: {"name": name}})
+
+    def test_redeploying_a_deploying_app_puts_it_without_removing_it(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        self.state.apps[name] = {"name": name}
+        self.state.status = "DEPLOYING"
+        puts: list[list[str]] = []
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications", side_effect=put
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [[name]])
+
+
+class TestWaitForModelServing(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeServeState()
         self.state.apps["Qwen2__instruct__boogey-46"] = {
@@ -179,9 +258,7 @@ class TestWaitForApplicationRunning(unittest.TestCase):
         self.state.message = "still booting"
 
         with self.assertRaises(TimeoutError) as ctx:
-            _wait_for_application_running(
-                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
-            )
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
 
         self.assertIn("DEPLOYING", str(ctx.exception))
         self.assertIn("still booting", str(ctx.exception))
@@ -190,17 +267,13 @@ class TestWaitForApplicationRunning(unittest.TestCase):
         self.state.status = "UNHEALTHY"
 
         with self.assertRaises(TimeoutError):
-            _wait_for_application_running(
-                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
-            )
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
 
     def test_finite_timeout_elapsing_raises_timeout_error(self) -> None:
         self.state.status = "DEPLOYING"
 
         with self.assertRaises(TimeoutError):
-            _wait_for_application_running(
-                "Qwen2__instruct__boogey-46", timeout_s=0.05, interval_s=0.0
-            )
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
 
     def test_unbounded_timeout_returns_once_status_reaches_running(self) -> None:
         statuses = ["DEPLOYING", "DEPLOYING", "RUNNING"]
@@ -212,9 +285,7 @@ class TestWaitForApplicationRunning(unittest.TestCase):
         with patch(
             "cortexgrid.model_serving.get_serve_details", side_effect=get_details
         ):
-            _wait_for_application_running(
-                "Qwen2__instruct__boogey-46", timeout_s=None, interval_s=0.0
-            )
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
 
         self.assertEqual(statuses, [])
 
@@ -222,12 +293,39 @@ class TestWaitForApplicationRunning(unittest.TestCase):
         self.state.status = "DEPLOY_FAILED"
         self.state.message = "replica died on import"
 
-        with self.assertRaises(RuntimeError) as ctx:
-            _wait_for_application_running(
-                "Qwen2__instruct__boogey-46", timeout_s=None, interval_s=0.0
-            )
+        with self.assertRaises(ModelDeployFailed) as ctx:
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
 
         self.assertIn("DEPLOY_FAILED", str(ctx.exception))
+
+    def test_missing_app_raises_regardless_of_unbounded_timeout(self) -> None:
+        self.state.apps.clear()
+
+        with self.assertRaises(ModelDeployFailed) as ctx:
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_app_removed_while_deploying_raises(self) -> None:
+        self.state.status = "DEPLOYING"
+        polls = 0
+
+        def get_details() -> dict[str, Any]:
+            nonlocal polls
+            polls += 1
+            if polls == 3:
+                self.state.apps.clear()
+            return self.state.get_details()
+
+        with (
+            patch(
+                "cortexgrid.model_serving.get_serve_details", side_effect=get_details
+            ),
+            self.assertRaises(ModelDeployFailed),
+        ):
+            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+
+        self.assertEqual(polls, 3)
 
 
 class TestModelServingStatus(unittest.TestCase):
