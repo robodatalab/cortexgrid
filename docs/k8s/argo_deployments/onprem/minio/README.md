@@ -10,7 +10,7 @@ Training pipelines, MLflow, and future workloads all need durable object storage
 
 ## Why raw manifests (not a Helm chart)
 
-Same reasoning as other deployments: one instance, one environment, no templating needs. We initially used the Bitnami MinIO Helm chart but Bitnami deleted the free image tags from Docker Hub in August 2024. The official `minio/minio` image is multi-arch (ARM64 works on DGX), stable, and has no licensing churn — much simpler as a raw Deployment.
+Same reasoning as other deployments: one instance, one environment, no templating needs. We initially used the Bitnami MinIO Helm chart but Bitnami deleted the free image tags from Docker Hub in August 2024. The official MinIO image is multi-arch (ARM64 works on DGX) and much simpler as a raw Deployment. MinIO stopped publishing community images in October 2025 and deleted `minio/minio` and `minio/mc` from Docker Hub in September 2026, so the chart pulls the same tags from `quay.io/minio/`. Those tags are frozen and get no security fixes, so MinIO will eventually need replacing.
 
 ## Dependencies
 
