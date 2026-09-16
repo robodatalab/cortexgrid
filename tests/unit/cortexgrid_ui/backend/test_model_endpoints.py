@@ -201,5 +201,39 @@ class TestRunByNameEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class TestDeploymentMessagesEndpoint(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+
+    def test_returns_controller_messages_for_the_deployment(self) -> None:
+        details = {
+            "applications": {
+                "Qwen2__instruct__boogey-46": {
+                    "status": "DEPLOY_FAILED",
+                    "message": "Traceback: boom",
+                    "deployments": {},
+                },
+            }
+        }
+        with patch(
+            "cortexgrid.model_serving.get_serve_details", return_value=details
+        ):
+            response = self.client.get(
+                "/api/deployments/Qwen2/instruct/boogey-46/messages"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            [
+                {
+                    "source": "application",
+                    "status": "DEPLOY_FAILED",
+                    "message": "Traceback: boom",
+                }
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

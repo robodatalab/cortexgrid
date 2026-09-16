@@ -15,7 +15,12 @@ from cortexgrid.experiment import (
 )
 from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import stop_experiment_run_jobs
-from cortexgrid.model_serving import deploy_model, undeploy_model
+from cortexgrid.model_serving import (
+    ServingMessage,
+    deploy_model,
+    model_serving_messages,
+    undeploy_model,
+)
 from cortexgrid.model_storage import delete_model
 from cortexgrid.ray_util import get_ray_logs
 from cortexgrid.secrets import (
@@ -191,6 +196,13 @@ def deployment_create(family: str, suffix: str, run_name: str) -> dict[str, str]
 def deployment_delete(family: str, suffix: str, run_name: str) -> dict[str, str]:
     undeploy_model(family, suffix, run_name)
     return {"status": "ok"}
+
+
+@app.get("/api/deployments/{family}/{suffix}/{run_name}/messages")
+def deployment_messages(
+    family: str, suffix: str, run_name: str
+) -> list[ServingMessage]:
+    return model_serving_messages(family, suffix, run_name)
 
 
 @app.delete("/api/models/{family}")

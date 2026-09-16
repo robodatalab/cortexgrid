@@ -22,6 +22,7 @@ from cortexgrid.model_serving import (
     deploy_model,
     list_deployed_models,
     metadata_to_tags,
+    model_serving_messages,
     model_serving_status,
     undeploy_model,
 )
@@ -290,6 +291,58 @@ class TestModelServingStatus(unittest.TestCase):
         self._serve_app("DEPLOY_FAILED", "oom")
         self.assertEqual(
             model_serving_status("fam", "suf", "run").phase, "failed"
+        )
+
+
+class TestModelServingMessages(unittest.TestCase):
+    def _messages(self, applications: dict[str, Any]) -> list[tuple[str, str, str]]:
+        with patch(
+            "cortexgrid.model_serving.get_serve_details",
+            return_value={"applications": applications},
+        ):
+            return [
+                (m.source, m.status, m.message)
+                for m in model_serving_messages("fam", "suf", "run")
+            ]
+
+    def test_empty_when_no_serve_app(self) -> None:
+        self.assertEqual(self._messages({}), [])
+
+    def test_application_message_precedes_deployment_messages(self) -> None:
+        app = {
+            "status": "DEPLOY_FAILED",
+            "message": "app failed",
+            "deployments": {
+                "Model": {"status": "DEPLOY_FAILED", "message": "replica crashed"},
+            },
+        }
+        self.assertEqual(
+            self._messages({"fam__suf__run": app}),
+            [
+                ("application", "DEPLOY_FAILED", "app failed"),
+                ("Model", "DEPLOY_FAILED", "replica crashed"),
+            ],
+        )
+
+    def test_skips_sources_without_a_message(self) -> None:
+        app = {
+            "status": "UNHEALTHY",
+            "message": "",
+            "deployments": {
+                "Healthy": {"status": "HEALTHY", "message": ""},
+                "Sick": {"status": "UNHEALTHY", "message": "health check failed"},
+            },
+        }
+        self.assertEqual(
+            self._messages({"fam__suf__run": app}),
+            [("Sick", "UNHEALTHY", "health check failed")],
+        )
+
+    def test_strips_ansi_color_escapes(self) -> None:
+        app = {"status": "DEPLOY_FAILED", "message": "\x1b[31m!!! FAIL\x1b[39m pickle"}
+        self.assertEqual(
+            self._messages({"fam__suf__run": app}),
+            [("application", "DEPLOY_FAILED", "!!! FAIL pickle")],
         )
 
 

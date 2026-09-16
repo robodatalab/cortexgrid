@@ -21,6 +21,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import re
 import shutil
 import tempfile
 import time
@@ -404,3 +405,43 @@ def model_serving_status(
         message=str(app.get("message", "")) or raw,
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
     )
+
+
+@dataclass
+class ServingMessage:
+    """One message the Ray Serve controller reports for a model's app. `source`
+    is "application" for the app-level message (e.g. the app failed to build)
+    or a deployment name for that deployment's message (e.g. its replicas
+    failed to start); `status` is the raw Ray Serve status of that source."""
+
+    source: str
+    status: str
+    message: str
+
+
+# Ray colors parts of its messages (e.g. the serialization checker's "!!! FAIL")
+# with ANSI escapes, which are noise outside a terminal.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def model_serving_messages(
+    family: str, suffix: str, run_name: str
+) -> list[ServingMessage]:
+    """Return the non-empty controller messages for a model's Serve app: the
+    app-level message first, then each deployment's. Empty when no app exists.
+    This is where Ray explains a DEPLOY_FAILED or UNHEALTHY app."""
+    app = get_serve_details().get("applications", {}).get(
+        _app_name(family, suffix, run_name)
+    )
+    if app is None:
+        return []
+    sources = [("application", app)] + list(app.get("deployments", {}).items())
+    return [
+        ServingMessage(
+            source=source,
+            status=str(details.get("status", "")),
+            message=_ANSI_ESCAPE.sub("", str(details["message"])),
+        )
+        for source, details in sources
+        if details.get("message")
+    ]

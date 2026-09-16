@@ -1,7 +1,9 @@
 // The serving-side detail card. Reuses the model-dashboard card chrome (same
 // visual language as the registry card) but is driven purely by a Deployment.
+import { useEffect, useState } from "react";
 import "./ModelDashboard.css";
 import type { Deployment } from "./ModelsTree";
+import { TitledFrame } from "./TitledFrame";
 import { deploymentId } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
@@ -21,6 +23,14 @@ type Props = {
     onStop: (deployment: Deployment) => void;
 };
 
+// One Ray Serve controller message for the app or one of its deployments
+// (cortexgrid.model_serving.ServingMessage).
+type ServingMessage = {
+    source: string;
+    status: string;
+    message: string;
+};
+
 function appName(d: Deployment): string {
     return `${d.family}__${d.suffix}__${d.run_name}`;
 }
@@ -34,6 +44,43 @@ function grafanaUrl(d: Deployment): string {
     return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
 }
 
+function messagesUrl(d: Deployment): string {
+    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/messages`;
+}
+
+// Ray's explanation of a failed or unhealthy deployment, fetched when the
+// deployment enters an error phase. Results are tagged with the url + phase
+// they were fetched for, so a response for another deployment or an earlier
+// phase is never shown. null until loaded, and for non-error phases.
+function useServingMessages(deployment: Deployment): ServingMessage[] | null {
+    const failed = servingTier(deployment.phase) === "error";
+    const url = messagesUrl(deployment);
+    const key = `${url}:${deployment.phase}`;
+    const [loaded, setLoaded] = useState<{
+        key: string;
+        messages: ServingMessage[];
+    } | null>(null);
+
+    useEffect(() => {
+        if (!failed) return;
+        const controller = new AbortController();
+        fetch(url, { signal: controller.signal })
+            .then((r) =>
+                r.ok ? (r.json() as Promise<ServingMessage[]>) : null,
+            )
+            .then((messages) => {
+                if (messages) setLoaded({ key, messages });
+            })
+            .catch((err: unknown) => {
+                if (err instanceof DOMException && err.name === "AbortError")
+                    return;
+            });
+        return () => controller.abort();
+    }, [failed, url, key]);
+
+    return failed && loaded?.key === key ? loaded.messages : null;
+}
+
 export function DeploymentDashboard({
     deployment,
     modelInRepository,
@@ -41,6 +88,7 @@ export function DeploymentDashboard({
     onStop,
 }: Props) {
     const tier = servingTier(deployment.phase);
+    const messages = useServingMessages(deployment);
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
@@ -117,6 +165,26 @@ export function DeploymentDashboard({
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
             </dl>
+            {messages !== null && (
+                <section className="model-dashboard__messages">
+                    {messages.length === 0 ? (
+                        <div className="model-dashboard__messages-empty">
+                            (no messages)
+                        </div>
+                    ) : (
+                        messages.map((m) => (
+                            <TitledFrame
+                                key={m.source}
+                                title={`${m.source} · ${m.status}`}
+                            >
+                                <pre className="model-dashboard__message">
+                                    {m.message}
+                                </pre>
+                            </TitledFrame>
+                        ))
+                    )}
+                </section>
+            )}
         </div>
     );
 }
