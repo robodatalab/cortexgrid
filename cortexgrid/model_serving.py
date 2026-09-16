@@ -248,36 +248,90 @@ def _current_application_specs() -> list[dict[str, Any]]:
     return specs
 
 
-def _wait_for_application_running(
-    name: str, timeout_s: float | None = 300.0, interval_s: float = 2.0
-) -> None:
-    """Poll the Serve controller until the named application is RUNNING.
+class ModelDeployFailed(RuntimeError):
+    """A model's Serve app cannot reach RUNNING: the controller reported
+    DEPLOY_FAILED, or no app exists for the model. Subclasses RuntimeError, which
+    `deploy_model(wait=True)` raised before this type existed."""
 
-    Raises immediately on DEPLOY_FAILED with the controller's message. Other
-    non-RUNNING statuses (NOT_STARTED, DEPLOYING, UNHEALTHY) are treated as
-    transient until the timeout fires. With `timeout_s=None` there is no
-    deadline: the loop blocks until a terminal status (RUNNING or
-    DEPLOY_FAILED) is reached.
+
+_SERVING_POLL_INTERVAL_S = 2.0
+
+
+def _deadline(timeout: float | None) -> float | None:
+    return None if timeout is None else time.monotonic() + timeout
+
+
+def _past(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def wait_for_model_serving(
+    family: str, suffix: str, run_name: str, timeout: float | None = None
+) -> None:
+    """Block until the model's Serve app is RUNNING.
+
+    Raises ModelDeployFailed on DEPLOY_FAILED, carrying the controller's message,
+    and as soon as no app exists for the model: never deployed, undeployed, or
+    dropped by a concurrent `deploy_model` (each one GETs the applications list,
+    splices its own app in and PUTs the whole list back, so a later PUT can drop
+    an app an earlier one added). NOT_STARTED, DEPLOYING, UNHEALTHY and DELETING
+    are transient; a DELETING app ends up missing. Exceeding a finite `timeout`
+    raises TimeoutError; with `timeout=None` there is no deadline.
     """
-    deadline = None if timeout_s is None else time.monotonic() + timeout_s
-    last_status: str = "(missing)"
-    last_message: str = ""
-    while deadline is None or time.monotonic() < deadline:
-        app = get_serve_details().get("applications", {}).get(name)
-        if app is not None:
-            last_status = str(app.get("status", "(missing)"))
-            last_message = str(app.get("message", ""))
-            if last_status == ApplicationStatus.RUNNING.value:
-                return
-            if last_status == ApplicationStatus.DEPLOY_FAILED.value:
-                raise RuntimeError(
-                    f"Serve app {name!r} DEPLOY_FAILED: {last_message}"
-                )
-        time.sleep(interval_s)
-    raise TimeoutError(
-        f"Serve app {name!r} did not reach RUNNING within {timeout_s}s "
-        f"(last status={last_status!r}, message={last_message!r})"
+    _wait_for_application_running(
+        _app_name(family, suffix, run_name), timeout, _deadline(timeout)
     )
+
+
+def _wait_for_application_running(
+    name: str, timeout: float | None, deadline: float | None
+) -> None:
+    """`wait_for_model_serving` against a deadline already running. `timeout`
+    only labels the TimeoutError."""
+    while True:
+        app = get_serve_details().get("applications", {}).get(name)
+        if app is None:
+            raise ModelDeployFailed(f"Serve app {name!r} does not exist")
+        status = str(app.get("status", "(missing)"))
+        message = str(app.get("message", ""))
+        if status == ApplicationStatus.RUNNING.value:
+            return
+        if status == ApplicationStatus.DEPLOY_FAILED.value:
+            raise ModelDeployFailed(f"Serve app {name!r} DEPLOY_FAILED: {message}")
+        if _past(deadline):
+            raise TimeoutError(
+                f"Serve app {name!r} did not reach RUNNING within {timeout}s "
+                f"(last status={status!r}, message={message!r})"
+            )
+        time.sleep(_SERVING_POLL_INTERVAL_S)
+
+
+def _clear_failed_application(
+    family: str, suffix: str, run_name: str, timeout: float | None, deadline: float | None
+) -> None:
+    """Remove the model's DEPLOY_FAILED Serve app, and wait until it, or an app
+    already DELETING, is gone.
+
+    Ray resets a failed deployment only when a deploy arrives after the
+    deployment is marked for deletion or its version changes. Re-PUTting an
+    identical spec over a failed app, or PUTting it back before the controller's
+    next tick has processed an undeploy, leaves the failed deployment in place,
+    and the app reports DEPLOY_FAILED again without retrying."""
+    name = _app_name(family, suffix, run_name)
+    app = get_serve_details().get("applications", {}).get(name)
+    if app is None:
+        return
+    status = app.get("status")
+    if status == ApplicationStatus.DEPLOY_FAILED.value:
+        undeploy_model(family, suffix, run_name)
+    elif status != ApplicationStatus.DELETING.value:
+        return
+    while name in get_serve_details().get("applications", {}):
+        if _past(deadline):
+            raise TimeoutError(
+                f"Serve app {name!r} was not removed within {timeout}s"
+            )
+        time.sleep(_SERVING_POLL_INTERVAL_S)
 
 
 def deploy_model(
@@ -295,19 +349,28 @@ def deploy_model(
     The serve-app class is pulled from the MLflow ModelVersion tags `save_model`
     wrote at save time; the caller does not need to hold the class object.
 
-    With `wait=True`, blocks until the Serve controller reports the app
-    RUNNING, capped at `timeout` seconds (default 300). DEPLOY_FAILED raises;
-    exceeding a finite `timeout` raises TimeoutError. With `timeout=None` the
-    wait is unbounded: it blocks until a terminal status (RUNNING or
-    DEPLOY_FAILED) is reached. Tradeoff: an app that never reaches a terminal
-    state (e.g. GPU-starved, stuck in DEPLOYING) will hang forever.
+    A DEPLOY_FAILED app left by an earlier attempt is undeployed first, and it,
+    or an app still DELETING, is waited out before the new spec is PUT, so the
+    deploy starts afresh instead of Ray reusing the failed deployment.
+
+    With `wait=True`, blocks as `wait_for_model_serving` does until the Serve
+    controller reports the app RUNNING. `timeout` (default 300) caps the whole
+    call, clearing a failed app included; exceeding it raises TimeoutError, and
+    DEPLOY_FAILED raises ModelDeployFailed. With `timeout=None` there is no cap.
+    Tradeoff: an app that never reaches a terminal state (e.g. GPU-starved,
+    stuck in DEPLOYING) will hang forever.
     """
+    deadline = _deadline(timeout)
     meta = _load_bundle_metadata(family, suffix, run_name)
     spec = _build_application_spec(family, suffix, run_name, meta)
+    _clear_failed_application(family, suffix, run_name, timeout, deadline)
     existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
+    # The controller registers the app, sets it DEPLOYING and stamps
+    # last_deployed_time_s before the PUT returns, so the wait below neither
+    # misses the app nor reads a status left by an earlier deploy.
     put_serve_applications([*existing, spec])
     if wait:
-        _wait_for_application_running(spec["name"], timeout_s=timeout)
+        _wait_for_application_running(spec["name"], timeout, deadline)
     app = get_serve_details().get("applications", {}).get(spec["name"], {})
     return Deployment(
         family=family,
