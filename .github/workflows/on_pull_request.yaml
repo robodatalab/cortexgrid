@@ -7,6 +7,7 @@ permissions:
   contents: write
   packages: write
   pull-requests: read
+  statuses: write
 
 concurrency:
   group: cortexgrid-${{ github.event.pull_request.number }}
@@ -83,6 +84,23 @@ jobs:
               changed_cortexgrid_ui_integration=true
           fi
 
+          # A run of update_image_tags' bot commit has nothing left to test or
+          # build. Building would retag every image under the new SHA and push
+          # another bot commit. all_checks_passed reports the verdict the
+          # pushing run posted on the commit instead.
+          if [[ "${{ github.actor }}" == "github-actions[bot]" ]]; then
+              changed_arc_runner=false
+              changed_cortexgrid=false
+              changed_cortexgrid_integration=false
+              changed_cortexgrid_ui_backend=false
+              changed_cortexgrid_ui_frontend=false
+              changed_cortexgrid_ui_integration=false
+              changed_jobs_control_plane=false
+              changed_k8s_seed=false
+              changed_mlflow=false
+              changed_ray=false
+          fi
+
           echo "changed_arc_runner=$changed_arc_runner" >> "$GITHUB_OUTPUT"
           echo "changed_cortexgrid=$changed_cortexgrid" >> "$GITHUB_OUTPUT"
           echo "changed_cortexgrid_integration=$changed_cortexgrid_integration" >> "$GITHUB_OUTPUT"
@@ -104,34 +122,6 @@ jobs:
         with:
           python-version: "3.11.13"
       - run: uv run --group test-torch python -m unittest discover -s tests/unit/cortexgrid -v
-
-  bump-cortexgrid-version:
-    needs: test_cortexgrid
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - run: |
-          set -o pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch --depth=1 origin main
-          MAIN_VERSION=$(git show origin/main:pyproject.toml | grep -E '^version = ' | head -1 | sed -E 's/version = "([^"]+)"/\1/')
-          CURRENT=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
-          if [ "$CURRENT" = "$MAIN_VERSION" ]; then
-            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
-            MINOR=$(echo "$CURRENT" | cut -d. -f2)
-            PATCH=$(echo "$CURRENT" | cut -d. -f3)
-            NEW="$MAJOR.$MINOR.$((PATCH+1))"
-            sed -i -E "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
-          fi
-
-          git add -A
-          git diff --cached --quiet && exit 0
-          git commit -m "bump cortexgrid library version"
-          git push
 
   test_cortexgrid_ui_backend:
     needs: detect
@@ -476,7 +466,7 @@ jobs:
   update_image_tags:
     needs:
       [
-        bump-cortexgrid-version,
+        test_cortexgrid,
         build_arc_runner,
         build_cortexgrid_integration,
         build_cortexgrid_ui_backend,
@@ -486,18 +476,40 @@ jobs:
         build_mlflow,
         build_ray,
       ]
-    if: ${{ always() && contains(needs.*.result, 'success') }}
+    # !cancelled() rather than always(): a run cancelled by a newer push must
+    # not write its tags onto the branch.
+    if: ${{ !cancelled() && contains(needs.*.result, 'success') }}
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
     env:
       OWNER: ${{ github.repository_owner }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-      - run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11.13"
+      - name: Bump the cortexgrid library version
+        if: needs.test_cortexgrid.result == 'success'
+        run: |
+          set -o pipefail
+          git fetch --depth=1 origin main
+          MAIN_VERSION=$(git show origin/main:pyproject.toml | grep -E '^version = ' | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          CURRENT=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          if [ "$CURRENT" = "$MAIN_VERSION" ]; then
+            MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+            MINOR=$(echo "$CURRENT" | cut -d. -f2)
+            PATCH=$(echo "$CURRENT" | cut -d. -f3)
+            NEW="$MAJOR.$MINOR.$((PATCH+1))"
+            sed -i -E "s/^version = \"$CURRENT\"/version = \"$NEW\"/" pyproject.toml
+          fi
+          # uv.lock records the project's own version, and the image builds'
+          # `uv sync --locked` rejects a lock that lags pyproject.toml.
+          uv lock
+      - name: Set the new image tags
+        run: |
           if [[ "${{ needs.build_arc_runner.result }}" == "success" ]]; then
             NEW_IMAGE="ghcr.io/$OWNER/arc-runner:${{ needs.build_arc_runner.outputs.tag }}" \
               yq -i '.helmCharts[0].valuesInline.template.spec.containers[0].image = strenv(NEW_IMAGE)' k8s/workloads/arc_runner_set/kustomization.yaml
@@ -530,18 +542,23 @@ jobs:
             NEW_IMAGE="ghcr.io/$OWNER/ray-head:${{ needs.build_ray.outputs.tag }}" \
               yq -i '.helmCharts[0].valuesInline.images.ray = strenv(NEW_IMAGE)' k8s/workloads/cortexgrid/kustomization.yaml
           fi
-
+      # One commit for the version bump and the tags. It becomes the PR head,
+      # so pushing it before the builds finish would hide them from the PR.
+      - id: commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "bump image versions"
+          git commit -m "bump versions"
           git push
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   all_checks_passed:
     needs:
       - detect
       - test_cortexgrid
-      - bump-cortexgrid-version
       - test_cortexgrid_ui_backend
       - test_cortexgrid_ui_frontend
       - test_jobs_control_plane
@@ -557,12 +574,34 @@ jobs:
       - update_image_tags
     if: always()
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Verify no upstream failures
+        id: verify
         run: |
+          # This run is for update_image_tags' bot commit and skipped everything
+          # (see detect). The verdict is the one the pushing run posted on it.
+          if [[ "${{ github.actor }}" == "github-actions[bot]" ]]; then
+            state=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/status" \
+              --jq '.statuses[] | select(.context == "all_checks_passed") | .state')
+            echo "Verdict posted on this commit by the run that pushed it: ${state:-none}"
+            [[ "$state" == "success" ]] || exit 1
+            exit 0
+          fi
           if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" \
              || "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "One or more upstream jobs failed or were cancelled."
             exit 1
           fi
           echo "All upstream jobs succeeded or were skipped."
+      # update_image_tags' commit is now the PR head, and its own run waits for
+      # approval and builds nothing. Post this run's verdict on it, so the PR
+      # shows the pipeline's result instead of no checks at all.
+      - name: Report the verdict on the bot commit
+        if: always() && needs.update_image_tags.outputs.sha != ''
+        run: |
+          gh api "repos/${{ github.repository }}/statuses/${{ needs.update_image_tags.outputs.sha }}" \
+            -f state="${{ steps.verify.outcome == 'success' && 'success' || 'failure' }}" \
+            -f context=all_checks_passed \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
