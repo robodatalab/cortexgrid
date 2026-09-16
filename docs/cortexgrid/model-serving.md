@@ -256,7 +256,47 @@ d = cortexgrid.deploy_model("qwen", "instruct", run_name, wait=True, timeout=300
 print(d.url, d.phase)
 ```
 
-`deploy_model` PUTs the Serve app spec and returns a `Deployment` immediately when `wait=False` (default). With `wait=True` it blocks until the controller reports `RUNNING`, capped at `timeout` seconds; `DEPLOY_FAILED` or a missing app raises `ModelDeployFailed`, and exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded. To wait on a deploy started elsewhere, call `wait_for_model_serving(family, suffix, run_name, timeout=...)` directly. It is idempotent on the triple - re-deploying replaces the app. Re-deploying a `failed` app first undeploys it and waits until it is gone: Ray only restarts a failed deployment that was deleted first, so PUTting the same spec over it would report `DEPLOY_FAILED` again without retrying. `timeout` caps that wait too. The model must be registered and `ready`.
+`deploy_model` PUTs the Serve app spec and returns a `Deployment`. With `wait=False` (default) it returns as soon as the controller has accepted the spec; with `wait=True` it then blocks exactly as [`wait_for_model_serving`](#waiting-for-a-model-to-serve) does. `timeout` (default 300) caps the whole call - clearing a [failed app](#re-deploying-a-failed-model), the PUT and the wait; `timeout=None` removes the cap. It is idempotent on the triple - re-deploying replaces the app. The model must be registered and `ready`.
+
+### Waiting for a model to serve
+
+`wait_for_model_serving` blocks until a model's app is `running`. Use it to wait on a deploy started elsewhere - another process, the UI, or an earlier `deploy_model(wait=False)`:
+
+```python
+try:
+    cortexgrid.wait_for_model_serving("qwen", "instruct", run_name, timeout=1800)
+except cortexgrid.ModelDeployFailed as e:
+    print(e)   # DEPLOY_FAILED with the controller's message, or no app at all
+except TimeoutError:
+    ...        # still not running after 1800 s
+```
+
+| app's state | what the wait does |
+|---|---|
+| `running` | returns |
+| `not_started`, `deploying`, `unhealthy` | keeps polling, every 2 s |
+| `deleting` | keeps polling; once the app is gone, raises `ModelDeployFailed` |
+| `failed` | raises `ModelDeployFailed` carrying the controller's message |
+| no app | raises `ModelDeployFailed` straight away - the wait never deploys anything itself |
+| `timeout` elapses | raises `TimeoutError` with the last status and message |
+
+`ModelDeployFailed` subclasses `RuntimeError`, so code that caught `RuntimeError` from `deploy_model(wait=True)` keeps working. A finite `timeout` always gets at least one status check. With `timeout=None` there is no deadline, so an app stuck `deploying` (e.g. waiting for a free GPU) blocks forever.
+
+An app can disappear mid-wait when `deploy_model` calls overlap: each one GETs the applications list, splices in its own app and PUTs the whole list back, so a later PUT can drop the app an earlier one added. The wait fails fast rather than polling for an app that will not come back.
+
+### Re-deploying a failed model
+
+Calling `deploy_model` for a model whose app is `failed` retries it from scratch:
+
+1. undeploy the failed app;
+2. poll until the controller has removed it (an app already `deleting` is waited out the same way);
+3. PUT the spec and, with `wait=True`, wait for `running`.
+
+Step 2 is what makes the retry real. Ray resets a failed deployment only when a new deploy arrives after the old deployment was marked for deletion, or when the deployment's version changes. A re-deploy sends an identical spec, so PUTting it over the failed app - or PUTting it back before the controller has processed the undeploy - leaves the failed deployment in place, and the app reports `DEPLOY_FAILED` again without retrying anything.
+
+Apps in any other state are PUT over directly. Re-PUTting an app that is still building restarts the build, so to wait on one, call `wait_for_model_serving` instead of `deploy_model`.
+
+A retry helps with transient failures (OOM on a busy node, a flaky download). A serve-app that fails deterministically - a missing dependency, a bug in `__init__` - fails again: fix it and `save_model` again first, since the bundle is frozen at save time.
 
 ### Getting serving status
 
@@ -286,7 +326,7 @@ Re-PUTs the applications list without this app; the controller tears down the re
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... does not exist` | the app was never deployed, was undeployed, or was dropped by a concurrent `deploy_model` (each deploy PUTs the whole applications list, so a later PUT can drop an app an earlier one added) | check `list_deployed_models`; deploy again. |
-| `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing (`deploy_model` clears the failed app itself). |
+| `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing - `deploy_model` clears the failed app itself. |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
 | deployed but a route returns 404 | wrong route prefix, or hitting the app before `running` | routes hang off `{d.url}` = `/r/<family>/<suffix>/<run_name>`; confirm `phase == "running"` first. |
 
@@ -332,7 +372,9 @@ caller
   |
   | cortexgrid.deploy_model(family, suffix, run_name, wait=True)
   |   1. read bundle metadata from MLflow tags
-  |   2. PUT /api/serve/applications/  (full applications list)
+  |   2. app DEPLOY_FAILED? undeploy it; failed or DELETING: poll GET until it is gone
+  |   3. PUT /api/serve/applications/  (full applications list)
+  |   4. poll GET until the app is RUNNING (DEPLOY_FAILED or a missing app raises ModelDeployFailed)
   v
 Ray Serve controller on the cluster
   fetches the bundle zip via runtime_env.working_dir and pip-installs runtime_env.pip into a cached virtualenv
@@ -380,4 +422,6 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | User-facing shape | user writes their own `@cortexgrid.serve.ingress` serve-app; cortexgrid only stores + deploys it | abstract `cortexgrid.Model` + generic `/infer` wrapper | A generic wrapper forces one request/response contract (unary JSON, fixed timeout) on every model. Real models need token streaming, multi-minute diffusion calls, and custom request schemas - all traffic concerns the serve-app must own. Letting cortexgrid own the wrapper collapsed those; the BYO serve-app keeps cortexgrid framework-free and imposes no HTTP shape. |
 | Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)). (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. |
 | Bundle timing | bundle the serve-app class at `save_model` time, persist URL+import path as MLflow tags | bundle at `deploy_model` time from a passed-in `cls` | Save-time bundling lets `deploy_model` callers be stateless - deploy from any process with just `(family, suffix, run_name)`. Re-pairing old weights with a new serve-app requires re-saving (acceptable: it forces an explicit decision and a fresh registry entry). |
+| Retrying a failed app | `deploy_model` undeploys a `DEPLOY_FAILED` app and waits until the controller has removed it, then PUTs | (a) PUT the same spec over the failed app; (b) undeploy, then PUT immediately | Ray resets a failed deployment only when a deploy arrives after it was marked for deletion, or when its version changes. (a) keeps the failed deployment: the app reports `DEPLOY_FAILED` again without retrying. (b) races the controller tick that marks the deployments for deletion, with the same result when the PUT wins. |
+| Status right after a deploy | read the status as soon as the PUT returns | ignore statuses until the app's `last_deployed_time_s` changes | The PUT is synchronous: the controller registers the app, sets it `DEPLOYING` and stamps `last_deployed_time_s` before responding (checked on Ray 2.9.3 and 2.55), so there is no stale status from a previous attempt to filter out. |
 | Code delivery transport | upload to S3, pass via `runtime_env.working_dir` | (a) bake serve-app into cluster image; (b) attach code to the model via MLflow artifacts | (a) cortexgrid doesn't own serve-app classes - they live downstream; baking would invert the dependency. (b) MLflow artifact API is slower per-file and not how Ray Serve consumes `working_dir`. |

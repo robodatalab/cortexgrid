@@ -150,7 +150,7 @@ deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name, wait=True
 print(deployed.url)
 ```
 
-`save_model` is synchronous (registry lifecycle: `uploading` -> `ready`); `deploy_model` schedules the serving lifecycle (`deploying` -> `running`). See [model-serving.md](https://github.com/robodatalab/cortexgrid/blob/main/docs/cortexgrid/model-serving.md) for both lifecycles end to end - upload/deploy/undeploy/delete, status queries (`model_registry_status`, `model_serving_status`), and error handling.
+`save_model` is synchronous (registry lifecycle: `uploading` -> `ready`); `deploy_model` schedules the serving lifecycle (`deploying` -> `running`). With `wait=True` a failed deploy raises `cortexgrid.ModelDeployFailed`; `cortexgrid.wait_for_model_serving(family, suffix, run_name, timeout=...)` waits on a deploy started elsewhere, and re-deploying a failed model retries it from scratch. See [model-serving.md](https://github.com/robodatalab/cortexgrid/blob/main/docs/cortexgrid/model-serving.md) for both lifecycles end to end - upload/deploy/undeploy/delete, status queries (`model_registry_status`, `model_serving_status`), and error handling.
 
 ### API reference
 
