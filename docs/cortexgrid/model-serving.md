@@ -55,9 +55,9 @@ class MyServeApp:
         ...   # stream, batch, long-running - cortexgrid does not care
 ```
 
-`serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. cortexgrid does not subclass or constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` and `serve.deployment(...)` (reading `num_gpus`/`num_replicas`) and binds it with the triple. There is no `cortexgrid.Model` base class and no generic `/infer` route.
+`serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. cortexgrid does not constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` to a thin subclass of it (see [On the replica](#on-the-replica)) and `serve.deployment(...)` (reading `num_gpus`/`num_replicas`) and binds it with the triple. There is no `cortexgrid.Model` base class and no generic `/infer` route.
 
-Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (the cluster image runs 2.9) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
+Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (e.g. 2.9, which the cluster image ran before 2.58) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
 
 Design note: resource needs are read from plain class attributes rather than a cortexgrid decorator or base class. This is a deliberate, provisional choice (documented in [_serve_entry.py](../../cortexgrid/_serve_entry.py)) - kept minimal until we see how serve-apps declare resources in practice.
 
@@ -127,14 +127,16 @@ Weights are never shipped via `runtime_env` - they stay in S3 and the serve-app'
 
 ## On the replica
 
-`deploy_model` PUTs an application spec whose `import_path` is the generic builder [cortexgrid._serve_entry:build](../../cortexgrid/_serve_entry.py). On the replica, `build`:
+`deploy_model` PUTs an application spec whose `import_path` is the generic builder [cortexgrid._serve_entry:build](../../cortexgrid/_serve_entry.py). On the cluster, `build`:
 
 1. Imports the serve-app class from `class_import_path`.
-2. If the class was marked by `cortexgrid.serve.ingress`, wraps it with Ray's `ray.serve.ingress(app)`. A class without the mark (a model saved before `cortexgrid.serve` existed, whose class Ray's decorator already wrapped) is used as imported.
+2. If the class was marked by `cortexgrid.serve.ingress`, subclasses it with `_IngressOnReplica` and wraps the subclass with Ray's `ray.serve.ingress(app)`. A class without the mark (a model saved before `cortexgrid.serve` existed, whose class Ray's decorator already wrapped) is used as imported.
 3. Reads `num_gpus` / `num_replicas` class attrs.
-4. Wraps the class with `serve.deployment(...).options(...)` and binds it with `(family, suffix, run_name)`.
+4. Wraps the class with `serve.deployment(...).options(...)` (`max_ongoing_requests=100`) and binds it with `(family, suffix, run_name)`.
 
-That is the whole of `build` - beyond Ray's own ingress wrapper, it interposes no wrapper and no route. The serve-app's own `__init__` runs on the replica (calling `cortexgrid.load_model` to download weights), and the serve-app's own routes are what the application exposes under `/r/<family>/<suffix>/<run_name>`.
+That is the whole of `build` - beyond Ray's own ingress wrapper and `_IngressOnReplica`, it interposes no wrapper and no route.
+
+`_IngressOnReplica` applies `ray.serve.ingress(app)` a second time, in the replica's own process, as Ray creates the instance. Ray's ingress rewrites each route method's signature in place so FastAPI injects the replica instance as `self`, but `build` runs in a different process: the replica imports the serve-app's module afresh, and its route methods carry no rewrite. FastAPI < 0.137 analysed routes once, in `build`'s process, and the replica received the result. FastAPI >= 0.137 analyses them in the replica on the first request, and without the rewrite reads `self` as a required query parameter, so every route answers HTTP 422. The subclass hooks `__new__`, which Ray calls on its own before the serve-app's `__init__`, whether that is sync or async. Checked on Ray 2.9.3 with FastAPI 0.108 and Ray 2.58 with FastAPI 0.141. The serve-app's own `__init__` runs on the replica (calling `cortexgrid.load_model` to download weights), and the serve-app's own routes are what the application exposes under `/r/<family>/<suffix>/<run_name>`.
 
 ## API
 
@@ -350,7 +352,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
 }
 ```
 
-Replica options (`num_replicas`, `ray_actor_options.num_gpus`) are not in the spec - `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment after reading the class's class attrs.
+Replica options (`num_replicas`, `max_ongoing_requests`, `ray_actor_options.num_gpus`) are not in the spec - `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment, reading `num_replicas` and `num_gpus` from the class attrs. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
 
 `deploy_model` reconstructs the full applications list (GET, replace this entry, PUT) because `/api/serve/applications/` is declarative: the PUT body is the desired complete set.
 
@@ -379,7 +381,8 @@ caller
 Ray Serve controller on the cluster
   fetches the bundle zip via runtime_env.working_dir and pip-installs runtime_env.pip into a cached virtualenv
   imports cortexgrid._serve_entry:build, which re-imports the serve-app class
-  applies ray.serve.ingress(app) to the class marked by cortexgrid.serve.ingress
+  applies ray.serve.ingress(app) to a subclass of the class marked by cortexgrid.serve.ingress
+  each replica re-applies ray.serve.ingress(app) as Ray creates its instance
   binds serve.deployment(ServeApp) -> __init__ calls cortexgrid.load_model(...) -> Path
   exposes the serve-app's own routes under /r/<family>/<suffix>/<run_name>
 
@@ -420,7 +423,7 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | Endpoint discovery | static URL composed from `RAY_SERVE_URI` + route prefix | jobs-control-plane lookup, MagicDNS, MLflow tag | URL is fully determined by `(family, suffix, run_name)`; no extra state to keep in sync. |
 | Caller -> cluster transport | Serve REST API (`/api/serve/applications/`) | (a) `ray.init` + `serve.run` in caller; (b) submit a Ray job that calls `serve.run` | (a) makes the caller a Ray driver - works on Ray nodes / jobs only, breaks on arc-runners; (b) decouples application lifetime from a job lifetime, then we'd have to babysit the job. REST keeps cortexgrid.model_serving HTTP-only and parallels how `cortexgrid.remote` talks to Ray Jobs. |
 | User-facing shape | user writes their own `@cortexgrid.serve.ingress` serve-app; cortexgrid only stores + deploys it | abstract `cortexgrid.Model` + generic `/infer` wrapper | A generic wrapper forces one request/response contract (unary JSON, fixed timeout) on every model. Real models need token streaming, multi-minute diffusion calls, and custom request schemas - all traffic concerns the serve-app must own. Letting cortexgrid own the wrapper collapsed those; the BYO serve-app keeps cortexgrid framework-free and imposes no HTTP shape. |
-| Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)). (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. |
+| Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time, and `_IngressOnReplica` applies it again in each replica | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)), and importing `ray.serve` needs the `ray[serve]` extras wherever a serve-app is defined. (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. Its cost: the wrap runs outside the replica, which FastAPI >= 0.137 needs it in, hence the second application (see [On the replica](#on-the-replica)). |
 | Bundle timing | bundle the serve-app class at `save_model` time, persist URL+import path as MLflow tags | bundle at `deploy_model` time from a passed-in `cls` | Save-time bundling lets `deploy_model` callers be stateless - deploy from any process with just `(family, suffix, run_name)`. Re-pairing old weights with a new serve-app requires re-saving (acceptable: it forces an explicit decision and a fresh registry entry). |
 | Retrying a failed app | `deploy_model` undeploys a `DEPLOY_FAILED` app and waits until the controller has removed it, then PUTs | (a) PUT the same spec over the failed app; (b) undeploy, then PUT immediately | Ray resets a failed deployment only when a deploy arrives after it was marked for deletion, or when its version changes. (a) keeps the failed deployment: the app reports `DEPLOY_FAILED` again without retrying. (b) races the controller tick that marks the deployments for deletion, with the same result when the PUT wins. |
 | Status right after a deploy | read the status as soon as the PUT returns | ignore statuses until the app's `last_deployed_time_s` changes | The PUT is synchronous: the controller registers the app, sets it `DEPLOYING` and stamps `last_deployed_time_s` before responding (checked on Ray 2.9.3 and 2.55), so there is no stale status from a previous attempt to filter out. |

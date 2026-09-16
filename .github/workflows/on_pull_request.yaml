@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.11.13"
       - run: uv run --group test-torch python -m unittest discover -s tests/unit/cortexgrid -v
 
   bump-cortexgrid-version:
@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.11.13"
       - run: uv sync --group dev --group ui
       - env:
           PYTHONPATH: cortexgrid_ui/backend
@@ -175,7 +175,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.11.13"
       - run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
 
   test_k8s_seed:
@@ -186,7 +186,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
+          python-version: "3.11.13"
       - run: uv run python -m unittest discover -s tests/unit/k8s/seed -v
 
   build_arc_runner:
