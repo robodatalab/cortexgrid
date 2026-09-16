@@ -23,7 +23,9 @@ spec:
         role: head
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+          # MinIO deleted minio/minio from Docker Hub in Sep 2026; quay.io still
+          # serves the same tags, frozen (no further community releases).
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
           args:
             - server
             - /data
