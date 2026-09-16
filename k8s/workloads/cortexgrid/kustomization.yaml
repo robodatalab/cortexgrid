@@ -13,6 +13,6 @@ helmCharts:
     namespace: cortexgrid
     valuesInline:
       images:
-        mlflow: ghcr.io/robodatalab/mlflow:04228357687bb32056a323b63567d247d5182e53
-        ray: ghcr.io/robodatalab/ray-head:e0264f5d97c9dcd65d8655c1b561e7cd9da552b2
-        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:30a6fcda51885f63e1a945e09a3947e6eb4af187
+        mlflow: ghcr.io/robodatalab/mlflow:8cb531ee99b94bdda24a7f246b12aaa79a757790
+        ray: ghcr.io/robodatalab/ray-head:8cb531ee99b94bdda24a7f246b12aaa79a757790
+        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:e209639706574521e4aa76536b57b00ddb638b57

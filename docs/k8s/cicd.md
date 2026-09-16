@@ -43,7 +43,7 @@ flowchart TB
         B2["build jobs-control-plane image"]
         E1["set new cortexgrid-ui-backend image in its deployment"]
         E2["set new jobs-control-plane image in its deployment"]
-        E3["bump cortexgrid library patch version"]
+        E3["bump cortexgrid library patch version, uv lock"]
         C["commit changes to PR branch"]
         T1 --> B1
         T2 --> B1
@@ -94,7 +94,7 @@ flowchart TB
 
 ### Test it
 - input: any `.py` under `cortexgrid/`
-- on PR: `test-cortexgrid`, `test-cortexgrid-ui-backend`, `test-jobs-control-plane`, `build-cortexgrid-ui-backend`, `build-jobs-control-plane`, `bump`
+- on PR: `test-cortexgrid`, `test-cortexgrid-ui-backend`, `test-jobs-control-plane`, `build-cortexgrid-ui-backend`, `build-jobs-control-plane`, `update_image_tags` (version bump, `uv.lock` and image tags in one bot commit)
 - after squash-merge in Argo: `cortexgrid-ui` and `jobs-control-plane` synced at the merge SHA (`kubectl -n argocd get app cortexgrid-ui jobs-control-plane -o custom-columns='NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REV:.status.sync.revision,SYNCED_AT:.status.operationState.finishedAt'`)
 - after ~10 min in GitHub Actions: one `cortexgrid integration tests` run and one `cortexgrid-ui integration tests` run (`gh run list --limit 5`)
 
@@ -442,4 +442,4 @@ Mapping back to requirements:
 Dependencies / unresolved:
 
 - **Same-repo PR write-back from arc-runners.** `actions/checkout@v4` with `ref: github.head_ref` previously failed with `git fetch` exit 1 on these runners. Root cause not yet diagnosed (research agent recommended repro with `ACTIONS_STEP_DEBUG=true` + `git ls-remote`). PR-side bumps are blocked until this is fixed.
-- **`GITHUB_TOKEN` does not re-trigger workflows** ([docs](https://docs.github.com/en/actions/using-workflows/triggering-a-workflow)), so bot bump commits on the PR branch won't loop the tests/build workflows. This is required for the design to terminate.
+- **The bot commit's own run.** `update_image_tags` pushes its single bot commit only after every build has finished, and that commit becomes the PR head. GitHub does start an `on_pull_request` run for it, held for approval (`action_required`). Approved or not, that run builds nothing, so the pipeline terminates: `detect` marks every service unchanged when `github.actor` is `github-actions[bot]`, and its `all_checks_passed` repeats the verdict the pushing run posted on the commit. The pushing run's `all_checks_passed` posts that verdict as an `all_checks_passed` commit status, so the PR head shows the pipeline's result without the approval. Merge only once the head shows it: until then builds may still be running. `[skip ci]` in the bot commit is not an option: squash merges copy every commit message into the merge commit, which would skip the post-merge workflows on `main`.
