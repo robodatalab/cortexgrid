@@ -5,7 +5,7 @@ description = "Connect your ML code to the RoboLab compute cluster — Ray, MLfl
 readme = "docs/cortexgrid/README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "ray[default]>=2.9,<3",
     "mlflow>=3.11,<4",

@@ -57,7 +57,7 @@ class MyServeApp:
 
 `serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. cortexgrid does not subclass or constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` and `serve.deployment(...)` (reading `num_gpus`/`num_replicas`) and binds it with the triple. There is no `cortexgrid.Model` base class and no generic `/infer` route.
 
-Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (the cluster image runs 2.9) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
+Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (e.g. 2.9, which the cluster image ran before 2.58) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
 
 Design note: resource needs are read from plain class attributes rather than a cortexgrid decorator or base class. This is a deliberate, provisional choice (documented in [_serve_entry.py](../../cortexgrid/_serve_entry.py)) - kept minimal until we see how serve-apps declare resources in practice.
 
@@ -350,7 +350,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
 }
 ```
 
-Replica options (`num_replicas`, `ray_actor_options.num_gpus`) are not in the spec - `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment after reading the class's class attrs.
+Replica options (`num_replicas`, `max_ongoing_requests`, `ray_actor_options.num_gpus`) are not in the spec - `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment, reading `num_replicas` and `num_gpus` from the class attrs. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
 
 `deploy_model` reconstructs the full applications list (GET, replace this entry, PUT) because `/api/serve/applications/` is declarative: the PUT body is the desired complete set.
 

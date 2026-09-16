@@ -2,7 +2,7 @@
 name = "cortexgrid-example-jobs"
 version = "0.1.0"
 description = "Example: submit remote jobs to the DGX via cortexgrid"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "cortexgrid",
 ]

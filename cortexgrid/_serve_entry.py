@@ -32,6 +32,9 @@ from ray.serve.deployment import Application
 from cortexgrid.serve import ingress_app
 
 
+# Requests one replica handles at once before Ray queues the rest.
+_MAX_ONGOING_REQUESTS = 100
+
 class _IngressOnReplica:
     """Mixin that re-applies Ray's ingress to `_serve_app` in the replica's own
     process, as Ray creates the replica instance.
@@ -73,5 +76,8 @@ def build(args: dict[str, Any]) -> Application:
     num_replicas = getattr(serve_app, "num_replicas", 1)
     return serve.deployment(serve_app).options(
         num_replicas=num_replicas,
+        # Ray 2.32 lowered the default from 100 to 5; keep what serve-apps
+        # had on Ray 2.9.
+        max_ongoing_requests=_MAX_ONGOING_REQUESTS,
         ray_actor_options={"num_gpus": num_gpus},
     ).bind(args["family"], args["suffix"], args["run_name"])
