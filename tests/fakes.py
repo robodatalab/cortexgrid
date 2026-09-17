@@ -245,6 +245,15 @@ class FakeMlflowClient:
         self.model_versions.append(v)
         return v
 
+    def set_model_version_tag(
+        self, name: str, version: str, key: str, value: str
+    ) -> None:
+        for v in self.model_versions:
+            if v.name == name and v.version == version:
+                v.tags[key] = value
+                return
+        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
+
     def delete_model_version(self, name: str, version: str) -> None:
         self.model_versions = [
             v for v in self.model_versions
