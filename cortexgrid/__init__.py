@@ -77,11 +77,11 @@ from cortexgrid.model_storage import (
     IMPORTED,
     SavedModel,
     delete_model,
-    import_model,
     list_models,
     load_model,
     model_registry_status,
 )
+from cortexgrid.model_storage import import_model as _import_model_storage
 from cortexgrid.model_storage import save_model as _save_model_storage
 from cortexgrid.model_serving import (
     Deployment,
@@ -135,6 +135,27 @@ def save_model(
         run_id=experiment.run_id,
         run_name=experiment.run_name(),
     )
+
+
+def import_model(
+    source: str | Path | Callable[[], str | Path],
+    serve_app: type,
+    family: str,
+    suffix: str,
+) -> SavedModel:
+    """Register a model produced elsewhere once, reuse it on every later call,
+    and record on the current Experiment's run which imported model it used.
+
+    The model belongs to no run (see `cortexgrid.model_storage.import_model`),
+    so the run keeps the link instead: the tag
+    `imported_model/<family>/<suffix>` holds the version's `created_at`, set
+    whether this call uploaded the model or reused it."""
+    experiment = Experiment.get_instance()
+    model = _import_model_storage(source, serve_app, family, suffix)
+    get_mlflow_client().set_tag(
+        experiment.run_id, f"imported_model/{family}/{suffix}", model.created_at
+    )
+    return model
 
 
 __all__ = [
