@@ -46,12 +46,7 @@ _app = FastAPI()
 class AddConstantServeApp:
     """Serve-app fronting the stub weights. Loads the constant from the weights
     directory at startup and returns `x + constant` on its own POST /add route.
-
-    Declares its Ray Serve resources as plain class attributes (num_gpus /
-    num_replicas), which `cortexgrid._serve_entry.build` reads at bind time."""
-
-    num_gpus = 0
-    num_replicas = 1
+    Saved without requirements, so it runs on any node, CPU-only included."""
 
     def __init__(self, family: str, suffix: str, run_name: str) -> None:
         self._constant = read_constant(cortexgrid.load_model(family, suffix, run_name))

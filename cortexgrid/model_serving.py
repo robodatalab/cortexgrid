@@ -8,7 +8,8 @@ uploaded to MinIO under
 referenced via `runtime_env.working_dir` so Ray workers fetch it from there.
 The bundle URL, class import path, pip list, and fingerprint are persisted as
 MLflow tags on the ModelVersion so `deploy_model` can find them later without
-the caller holding the class object.
+the caller holding the class object. So are the model's `ModelRequirements`,
+which `deploy_model` turns into the replica's Ray resource requests.
 
 Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
 This relies on family/suffix/run_name not containing the literal "__".
@@ -206,10 +207,36 @@ def upload_bundle(
     )
 
 
+# Custom Ray resource each GPU worker advertises: the GiB of memory its GPUs
+# have. A replica requests its vram_gb of it, so Ray places it only on a node
+# with that much VRAM left.
+_VRAM_RESOURCE = "vram_gb"
+
+_GIB = 1024**3
+
+
+def _ray_actor_options(requirements: ModelRequirements) -> dict[str, Any]:
+    """Translate ModelRequirements into a replica's Ray actor resource requests.
+    Ray places the replica only on a node with that much free and reserves it
+    there; a zero requirement requests nothing."""
+    options: dict[str, Any] = {"num_gpus": requirements.num_gpus}
+    if requirements.ram_gb > 0:
+        options["memory"] = int(requirements.ram_gb * _GIB)
+    if requirements.vram_gb > 0:
+        options["resources"] = {_VRAM_RESOURCE: requirements.vram_gb}
+    return options
+
+
 def _build_application_spec(
-    family: str, suffix: str, run_name: str, meta: BundleMetadata
+    family: str,
+    suffix: str,
+    run_name: str,
+    meta: BundleMetadata,
+    requirements: ModelRequirements,
+    num_replicas: int,
 ) -> dict[str, Any]:
-    """Assemble a Ray Serve application schema from pre-bundled metadata."""
+    """Assemble a Ray Serve application schema from pre-bundled metadata and
+    the model's requirements."""
     # working_dir carries the serve-app's own source; Ray pip-installs the
     # third-party distributions the image lacks into a per-node cached
     # virtualenv layered on the image. No pip key when there are none, so Ray
@@ -230,6 +257,8 @@ def _build_application_spec(
             "family": family,
             "suffix": suffix,
             "run_name": run_name,
+            "num_replicas": num_replicas,
+            "ray_actor_options": _ray_actor_options(requirements),
         },
         "runtime_env": runtime_env,
     }
@@ -270,8 +299,8 @@ def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
 
 @dataclass
 class ModelRequirements:
-    """Hardware one replica of a model needs to be served. Persisted as tags on
-    the ModelVersion next to the bundle metadata, so it is read without
+    """Hardware one replica of a model needs to be served, in GiB. Persisted as
+    tags on the ModelVersion next to the bundle metadata, so it is read without
     touching the weights or importing the serve-app class.
 
     Zero means no requirement: a model with no requirements is served on any
@@ -280,7 +309,7 @@ class ModelRequirements:
 
     num_gpus: int = 0
     ram_gb: float = 0.0
-    # Memory of the GPU the replica runs on, so it needs num_gpus >= 1.
+    # GPU memory across the replica's num_gpus GPUs, so it needs num_gpus >= 1.
     vram_gb: float = 0.0
 
     def __post_init__(self) -> None:
@@ -323,10 +352,11 @@ def requirements_from_tags(tags: dict[str, str]) -> ModelRequirements:
     )
 
 
-def _load_bundle_metadata(
+def _load_deploy_metadata(
     family: str, suffix: str, run_name: str
-) -> BundleMetadata:
-    """Read the bundle metadata `save_model` persisted on the ModelVersion."""
+) -> tuple[BundleMetadata, ModelRequirements]:
+    """Read the bundle metadata and requirements `save_model` persisted on the
+    ModelVersion."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     name = f"{family}__{suffix}"
     versions = client.search_model_versions(
@@ -336,8 +366,9 @@ def _load_bundle_metadata(
         raise ValueError(
             f"No saved model for {family}/{suffix}/{run_name}; cannot deploy."
         )
+    tags = versions[0].tags or {}
     try:
-        return metadata_from_tags(versions[0].tags or {})
+        return metadata_from_tags(tags), requirements_from_tags(tags)
     except KeyError as exc:
         raise ValueError(
             f"Saved model {family}/{suffix}/{run_name} is missing the deployment "
@@ -453,6 +484,7 @@ def deploy_model(
     family: str,
     suffix: str,
     run_name: str,
+    num_replicas: int = 1,
     wait: bool = False,
     timeout: float | None = 300.0,
 ) -> Deployment:
@@ -463,6 +495,8 @@ def deploy_model(
 
     The serve-app class is pulled from the MLflow ModelVersion tags `save_model`
     wrote at save time; the caller does not need to hold the class object.
+    Each of the `num_replicas` replicas requests the model's `ModelRequirements`
+    from Ray, so it is placed only on a node that has them free.
 
     A DEPLOY_FAILED app left by an earlier attempt is undeployed first, and it,
     or an app still DELETING, is waited out before the new spec is PUT, so the
@@ -476,8 +510,10 @@ def deploy_model(
     stuck in DEPLOYING) will hang forever.
     """
     deadline = _deadline(timeout)
-    meta = _load_bundle_metadata(family, suffix, run_name)
-    spec = _build_application_spec(family, suffix, run_name, meta)
+    meta, requirements = _load_deploy_metadata(family, suffix, run_name)
+    spec = _build_application_spec(
+        family, suffix, run_name, meta, requirements, num_replicas
+    )
     _clear_failed_application(family, suffix, run_name, timeout, deadline)
     existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
     # The controller registers the app, sets it DEPLOYING and stamps

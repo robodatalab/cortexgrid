@@ -13,8 +13,7 @@ _APP = object()
 
 @serve.ingress(_APP)
 class _MarkedServeApp:
-    num_gpus = 1
-    num_replicas = 2
+    pass
 
 
 class _UnmarkedServeApp:
@@ -61,15 +60,30 @@ class TestBuild(unittest.TestCase):
         ray_serve.ingress.return_value.assert_called_once_with(_MarkedServeApp)
         self.assertIsInstance(instance, _MarkedServeApp)
 
-    def test_reads_resources_from_the_class(self) -> None:
+    def test_applies_resources_from_the_args(self) -> None:
+        actor_options = {"num_gpus": 1, "memory": 1024, "resources": {"vram_gb": 8.0}}
         with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
-            ray_serve.ingress.return_value.side_effect = lambda cls: cls
-            build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
+            build({
+                **_ARGS,
+                "class_import_path": f"{__name__}:_MarkedServeApp",
+                "num_replicas": 2,
+                "ray_actor_options": actor_options,
+            })
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
             num_replicas=2,
             max_ongoing_requests=100,
-            ray_actor_options={"num_gpus": 1},
+            ray_actor_options=actor_options,
+        )
+
+    def test_args_from_an_older_deployer_request_no_resources(self) -> None:
+        with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
+            build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
+
+        ray_serve.deployment.return_value.options.assert_called_once_with(
+            num_replicas=1,
+            max_ongoing_requests=100,
+            ray_actor_options={},
         )
 
     def test_unmarked_class_is_deployed_without_ingress(self) -> None:
