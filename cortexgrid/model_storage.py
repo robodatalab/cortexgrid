@@ -11,8 +11,9 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
 
 Two ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
-model produced elsewhere once, under the fixed run_name IMPORTED, and is a
-no-op after that. Both write the same layout, so every
+model produced elsewhere once, under the fixed run_name IMPORTED, and after
+that only re-bundles the serve-app when its code changed. Both write the same
+layout, so every
 (family, suffix, run_name) consumer - load_model, deploy_model - handles both.
 
 storage.py is pure: it takes run_id/run_name as explicit args and never reads

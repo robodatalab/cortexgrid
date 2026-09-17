@@ -105,7 +105,7 @@ No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_U
 `save_model(weights_dir, serve_app, family, suffix)` does two things:
 
 1. **Weights:** uploads `weights_dir` as-is to `s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/` and records that path as the MLflow `ModelVersion.source`. cortexgrid never inspects the contents - the on-disk format is the caller's concern.
-2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexgrid/_bundle.py) `cortexgrid.remote` uses). Local modules ship as source: the staging dir is zipped under a single top-level `code/` directory and uploaded to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip`. The `code/` wrapper is required: Ray unpacks a remote (`s3://`) `working_dir` zip by stripping its top-level directory when there is exactly one, so a bundle of a single package (e.g. only `model_gateway/`) zipped without it would lose that package directory and fail to import on the replica. Jobs are unaffected - the control plane passes a local directory, which Ray zips and unpacks as-is. Third-party distributions are pinned to their installed versions, minus what the worker image already has (`worker_provides()`), and pip-installed on the replica by Ray.
+2. **Serve-app bundle:** `bundle`s the serve-app class's import graph (same [_bundle.py](../../cortexgrid/_bundle.py) `cortexgrid.remote` uses). Local modules ship as source: the staging dir is zipped under a single top-level `code/` directory and uploaded to `s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip`. The fingerprint hashes everything the replica runs - the bundled files, the serve-app import path, and the pip requirements - and is part of the URL because Ray keeps a remote `working_dir` it has downloaded and reuses it for the same URL, so new code at an old URL would never reach a replica. The `code/` wrapper is required: Ray unpacks a remote (`s3://`) `working_dir` zip by stripping its top-level directory when there is exactly one, so a bundle of a single package (e.g. only `model_gateway/`) zipped without it would lose that package directory and fail to import on the replica. Jobs are unaffected - the control plane passes a local directory, which Ray zips and unpacks as-is. Third-party distributions are pinned to their installed versions, minus what the worker image already has (`worker_provides()`), and pip-installed on the replica by Ray.
 
 The bundle URL and the serve-app import path are persisted as MLflow tags on the new `ModelVersion`:
 
@@ -114,6 +114,7 @@ The bundle URL and the serve-app import path are persisted as MLflow tags on the
 | `serve_bundle_url` | `s3://...` URL of the zipped staging dir |
 | `class_import_path` | `<module>:<ClassName>` of the serve-app to import on the replica |
 | `serve_pip_requirements` | JSON list of pinned pip requirements (`["tqdm==4.67.3", ...]`) the replica installs; absent on models saved before this existed, which then install nothing |
+| `serve_bundle_fingerprint` | fingerprint of the bundle at `serve_bundle_url`; `import_model` compares it to re-bundle changed serve-app code. Absent on models saved before this existed |
 
 `deploy_model` reads those tags back; it does not need the class object, so deployment can happen from any environment that can hit MLflow + the Ray dashboard.
 
@@ -153,7 +154,7 @@ All exported from `cortexgrid.*`.
 | Function | Purpose |
 |----------|---------|
 | `save_model(weights_dir, serve_app, family, suffix) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
-| `import_model(source, serve_app, family, suffix) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; a no-op returning the existing model when it is already `ready`. `source` is the weights directory or a callable returning it. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
+| `import_model(source, serve_app, family, suffix) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
 | `model_registry_status(family, suffix, run_name) -> SavedModel \| None` | The registry lifecycle of one model, or `None` if never registered. `SavedModel.phase` is `uploading` / `ready` / `upload_failed` / `broken`. |
 | `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. |
 | `list_models() -> list[SavedModel]` | Every `ModelVersion` in the registry (including `uploading` / `upload_failed` / `broken`), mapped to a `SavedModel`. |
@@ -220,15 +221,17 @@ If a version is already registered under `(family, suffix, IMPORTED)`:
 
 | phase | `import_model` |
 |---|---|
-| `ready` | returns it; `source` is not called and `serve_app` is not re-bundled |
+| `ready` | returns it without calling `source`; re-bundles `serve_app` first if its code changed (see below) |
 | `uploading` | raises `RuntimeError` - another process is importing it |
 | `upload_failed` / `broken` | deletes it and imports again |
 
 `source` is called only after the new version is registered in `uploading`, so a second `import_model` of the same model raises instead of starting a download of its own while the first one is still fetching. If `source` raises, the version is marked `upload_failed`.
 
-An imported model belongs to no run, so the run records the link instead: every successful `import_model` - upload or no-op - tags the current Experiment's run with `imported_model/<family>/<suffix>` set to the version's `created_at`. Like `save_model`, it needs an active Experiment.
+An imported model belongs to no run, so the run records the link instead: every successful `import_model` - whether it uploaded the model or reused it - tags the current Experiment's run with `imported_model/<family>/<suffix>` set to the version's `created_at`. Like `save_model`, it needs an active Experiment.
 
-To replace an imported model's weights or serve-app, `undeploy_model` and `delete_model(family, suffix, cortexgrid.IMPORTED)`, then import again. The weights and bundle land under the same layout as a saved model (`models/imported/...`, `serve-bundles/imported/...`), so `load_model`, `deploy_model` and the rest work unchanged. The version is linked to no MLflow run, so `delete_run` / `delete_experiment` leave it in place.
+Weights are imported once, but the serve-app code can change with the library that provides it. On a `ready` model, `import_model` builds the bundle locally and compares its fingerprint with the version's `serve_bundle_fingerprint`; when they differ (or the tag is absent), it uploads the new bundle next to the old one and points the version's bundle tags at it, leaving the weights untouched. The next `deploy_model` runs the new code; an app that is already running keeps the code it started with until it is deployed again, and the old bundle stays in storage so that app can still restart. Every call pays for the local build (walking the serve-app's imports and hashing its files). Callers with different installed dependency versions produce different fingerprints, so each re-bundles when it imports.
+
+To replace an imported model's weights, `undeploy_model` and `delete_model(family, suffix, cortexgrid.IMPORTED)`, then import again. The weights and bundle land under the same layout as a saved model (`models/imported/...`, `serve-bundles/imported/...`), so `load_model`, `deploy_model` and the rest work unchanged. The version is linked to no MLflow run, so `delete_run` / `delete_experiment` leave it in place.
 
 ### Getting upload / model status
 
@@ -373,7 +376,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
     "family": "...", "suffix": "...", "run_name": "..."
   },
   "runtime_env": {
-    "working_dir": "s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip",
+    "working_dir": "s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip",
     "pip": ["tqdm==4.67.3", "..."]
   }
 }
@@ -389,10 +392,10 @@ Replica options (`num_replicas`, `max_ongoing_requests`, `ray_actor_options.num_
 caller (laptop / arc-runner / training job)
   |
   | cortexgrid.save_model(weights_dir, ServeApp, family, suffix)   [synchronous / blocking]
-  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, size_bytes, lifecycle=uploading})
-  |   2. upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
-  |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>.zip
-  |   4. set tags {serve_bundle_url, class_import_path, serve_pip_requirements}; flip lifecycle=ready
+  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, lifecycle=uploading})
+  |   2. set tag size_bytes; upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
+  |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip
+  |   4. set tags {serve_bundle_url, class_import_path, serve_pip_requirements, serve_bundle_fingerprint}; flip lifecycle=ready
   v
 S3 (weights + zipped bundle)
 MLflow Model Registry (ModelVersion + tags)

@@ -16,8 +16,10 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
     ModelDeployFailed,
+    ServeBundle,
     _build_application_spec,
     _load_bundle_metadata,
+    build_bundle,
     bundle_class,
     deploy_model,
     list_deployed_models,
@@ -497,6 +499,66 @@ class TestServeDependencies(unittest.TestCase):
 
         self.assertEqual(uploaded, [("Qwen2.5-0.5B__Instruct.zip", True)])
 
+    def test_bundle_class_uploads_under_its_fingerprint(self) -> None:
+        # Ray reuses a working_dir it has downloaded for the same URL, so new
+        # code must land at a new URL.
+        dest_paths: list[str] = []
+
+        def fake_upload(local_path: str, dest_path: str) -> str:
+            dest_paths.append(dest_path)
+            return f"s3://b/{dest_path}"
+
+        desc = BundleDesc(local_files={Path(__file__).resolve()}, tp_deps={})
+        with (
+            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+        ):
+            meta = bundle_class(_ServeApp, "fam", "suf", "run")
+
+        self.assertEqual(
+            dest_paths, [f"serve-bundles/run/fam__suf/{meta.fingerprint}.zip"]
+        )
+        self.assertEqual(meta.bundle_url, f"s3://b/{dest_paths[0]}")
+
+    def _build(self, desc: BundleDesc) -> ServeBundle:
+        with (
+            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch(
+                "cortexgrid.model_serving.worker_provides",
+                return_value=frozenset(),
+            ),
+        ):
+            return build_bundle(_ServeApp)
+
+    def test_build_bundle_fingerprint_is_stable_for_the_same_code(self) -> None:
+        desc = BundleDesc(
+            local_files={Path(__file__).resolve()}, tp_deps={"tqdm": "4.67.3"}
+        )
+
+        self.assertEqual(self._build(desc).fingerprint, self._build(desc).fingerprint)
+
+    def test_build_bundle_fingerprint_changes_with_the_code(self) -> None:
+        root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        app = root / "app.py"
+        app.write_text("x = 1\n")
+        desc = BundleDesc(local_files={app}, tp_deps={})
+        before = self._build(desc)
+
+        app.write_text("x = 2\n")
+
+        self.assertNotEqual(before.fingerprint, self._build(desc).fingerprint)
+
+    def test_build_bundle_fingerprint_changes_with_the_pip_requirements(
+        self,
+    ) -> None:
+        files = {Path(__file__).resolve()}
+        before = self._build(BundleDesc(local_files=files, tp_deps={"tqdm": "4.67.3"}))
+
+        after = self._build(BundleDesc(local_files=files, tp_deps={"tqdm": "4.67.4"}))
+
+        self.assertNotEqual(before.fingerprint, after.fingerprint)
+
     def test_bundle_class_zip_unpacks_on_ray_with_packages_at_the_root(self) -> None:
         # Ray strips the single top-level directory of a remote working_dir zip;
         # a bundle of one package must still unpack with that package intact.
@@ -570,6 +632,7 @@ class TestServeDependencies(unittest.TestCase):
             bundle_url="s3://b/x.zip",
             class_import_path="stub:Stub",
             pip_requirements=["haikunator==2.1.0", "tqdm==4.67.3"],
+            fingerprint="abc123",
         )
 
         self.assertEqual(self._load_with_tags(metadata_to_tags(meta)), meta)
@@ -578,6 +641,13 @@ class TestServeDependencies(unittest.TestCase):
         tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
 
         self.assertEqual(self._load_with_tags(tags).pip_requirements, [])
+
+    def test_model_saved_without_fingerprint_tag_loads_with_no_fingerprint(
+        self,
+    ) -> None:
+        tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
+
+        self.assertEqual(self._load_with_tags(tags).fingerprint, "")
 
 
 if __name__ == "__main__":

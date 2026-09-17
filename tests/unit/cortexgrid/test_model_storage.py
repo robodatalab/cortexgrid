@@ -14,7 +14,7 @@ from mlflow.exceptions import MlflowException
 
 import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
-from cortexgrid.model_serving import BundleMetadata
+from cortexgrid.model_serving import BundleMetadata, ServeBundle
 from cortexgrid.model_storage import (
     IMPORTED,
     delete_model,
@@ -52,7 +52,18 @@ def _make_weights_dir() -> Path:
 _FAKE_BUNDLE = BundleMetadata(
     bundle_url="s3://b/serve-bundles/x.zip",
     class_import_path="fake.module:FakeClass",
+    fingerprint="code-v1",
 )
+
+
+def _serve_bundle(fingerprint: str) -> ServeBundle:
+    """A built (not uploaded) bundle of `_FakeServeApp` with this fingerprint."""
+    return ServeBundle(
+        files=set(),
+        class_import_path="fake.module:FakeClass",
+        pip_requirements=[],
+        fingerprint=fingerprint,
+    )
 
 
 @dataclass
@@ -196,10 +207,18 @@ def _patches(mlflow: FakeMLflow, s3: FakeS3) -> list:
             "cortexgrid.model_storage.get_mlflow_tracking_uri",
             return_value="http://x",
         ),
-        # bundling does pip freeze + import-graph walk + secret read - not
+        # bundling does pip freeze + import-graph walk + an S3 upload - not
         # what these tests cover; the bundle behaviour is tested separately.
+        # The built bundle matches _FAKE_BUNDLE, so re-importing keeps it.
         patch(
             "cortexgrid.model_storage.bundle_class", return_value=_FAKE_BUNDLE
+        ),
+        patch(
+            "cortexgrid.model_storage.build_bundle",
+            return_value=_serve_bundle(_FAKE_BUNDLE.fingerprint),
+        ),
+        patch(
+            "cortexgrid.model_storage.upload_bundle", return_value=_FAKE_BUNDLE
         ),
     ]
 
@@ -393,6 +412,57 @@ class TestImportModel(unittest.TestCase):
         import_model(fetch, _FakeServeApp, "Qwen2", "base")
 
         self.assertEqual(len(calls), 1)
+
+    def test_reimport_with_unchanged_code_keeps_the_bundle(self) -> None:
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        with patch("cortexgrid.model_storage.upload_bundle") as upload_bundle:
+            import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        upload_bundle.assert_not_called()
+
+    def test_reimport_with_changed_code_rebundles_and_keeps_the_weights(
+        self,
+    ) -> None:
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+        self.s3.objects.clear()
+        changed = BundleMetadata(
+            bundle_url="s3://b/serve-bundles/y.zip",
+            class_import_path="fake.module:FakeClass",
+            fingerprint="code-v2",
+        )
+
+        with (
+            patch(
+                "cortexgrid.model_storage.build_bundle",
+                return_value=_serve_bundle("code-v2"),
+            ),
+            patch(
+                "cortexgrid.model_storage.upload_bundle", return_value=changed
+            ) as upload_bundle,
+        ):
+            import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        upload_bundle.assert_called_once_with(
+            _serve_bundle("code-v2"), "Qwen2", "base", IMPORTED
+        )
+        self.assertEqual(len(self.mlflow.versions), 1)
+        tags = self.mlflow.versions[0].tags
+        self.assertEqual(tags["serve_bundle_url"], "s3://b/serve-bundles/y.zip")
+        self.assertEqual(tags["serve_bundle_fingerprint"], "code-v2")
+        self.assertEqual(self.s3.objects, {})
+
+    def test_reimport_rebundles_a_model_stored_without_a_fingerprint(
+        self,
+    ) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
+        v.tags["serve_bundle_url"] = "s3://b/serve-bundles/old.zip"
+        v.tags["class_import_path"] = "fake.module:FakeClass"
+
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(v.tags["serve_bundle_url"], _FAKE_BUNDLE.bundle_url)
+        self.assertEqual(v.tags["serve_bundle_fingerprint"], "code-v1")
 
     def test_raises_while_another_import_is_uploading(self) -> None:
         v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
