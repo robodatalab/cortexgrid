@@ -6,7 +6,14 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
     family, suffix      -> ModelVersion.tags["family"], ["suffix"]   (denormalized)
     weights blob path   -> ModelVersion.source =
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
-    run linkage         -> ModelVersion.run_id  (built-in MLflow field)
+    run linkage         -> ModelVersion.run_id  (built-in MLflow field; unset
+                           for imported models)
+
+Two ways in: `save_model` registers a fresh copy under the calling run's
+run_name every time it runs (fine-tuned output); `import_model` registers a
+model produced elsewhere once, under the fixed run_name IMPORTED, and is a
+no-op after that. Both write the same layout, so every
+(family, suffix, run_name) consumer - load_model, deploy_model - handles both.
 
 storage.py is pure: it takes run_id/run_name as explicit args and never reads
 the active Experiment singleton. The facade that fills those in lives in
@@ -20,7 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
-from typing import Any
+from typing import Any, Callable
 
 from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
@@ -48,6 +55,11 @@ _PHASE_BROKEN = "broken"
 # dies mid-upload never flips the tag to "ready"/"upload_failed". Expiry is
 # derived lazily on read (see `_phase_for`); nothing is written back.
 _UPLOAD_DEADLINE = timedelta(hours=3)
+
+# run_name under which `import_model` registers a model: imported weights belong
+# to no run, so they share one fixed key and outlive the run that imported
+# them. Run names are haikunator "word-word-NN", so no run can take this name.
+IMPORTED = "imported"
 
 
 @dataclass
@@ -137,6 +149,10 @@ def save_model(
     """Upload a weights directory to S3 and register a new MLflow ModelVersion
     paired with the serve-app that fronts it.
 
+    Meant for weights the calling run produced (e.g. a fine-tune): every run
+    saves its own copy under its own run_name, so running the same code twice
+    yields two models. For weights produced elsewhere, use `import_model`.
+
     cortexgrid stores the weights as an opaque directory: it never inspects,
     serializes, or reconstructs their contents, so the on-disk format
     (HuggingFace `save_pretrained`, `torch.save`, ONNX, anything) is entirely
@@ -148,6 +164,55 @@ def save_model(
     Its code is bundled and its import path, bundle URL, and pip list are
     stored as tags on the ModelVersion so `deploy_model` can bind it later
     without the caller holding the class object."""
+    return _upload_model(weights_dir, serve_app, suffix, family, run_id, run_name)
+
+
+def import_model(
+    source: str | Path | Callable[[], str | Path],
+    serve_app: type,
+    family: str,
+    suffix: str,
+) -> SavedModel:
+    """Register a model produced elsewhere (e.g. a pretrained base model) under
+    the fixed key (family, suffix, IMPORTED), once.
+
+    `source` is the weights directory, or a callable returning it; the callable
+    runs only when the upload actually happens, so an expensive download can be
+    skipped on every run after the first.
+
+    If a version is already registered under the key:
+      - "ready": no-op, returns it. `source` and `serve_app` are ignored; to
+        replace the weights or the serve-app, `delete_model` it first.
+      - "uploading": raises RuntimeError - another process is importing it.
+      - "upload_failed" / "broken": deleted and imported again.
+
+    The version is linked to no MLflow run, so deleting a run leaves it in
+    place. Deploy it like any saved model:
+    `deploy_model(family, suffix, IMPORTED)`."""
+    existing = model_registry_status(family, suffix, IMPORTED)
+    if existing is not None:
+        if existing.phase == _PHASE_READY:
+            return existing
+        if existing.phase == _PHASE_UPLOADING:
+            raise RuntimeError(
+                f"Model {family}/{suffix}/{IMPORTED} is being imported by "
+                "another process"
+            )
+        delete_model(family, suffix, IMPORTED)
+    weights_dir = source() if callable(source) else source
+    return _upload_model(weights_dir, serve_app, suffix, family, None, IMPORTED)
+
+
+def _upload_model(
+    weights_dir: str | Path,
+    serve_app: type,
+    suffix: str,
+    family: str,
+    run_id: str | None,
+    run_name: str,
+) -> SavedModel:
+    """Register a ModelVersion in "uploading", upload the weights and the
+    serve-app bundle, and flip it to "ready" (or "upload_failed")."""
     bucket = get_s3_bucket()
     prefix = f"models/{run_name}/{family}/{suffix}"
     size_bytes = _dir_size_bytes(weights_dir)

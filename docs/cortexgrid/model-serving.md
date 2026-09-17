@@ -123,7 +123,7 @@ Weights are never shipped via `runtime_env` - they stay in S3 and the serve-app'
 
 ### Bundle lifecycle
 
-`delete_model(family, suffix, run_name)` removes the `ModelVersion`, the weights prefix, and the serve bundle. `delete_models_for_run(run_id)` (called by `delete_run` and therefore `delete_experiment`) removes every `ModelVersion` linked to the run, the `models/<run_name>/` prefix, and the `serve-bundles/<run_name>/` prefix. Active Ray Serve deployments are *not* torn down by `delete_run` - call `undeploy_model` explicitly.
+`delete_model(family, suffix, run_name)` removes the `ModelVersion`, the weights prefix, and the serve bundle. `delete_models_for_run(run_id)` (called by `delete_run` and therefore `delete_experiment`) removes every `ModelVersion` linked to the run, the `models/<run_name>/` prefix, and the `serve-bundles/<run_name>/` prefix; imported models are linked to no run and are left in place. Active Ray Serve deployments are *not* torn down by `delete_run` - call `undeploy_model` explicitly.
 
 ## On the replica
 
@@ -152,7 +152,8 @@ All exported from `cortexgrid.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `save_model(weights_dir, serve_app, family, suffix) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`. See [Model registry lifecycle](#model-registry-lifecycle). |
+| `save_model(weights_dir, serve_app, family, suffix) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
+| `import_model(source, serve_app, family, suffix) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; a no-op returning the existing model when it is already `ready`. `source` is the weights directory or a callable returning it. See [Importing a model](#importing-a-model). |
 | `model_registry_status(family, suffix, run_name) -> SavedModel \| None` | The registry lifecycle of one model, or `None` if never registered. `SavedModel.phase` is `uploading` / `ready` / `upload_failed` / `broken`. |
 | `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. |
 | `list_models() -> list[SavedModel]` | Every `ModelVersion` in the registry (including `uploading` / `upload_failed` / `broken`), mapped to a `SavedModel`. |
@@ -183,7 +184,7 @@ The registry lifecycle spans a model's life in MLflow + S3: it starts when an up
 | `None` | no version registered - no upload has started for this triple |
 | `uploading` | the `ModelVersion` exists; weights + serve bundle are streaming to storage |
 | `ready` | upload finished; the model is registered and deployable |
-| `upload_failed` | `save_model` raised during the upload and marked the version failed |
+| `upload_failed` | `save_model` / `import_model` raised during the upload and marked the version failed |
 | `broken` | an upload has stayed `uploading` past the deadline (3h); the writer is presumed dead |
 
 ### Uploading a model
@@ -202,6 +203,28 @@ assert saved.phase == "ready"   # returns only once the upload has landed
 The call returns only after the upload completes (`ready`) or raises (`upload_failed`). The `uploading` phase is what *other* readers (the dashboard, a concurrent `list_models`) observe while the call is in flight - the caller of `save_model` itself blocks.
 
 Each call creates a *new* `ModelVersion` (MLflow versions are append-only), so saving twice in the same run yields two versions for the same `(family, suffix, run_name)`; save under a fresh run for a clean re-upload.
+
+### Importing a model
+
+`save_model` keys a model by the run that saved it, which suits fine-tuned output: every run of the training code produces a new model. A model produced elsewhere - e.g. a pretrained base model pulled from HuggingFace - should be uploaded once and reused by every run. `import_model` registers it under the fixed run_name `cortexgrid.IMPORTED` (`"imported"`; haikunator run names are `word-word-NN`, so no run can take it):
+
+```python
+def fetch() -> Path:   # runs only when the model is not registered yet
+    return Path(huggingface_hub.snapshot_download("Qwen/Qwen2.5-0.5B-Instruct"))
+
+m = cortexgrid.import_model(fetch, MyServeApp, family="qwen", suffix="base")
+cortexgrid.deploy_model(m.family, m.suffix, m.run_name, wait=True)   # m.run_name == cortexgrid.IMPORTED
+```
+
+If a version is already registered under `(family, suffix, IMPORTED)`:
+
+| phase | `import_model` |
+|---|---|
+| `ready` | returns it; `source` is not called and `serve_app` is not re-bundled |
+| `uploading` | raises `RuntimeError` - another process is importing it |
+| `upload_failed` / `broken` | deletes it and imports again |
+
+To replace an imported model's weights or serve-app, `undeploy_model` and `delete_model(family, suffix, cortexgrid.IMPORTED)`, then import again. The weights and bundle land under the same layout as a saved model (`models/imported/...`, `serve-bundles/imported/...`), so `load_model`, `deploy_model` and the rest work unchanged. The version is linked to no MLflow run, so `delete_run` / `delete_experiment` leave it in place.
 
 ### Getting upload / model status
 

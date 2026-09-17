@@ -14,8 +14,10 @@ from mlflow.exceptions import MlflowException
 
 from cortexgrid.model_serving import BundleMetadata
 from cortexgrid.model_storage import (
+    IMPORTED,
     delete_model,
     delete_models_for_run,
+    import_model,
     list_models,
     load_model,
     model_registry_status,
@@ -56,7 +58,7 @@ class FakeModelVersion:
     name: str
     version: str
     source: str | None
-    run_id: str
+    run_id: str | None
     tags: dict[str, str]
     creation_timestamp: int = 1700000000000
 
@@ -95,7 +97,7 @@ class FakeMLflow:
         self,
         name: str,
         source: str,
-        run_id: str,
+        run_id: str | None,
         tags: dict[str, str],
     ) -> FakeModelVersion:
         v = FakeModelVersion(
@@ -341,6 +343,88 @@ class TestSaveModel(unittest.TestCase):
         self.assertEqual(len(self.mlflow.versions), 1)
         self.assertEqual(
             self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
+        )
+
+
+class TestImportModel(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        for p in _patches(self.mlflow, self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+        self.weights_dir = _make_weights_dir()
+        self.addCleanup(shutil.rmtree, self.weights_dir, ignore_errors=True)
+
+    def test_registers_under_imported_run_name_without_run(self) -> None:
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base"
+        )
+        self.assertEqual(result.run_name, IMPORTED)
+        self.assertEqual(result.phase, "ready")
+        self.assertIsNone(self.mlflow.versions[0].run_id)
+        self.assertIn(
+            f"models/{IMPORTED}/Qwen2/base/weights/config.json", self.s3.objects
+        )
+
+    def test_second_import_is_a_noop(self) -> None:
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+        self.s3.objects.clear()
+
+        result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(self.s3.objects, {})
+
+    def test_calls_source_only_when_uploading(self) -> None:
+        calls: list[int] = []
+
+        def fetch() -> Path:
+            calls.append(1)
+            return self.weights_dir
+
+        import_model(fetch, _FakeServeApp, "Qwen2", "base")
+        import_model(fetch, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(len(calls), 1)
+
+    def test_raises_while_another_import_is_uploading(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
+        v.tags["lifecycle"] = "uploading"
+        v.creation_timestamp = _recent_ms()
+
+        with self.assertRaises(RuntimeError):
+            import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+    def test_reimports_after_failed_upload(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
+        v.tags["lifecycle"] = "upload_failed"
+
+        result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(len(self.mlflow.versions), 1)
+
+    def test_reimports_after_broken_upload(self) -> None:
+        # _seed_version's default creation_timestamp is past the deadline.
+        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
+        v.tags["lifecycle"] = "uploading"
+
+        result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(len(self.mlflow.versions), 1)
+
+    def test_survives_deleting_a_run(self) -> None:
+        self.mlflow.runs["r1"] = FakeRun("r1", "boogey-46")
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        delete_models_for_run("r1")
+
+        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertIn(
+            f"models/{IMPORTED}/Qwen2/base/weights/config.json", self.s3.objects
         )
 
 
