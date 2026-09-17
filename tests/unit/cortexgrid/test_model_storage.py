@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from mlflow.exceptions import MlflowException
 
+import cortexgrid
+from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import BundleMetadata
 from cortexgrid.model_storage import (
     IMPORTED,
@@ -106,6 +108,9 @@ class FakeMLflow:
             source=source,
             run_id=run_id,
             tags=tags,
+            # MLflow stamps the creation time, so a version this fake creates
+            # is fresh rather than past the upload deadline.
+            creation_timestamp=_recent_ms(),
         )
         self._next_version += 1
         self.versions.append(v)
@@ -397,6 +402,29 @@ class TestImportModel(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
+    def test_raises_while_another_import_is_downloading(self) -> None:
+        def fetch() -> Path:
+            with self.assertRaises(RuntimeError):
+                import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+            return self.weights_dir
+
+        import_model(fetch, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(self.mlflow.versions[0].tags["lifecycle"], "ready")
+
+    def test_marks_version_failed_when_source_raises(self) -> None:
+        def fetch() -> Path:
+            raise RuntimeError("download died")
+
+        with self.assertRaises(RuntimeError):
+            import_model(fetch, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(
+            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
+        )
+
     def test_reimports_after_failed_upload(self) -> None:
         v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
         v.tags["lifecycle"] = "upload_failed"
@@ -426,6 +454,67 @@ class TestImportModel(unittest.TestCase):
         self.assertIn(
             f"models/{IMPORTED}/Qwen2/base/weights/config.json", self.s3.objects
         )
+
+
+class TestImportModelRecordsRun(unittest.TestCase):
+    """The `cortexgrid.import_model` facade tags the calling run with the
+    imported model it used."""
+
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        self.run_client = MagicMock()
+        for p in [
+            *_patches(self.mlflow, self.s3),
+            patch("cortexgrid.get_mlflow_client", return_value=self.run_client),
+        ]:
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(clear_instance)
+        self.weights_dir = _make_weights_dir()
+        self.addCleanup(shutil.rmtree, self.weights_dir, ignore_errors=True)
+
+    def _use_run(self, run_id: str) -> None:
+        set_instance(Experiment(experiment_name="experiment", run_id=run_id))
+
+    def test_tags_every_run_that_imports_the_model(self) -> None:
+        self._use_run("r1")
+        model = cortexgrid.import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base"
+        )
+        self._use_run("r2")
+        cortexgrid.import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(
+            self.run_client.set_tag.call_args_list,
+            [
+                call("r1", "imported_model/Qwen2/base", model.created_at),
+                call("r2", "imported_model/Qwen2/base", model.created_at),
+            ],
+        )
+
+    def test_does_not_tag_the_run_when_the_import_fails(self) -> None:
+        self._use_run("r1")
+
+        def fetch() -> Path:
+            raise RuntimeError("download died")
+
+        with self.assertRaises(RuntimeError):
+            cortexgrid.import_model(fetch, _FakeServeApp, "Qwen2", "base")
+
+        self.run_client.set_tag.assert_not_called()
+
+    def test_requires_an_experiment_before_fetching(self) -> None:
+        calls: list[int] = []
+
+        def fetch() -> Path:
+            calls.append(1)
+            return self.weights_dir
+
+        with self.assertRaises(ValueError):
+            cortexgrid.import_model(fetch, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(calls, [])
 
 
 class TestLoadModel(unittest.TestCase):

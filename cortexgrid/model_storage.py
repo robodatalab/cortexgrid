@@ -50,9 +50,10 @@ _PHASE_UPLOAD_FAILED = "upload_failed"
 _PHASE_BROKEN = "broken"
 
 # An upload still marked "uploading" this long after the version was created is
-# treated as broken: save_model creates the version immediately before the
-# upload begins, so creation_timestamp is the upload start, and a process that
-# dies mid-upload never flips the tag to "ready"/"upload_failed". Expiry is
+# treated as broken: the version is created before the weights are resolved
+# (for `import_model`, before its download), so creation_timestamp is the
+# start of the whole upload, and a process that dies mid-way never flips the
+# tag to "ready"/"upload_failed". Expiry is
 # derived lazily on read (see `_phase_for`); nothing is written back.
 _UPLOAD_DEADLINE = timedelta(hours=3)
 
@@ -178,7 +179,9 @@ def import_model(
 
     `source` is the weights directory, or a callable returning it; the callable
     runs only when the upload actually happens, so an expensive download can be
-    skipped on every run after the first.
+    skipped on every run after the first. It runs after the version is
+    registered as "uploading", so a concurrent import sees this one in flight
+    while it downloads.
 
     If a version is already registered under the key:
       - "ready": no-op, returns it. `source` and `serve_app` are ignored; to
@@ -199,30 +202,32 @@ def import_model(
                 "another process"
             )
         delete_model(family, suffix, IMPORTED)
-    weights_dir = source() if callable(source) else source
-    return _upload_model(weights_dir, serve_app, suffix, family, None, IMPORTED)
+    return _upload_model(source, serve_app, suffix, family, None, IMPORTED)
 
 
 def _upload_model(
-    weights_dir: str | Path,
+    weights: str | Path | Callable[[], str | Path],
     serve_app: type,
     suffix: str,
     family: str,
     run_id: str | None,
     run_name: str,
 ) -> SavedModel:
-    """Register a ModelVersion in "uploading", upload the weights and the
-    serve-app bundle, and flip it to "ready" (or "upload_failed")."""
+    """Register a ModelVersion in "uploading", resolve `weights` to a directory
+    (calling it when it is a callable), upload the weights and the serve-app
+    bundle, and flip it to "ready" (or "upload_failed")."""
     bucket = get_s3_bucket()
     prefix = f"models/{run_name}/{family}/{suffix}"
-    size_bytes = _dir_size_bytes(weights_dir)
     source = f"s3://{bucket}/{prefix}/weights/"
     name = f"{family}__{suffix}"
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     _ensure_registered_model(client, name)
-    # Register the version up front in the "uploading" phase so the dashboard
-    # can surface a model while its weights are still streaming to storage. The
-    # bundle tags and the flip to "ready" happen only after the upload lands.
+    # Register the version up front in the "uploading" phase, before `weights`
+    # is resolved: the dashboard surfaces the model while it is still being
+    # fetched and uploaded, and a concurrent `import_model` sees the import in
+    # flight for the whole download instead of starting one of its own. The
+    # size is stamped once the directory exists; the bundle tags and the flip
+    # to "ready" happen only after the upload lands.
     version = client.create_model_version(
         name=name,
         source=source,
@@ -231,11 +236,14 @@ def _upload_model(
             "family": family,
             "suffix": suffix,
             "run_name": run_name,
-            "size_bytes": str(size_bytes),
             _LIFECYCLE_TAG: _PHASE_UPLOADING,
         },
     )
     try:
+        weights_dir = weights() if callable(weights) else weights
+        client.set_model_version_tag(
+            name, version.version, "size_bytes", str(_dir_size_bytes(weights_dir))
+        )
         s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
         bundle_meta = bundle_class(serve_app, family, suffix, run_name)
         for key, value in metadata_to_tags(bundle_meta).items():
