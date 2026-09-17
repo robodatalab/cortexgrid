@@ -8,6 +8,11 @@ NodeLabel is strict in direct mode: the agent was just installed against a
 running head, so a node that does not register is a failed join and must fail
 setup. In deferred mode the node cannot have registered yet; it labels itself
 (`node-label` in the agent config JoinCluster writes) when it joins.
+ComputeLabels follows the same strictness.
+
+`build_on_head()` makes the head a worker too: the head is already a k3s node
+with prerequisites installed, so only ComputeLabels runs - joining would
+overwrite the head's k3s config and NodeLabel would relabel it role=worker.
 """
 
 from typing import Literal
@@ -21,4 +26,11 @@ def build(*, mode: Literal["direct", "deferred"]) -> Pipeline:
         operators.InstallPrereqs(),
         operators.JoinCluster(mode=mode),
         operators.NodeLabel(role="worker", strict=(mode == "direct")),
+        operators.ComputeLabels(strict=(mode == "direct")),
+    ])
+
+
+def build_on_head() -> Pipeline:
+    return Pipeline([
+        operators.ComputeLabels(),
     ])

@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import yaml  # type: ignore
+from parameterized import parameterized  # type: ignore
 
 from k8s.seed import head, restart_nodes, setup_node, teardown_node, util, worker
 
@@ -23,6 +24,7 @@ HEAD = {
     "profile": "onprem",
     "storage_path": "/mnt/hdd",
 }
+HEAD_WORKER = {**HEAD, "worker": True}
 WORKER_1 = {"ip": "10.0.0.11", "role": "worker", "profile": "onprem"}
 WORKER_2 = {"ip": "10.0.0.12", "role": "worker", "profile": "onprem"}
 
@@ -39,9 +41,9 @@ HEAD_ENV = (
 )
 
 
-def _seed_config(path: Path) -> None:
+def _seed_config(path: Path, head_entry: dict) -> None:
     with open(path, "w") as f:
-        yaml.safe_dump({"nodes": [HEAD, WORKER_1, WORKER_2]}, f)
+        yaml.safe_dump({"nodes": [head_entry, WORKER_1, WORKER_2]}, f)
 
 
 class _RecordingPipeline:
@@ -95,8 +97,8 @@ class RestartCallSequenceParityTest(unittest.TestCase):
         self._env_patch.stop()
         self._tmpdir.cleanup()
 
-    def _capture(self, action) -> list:
-        _seed_config(self.config_path)
+    def _capture(self, action, head_entry: dict) -> list:
+        _seed_config(self.config_path, head_entry)
         calls: list = []
         secrets = [util.SECRET_K3S_TOKEN, util.SECRET_CONTROL_PLANE_IP]
         with (
@@ -108,6 +110,11 @@ class RestartCallSequenceParityTest(unittest.TestCase):
                 head, "build", lambda: _RecordingPipeline("head", calls)
             ),
             mock.patch.object(worker, "build", _worker_build_factory(calls)),
+            mock.patch.object(
+                worker,
+                "build_on_head",
+                lambda: _RecordingPipeline("worker_on_head", calls),
+            ),
             mock.patch(
                 "k8s.seed.restart_nodes.list_secrets", return_value=secrets
             ),
@@ -124,17 +131,24 @@ class RestartCallSequenceParityTest(unittest.TestCase):
             action()
         return calls
 
-    def test_restart_matches_individual_invocations(self) -> None:
-        restart_sequence = self._capture(restart_nodes.main)
-        individual_sequence = self._capture(_invoke_scripts_individually)
+    @parameterized.expand([("head", HEAD), ("head_worker", HEAD_WORKER)])
+    def test_restart_matches_individual_invocations(
+        self, _name: str, head_entry: dict
+    ) -> None:
+        restart_sequence = self._capture(restart_nodes.main, head_entry)
+        individual_sequence = self._capture(
+            lambda: _invoke_scripts_individually(head_entry), head_entry
+        )
         self.assertEqual(restart_sequence, individual_sequence)
 
 
-def _invoke_scripts_individually() -> None:
+def _invoke_scripts_individually(head_entry: dict) -> None:
     _run_teardown(WORKER_1["ip"])
     _run_teardown(WORKER_2["ip"])
     _run_teardown(HEAD["ip"])
     _run_setup_head()
+    if head_entry.get("worker"):
+        _run_setup_worker(HEAD["ip"])
     _run_setup_worker(WORKER_1["ip"])
     _run_setup_worker(WORKER_2["ip"])
 

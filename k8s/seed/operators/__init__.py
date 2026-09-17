@@ -2,6 +2,7 @@
 
 from k8s.seed.operators.argo_ready import ArgoReady
 from k8s.seed.operators.bootstrap_secrets import BootstrapSecrets
+from k8s.seed.operators.compute_labels import ComputeLabels
 from k8s.seed.operators.control_plane_details import ControlPlaneDetails
 from k8s.seed.operators.env_secrets import EnvSecrets
 from k8s.seed.operators.head_server import HeadServer
@@ -21,6 +22,7 @@ from k8s.seed.operators.worker_labels import WorkerLabels
 __all__ = [
     "ArgoReady",
     "BootstrapSecrets",
+    "ComputeLabels",
     "ControlPlaneDetails",
     "EnvSecrets",
     "HeadServer",

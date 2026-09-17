@@ -13,7 +13,7 @@ How the Ray head runs inside Kubernetes. Applied by the Argo Application at [../
 - **`imagePullSecrets: ghcr-pull`** — reflected into the namespace by reflector, allows pulling the private image.
 - **`imagePullPolicy: Always`** — every new pod re-pulls `:latest` so CI builds take effect.
 - **`livenessProbe: ray status`** — if `ray status` fails for 30s, k8s kills the pod; the Deployment replaces it.
-- **Workers via DaemonSet** — one `ray-worker` pod per cluster node (head + workers), each requesting 1 GPU. All pods register against `ray-head.ray.svc.cluster.local:6379` and share one GPU pool.
+- **Workers via DaemonSets** — one pod per `worker=true` node: `ray-worker` (1 GPU) on `gpu=true` nodes, `ray-worker-cpu` (`--num-gpus=0`) elsewhere. All pods register against `ray-head.cortexgrid.svc.cluster.local:6379` and share one resource pool.
 
 ## Files
 
