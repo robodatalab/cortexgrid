@@ -64,13 +64,19 @@ make head-setup IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage
 # On-prem head (skip terraform; just bootstrap k3s on an existing box)
 make head-setup IP=<head-ip> STORAGE_PATH=<hdd-mount> [SSH_USER=<user>]
 
-# Worker (any GPU box, AWS or on-prem)
+# Worker (any box, GPU or CPU-only, AWS or on-prem)
 make worker-setup IP=<worker-ip> [SSH_USER=<user>]
+
+# Head as a worker too (runs Ray workers next to the control plane)
+make worker-setup IP=<head-ip> [SSH_USER=<user>]
 
 # Teardown
 make node-teardown IP=<any-ip> [SSH_USER=<user>]
+make worker-teardown IP=<head-ip> [SSH_USER=<user>]   # removes only the worker role; on a plain worker, same as node-teardown
 make head-aws-destroy   # AWS only - destroys EC2 + VPC + S3 + RDS
 ```
+
+`worker-setup` on the head's IP does not join or relabel it: it only runs `ComputeLabels` (`worker=true`, plus `gpu=true` on a GPU host) and records `worker: true` on the head's `infra-config.yaml` entry, which `head-setup` re-runs, `node-teardown` and `restart` honour.
 
 Worker-before-head is supported: if the head hasn't been seeded yet, `make worker-setup` installs node prerequisites and drops a systemd timer on the worker that polls the head secrets server (`http://robolab-head:7700`) for the head's credentials and joins automatically once the head appears. The command returns immediately.
 

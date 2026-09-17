@@ -4,6 +4,9 @@ Usage:
     uv run python k8s/seed/setup-node.py --type=head --ip=X --storage-path=Y [--ssh-user=Z]
     uv run python k8s/seed/setup-node.py --type=worker --ip=X [--ssh-user=Z]
 
+--type=worker on the head's IP makes the head a worker too (`worker: true` on
+its infra-config.yaml entry) instead of joining it as a separate node.
+
 Dispatcher responsibilities:
   - Parse args, validate and update infra-config.yaml.
   - Resolve every pipeline dependency (.env.head values, head creds from the
@@ -62,6 +65,9 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
     existing = next((n for n in cfg["nodes"] if n["ip"] == args.ip), None)
 
     if existing is not None:
+        if existing["role"] == "head" and args.type == "worker":
+            existing["worker"] = True
+            return cfg
         if existing["role"] != args.type:
             sys.exit(
                 f"Error: node {args.ip} is already registered as role={existing['role']}. "
@@ -88,6 +94,9 @@ def validate_and_update(cfg: dict, args: argparse.Namespace) -> dict:
     entry = {"ip": args.ip, "role": args.type, "profile": args.profile}
     if args.type == "head":
         entry["storage_path"] = args.storage_path
+    if existing is not None and existing.get("worker"):
+        # A head re-seed keeps the worker role added by worker-setup.
+        entry["worker"] = True
     if existing is not None and "progress" in existing:
         # Carry the checkpoint across re-runs so a prior failure's state is visible.
         entry["progress"] = existing["progress"]
@@ -191,6 +200,27 @@ def _run_worker(
         )
 
 
+def _run_worker_on_head(
+    args: argparse.Namespace,
+    ssh_pw: Callable[[], str],
+    sudo_pw: Callable[[], str],
+) -> None:
+    pipeline = worker.build_on_head()
+    with (
+        util.connect(args.ssh_user, args.ip, ssh_pw, sudo_pw) as c,
+        tqdm(total=len(pipeline.operators), desc=f"Worker setup on head {args.ip}") as bar,
+    ):
+
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "setup")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
+        pipeline.setup({"connection": c, "node_ip": args.ip})
+    log.info(f"\nHead {args.ip} is now also a worker.")
+
+
 def main() -> None:
     args = parse_args()
     # Validate .env.head before touching infra-config.yaml.
@@ -208,8 +238,11 @@ def main() -> None:
     def sudo_pw():
         return getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
+    entry = next(n for n in cfg["nodes"] if n["ip"] == args.ip)
     if args.type == "head":
         _run_head(args, cfg, env, ssh_pw, sudo_pw)
+    elif entry["role"] == "head":
+        _run_worker_on_head(args, ssh_pw, sudo_pw)
     else:
         _run_worker(args, ssh_pw, sudo_pw)
 

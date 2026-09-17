@@ -1,7 +1,10 @@
 """Tear down a robolab cluster node.
 
 Usage:
-    uv run python k8s/seed/teardown-node.py --ip=X [--ssh-user=Z]
+    uv run python k8s/seed/teardown-node.py --ip=X [--worker] [--ssh-user=Z]
+
+--worker removes only the worker role. On a head that worker-setup made a
+worker too, the head stays in place; on a plain worker it is a full teardown.
 
 Dispatcher responsibilities:
   - Look the node up in infra-config.yaml.
@@ -30,6 +33,11 @@ log = logging.getLogger("k8s.seed.teardown_node")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Tear down a robolab cluster node.")
     p.add_argument("--ip", required=True)
+    p.add_argument(
+        "--worker",
+        action="store_true",
+        help="Remove only the worker role (keeps a head that is also a worker).",
+    )
     p.add_argument("--ssh-user", default=None)
     args = p.parse_args()
     if args.ssh_user is None:
@@ -97,6 +105,23 @@ def _run_worker(
     log.info("Worker teardown complete.")
 
 
+def _run_worker_on_head(args: argparse.Namespace) -> None:
+    # ComputeLabels.teardown only talks to the API server - no SSH connection.
+    pipeline = worker.build_on_head()
+    with tqdm(
+        total=len(pipeline.operators), desc=f"Worker teardown on head {args.ip}"
+    ) as bar:
+
+        def on_step_done(name: str) -> None:
+            util.checkpoint_step_done(args.ip, name, "teardown")
+            bar.set_postfix_str(name)
+            bar.update(1)
+
+        pipeline.on_step_done = on_step_done
+        pipeline.teardown({"node_ip": args.ip})
+    log.info("Worker teardown on head complete.")
+
+
 def main() -> None:
     args = parse_args()
     cfg = util.load_config()
@@ -116,7 +141,21 @@ def main() -> None:
     def sudo_pw():
         return getpass.getpass(f"Sudo password for {args.ssh_user}@{args.ip}: ")
 
+    if args.worker and entry["role"] == "head":
+        if not entry.get("worker"):
+            sys.exit(f"Error: head {args.ip} is not a worker. Nothing to tear down.")
+        _run_worker_on_head(args)
+        cfg = util.load_config()
+        for n in cfg["nodes"]:
+            if n["ip"] == args.ip:
+                n.pop("worker", None)
+        util.save_config(cfg)
+        logging.info(f"Removed the worker role from {args.ip} in infra-config.yaml.")
+        return
+
     if entry["role"] == "head":
+        if entry.get("worker"):
+            _run_worker_on_head(args)
         _run_head(args, entry, cfg, ssh_pw, sudo_pw)
     else:
         _run_worker(args, ssh_pw, sudo_pw)

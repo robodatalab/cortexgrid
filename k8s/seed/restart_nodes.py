@@ -2,7 +2,8 @@
 
 Snapshots the registered nodes, tears each one down, then seeds it again.
 Workers are torn down before the head and seeded after it, so the cluster
-stays in a valid topology at each step.
+stays in a valid topology at each step. A head that is also a worker loses the
+worker role right before its teardown and regains it right after its setup.
 
 Uses head.build() / worker.build() and pipeline.setup / pipeline.teardown
 directly -- no subprocesses.
@@ -103,6 +104,18 @@ def _teardown_worker(entry: dict) -> None:
         )
 
 
+def _teardown_worker_on_head(entry: dict) -> None:
+    ip = entry["ip"]
+    # ComputeLabels.teardown only talks to the API server - no SSH connection.
+    _run(
+        worker.build_on_head(),
+        {"node_ip": ip},
+        direction="teardown",
+        ip=ip,
+        desc=f"Worker teardown on head {ip}",
+    )
+
+
 def _setup_head(entry: dict, env: dict[str, str]) -> None:
     ip = entry["ip"]
     user = util.ssh_user_for_ip(ip) or getpass.getuser()
@@ -161,6 +174,20 @@ def _setup_worker(entry: dict) -> None:
         )
 
 
+def _setup_worker_on_head(entry: dict) -> None:
+    ip = entry["ip"]
+    user = util.ssh_user_for_ip(ip) or getpass.getuser()
+    ssh_pw, sudo_pw = _password_callbacks(user, ip)
+    with util.connect(user, ip, ssh_pw, sudo_pw) as c:
+        _run(
+            worker.build_on_head(),
+            {"connection": c, "node_ip": ip},
+            direction="setup",
+            ip=ip,
+            desc=f"Worker setup on head {ip}",
+        )
+
+
 def _config_remove(ip: str) -> None:
     cfg = util.load_config()
     cfg["nodes"] = [n for n in cfg["nodes"] if n["ip"] != ip]
@@ -172,6 +199,8 @@ def _config_add(entry: dict) -> None:
     fresh = {"ip": entry["ip"], "role": entry["role"], "profile": entry["profile"]}
     if entry["role"] == "head":
         fresh["storage_path"] = entry["storage_path"]
+    if entry.get("worker"):
+        fresh["worker"] = True
     cfg.setdefault("nodes", []).append(fresh)
     util.save_config(cfg)
 
@@ -201,12 +230,16 @@ def main() -> None:
         _teardown_worker(w)
         _config_remove(w["ip"])
     if head_entry is not None:
+        if head_entry.get("worker"):
+            _teardown_worker_on_head(head_entry)
         _teardown_head(head_entry)
         _config_remove(head_entry["ip"])
 
     if head_entry is not None:
         _config_add(head_entry)
         _setup_head(head_entry, env)
+        if head_entry.get("worker"):
+            _setup_worker_on_head(head_entry)
     for w in worker_entries:
         _config_add(w)
         _setup_worker(w)

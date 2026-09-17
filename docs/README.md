@@ -76,6 +76,8 @@ make head-setup IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage PROFILE=aws
 make worker-setup IP=<dgx-tailscale-ip> PROFILE=aws
 ```
 
+To also run Ray workers on the head, run `worker-setup` against the head's IP; `make worker-teardown IP=<head-ip>` removes that role again and leaves the head running.
+
 **4. Point your laptop at the head** (for `cortexgrid` and `make dev`):
 
 ```bash
@@ -86,6 +88,7 @@ export CORTEXGRID_HEAD_URL=http://robolab-head:7700
 
 ```bash
 make node-teardown IP=<tailscale-ip>      # k3s teardown on a single node
+make worker-teardown IP=<tailscale-ip>    # only the worker role (keeps a head); plain worker: same as node-teardown
 make head-aws-destroy                     # single terraform destroy of the platform stack
 ```
 

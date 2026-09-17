@@ -87,6 +87,24 @@ class TestValidateAndUpdate(unittest.TestCase):
             result["nodes"][0].get("progress"), ["InstallPrereqs", "K3sServer"]
         )
 
+    def test_worker_on_head_marks_the_head_a_worker(self) -> None:
+        """worker-setup on the head's IP keeps the head entry and adds worker: true."""
+        head = {"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd", "progress": ["ArgoReady"]}
+        cfg = {"nodes": [dict(head)]}
+        result = setup_node.validate_and_update(
+            cfg, _args(type="worker", storage_path=None)
+        )
+        self.assertEqual(result["nodes"], [{**head, "worker": True}])
+
+    def test_head_reseed_keeps_worker_role(self) -> None:
+        cfg = {
+            "nodes": [
+                {"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd", "worker": True}
+            ]
+        }
+        result = setup_node.validate_and_update(cfg, _args(type="head"))
+        self.assertTrue(result["nodes"][0].get("worker"))
+
     def test_fresh_entry_has_no_progress_field(self) -> None:
         cfg: dict = {"nodes": []}
         result = setup_node.validate_and_update(cfg, _args(type="head"))
