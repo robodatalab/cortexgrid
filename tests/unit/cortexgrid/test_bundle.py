@@ -18,6 +18,7 @@ from cortexgrid._bundle import (
     BundleDesc,
     UnownedDependencyError,
     bundle,
+    digest,
     distribution_closure,
     stage,
 )
@@ -571,6 +572,45 @@ class TestStage(unittest.TestCase):
         stage(set(), dest)
 
         self.assertTrue(dest.is_dir())
+
+
+class TestDigest(unittest.TestCase):
+    def _tree(self, files: dict[str, str]) -> Path:
+        root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        for rel, content in files.items():
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        return root
+
+    def _digest(self, root: Path, rels: tuple[str, ...]) -> str:
+        return digest({(root / rel).resolve() for rel in rels})
+
+    def test_same_layout_digests_the_same_wherever_it_lives(self) -> None:
+        files = {"app/__init__.py": "", "app/main.py": "x = 1\n"}
+
+        first, second = self._tree(files), self._tree(files)
+
+        self.assertEqual(
+            self._digest(first, tuple(files)), self._digest(second, tuple(files))
+        )
+
+    def test_changed_content_changes_the_digest(self) -> None:
+        rels = ("app/__init__.py", "app/main.py")
+        before = self._tree({"app/__init__.py": "", "app/main.py": "x = 1\n"})
+        after = self._tree({"app/__init__.py": "", "app/main.py": "x = 2\n"})
+
+        self.assertNotEqual(self._digest(before, rels), self._digest(after, rels))
+
+    def test_changed_import_path_changes_the_digest(self) -> None:
+        before = self._tree({"app/__init__.py": "", "app/main.py": "x = 1\n"})
+        after = self._tree({"app/__init__.py": "", "app/other.py": "x = 1\n"})
+
+        self.assertNotEqual(
+            self._digest(before, ("app/__init__.py", "app/main.py")),
+            self._digest(after, ("app/__init__.py", "app/other.py")),
+        )
 
 
 if __name__ == "__main__":

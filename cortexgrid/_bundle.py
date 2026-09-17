@@ -12,6 +12,8 @@ Bundles of several seeds combine with `BundleDesc.merge`.
 
 `stage(files, dest)` lays a bundle out under `dest` at each file's import path,
 so `dest` on sys.path (e.g. a Ray working_dir) makes every module importable.
+`digest(files)` hashes that layout, so bundles that stage identically compare
+equal wherever their files live.
 
 `BundleDesc.pip_requirements(worker_provides())` pins the third-party
 distributions the Ray worker image does not already have, for a Ray `pip`
@@ -24,6 +26,7 @@ import ast
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 import functools
+import hashlib
 import importlib.machinery
 import importlib.metadata
 import importlib.util
@@ -105,9 +108,21 @@ def stage(files: set[Path], dest: Path) -> None:
     in installed distributions)."""
     dest.mkdir(parents=True, exist_ok=True)
     for file in files:
-        target = dest / file.relative_to(_sys_path_root(file))
+        target = dest / _import_path(file)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(file, target)
+
+
+def digest(files: set[Path]) -> str:
+    """SHA-256 of `files` as `stage` lays them out: each file's import path and
+    contents, in import-path order. Files that stage identically digest
+    identically, wherever they live on disk."""
+    sha = hashlib.sha256()
+    for path, file in sorted((_import_path(file).as_posix(), file) for file in files):
+        content = file.read_bytes()
+        sha.update(f"{path}\0{len(content)}\0".encode())
+        sha.update(content)
+    return sha.hexdigest()
 
 
 # What the Ray worker image pip-installs, as the Dockerfile spells it. They and
@@ -333,6 +348,11 @@ def _package(file: Path) -> str:
         parts.insert(0, directory.name)
         directory = directory.parent
     return ".".join(parts)
+
+
+def _import_path(file: Path) -> Path:
+    """`file` relative to the sys.path entry it is imported from."""
+    return file.relative_to(_sys_path_root(file))
 
 
 def _sys_path_root(file: Path) -> Path:

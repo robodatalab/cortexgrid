@@ -11,8 +11,9 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
 
 Two ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
-model produced elsewhere once, under the fixed run_name IMPORTED, and is a
-no-op after that. Both write the same layout, so every
+model produced elsewhere once, under the fixed run_name IMPORTED, and after
+that only re-bundles the serve-app when its code changed. Both write the same
+layout, so every
 (family, suffix, run_name) consumer - load_model, deploy_model - handles both.
 
 storage.py is pure: it takes run_id/run_name as explicit args and never reads
@@ -35,8 +36,11 @@ from mlflow.tracking import MlflowClient
 from cortexgrid import s3_util
 from cortexgrid.infra import get_mlflow_tracking_uri, get_s3_bucket
 from cortexgrid.model_serving import (
+    build_bundle,
     bundle_class,
+    metadata_from_tags,
     metadata_to_tags,
+    upload_bundle,
 )
 
 
@@ -184,8 +188,10 @@ def import_model(
     while it downloads.
 
     If a version is already registered under the key:
-      - "ready": no-op, returns it. `source` and `serve_app` are ignored; to
-        replace the weights or the serve-app, `delete_model` it first.
+      - "ready": returns it without calling `source`. If `serve_app`'s code no
+        longer matches the stored bundle, it is re-bundled first and the
+        weights are kept (see `_refresh_bundle`). To replace the weights,
+        `delete_model` it first.
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
 
@@ -195,6 +201,7 @@ def import_model(
     existing = model_registry_status(family, suffix, IMPORTED)
     if existing is not None:
         if existing.phase == _PHASE_READY:
+            _refresh_bundle(serve_app, family, suffix)
             return existing
         if existing.phase == _PHASE_UPLOADING:
             raise RuntimeError(
@@ -203,6 +210,27 @@ def import_model(
             )
         delete_model(family, suffix, IMPORTED)
     return _upload_model(source, serve_app, suffix, family, None, IMPORTED)
+
+
+def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
+    """Re-bundle an imported model's serve-app when its fingerprint differs
+    from the bundle stored on the version, leaving the weights in place.
+
+    The new bundle is uploaded next to the old one and the version's tags are
+    pointed at it, so the next `deploy_model` runs the new code. An app that is
+    already running keeps the code it started with until it is deployed again;
+    the old bundle stays in storage so that app can still restart."""
+    name = f"{family}__{suffix}"
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    version = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{IMPORTED}'"
+    )[0]
+    serve_bundle = build_bundle(serve_app)
+    if metadata_from_tags(version.tags).fingerprint == serve_bundle.fingerprint:
+        return
+    meta = upload_bundle(serve_bundle, family, suffix, IMPORTED)
+    for key, value in metadata_to_tags(meta).items():
+        client.set_model_version_tag(name, version.version, key, value)
 
 
 def _upload_model(
