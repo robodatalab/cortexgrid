@@ -14,6 +14,8 @@ How the Ray head runs inside Kubernetes. Applied by the Argo Application at [../
 - **`imagePullPolicy: Always`** — every new pod re-pulls `:latest` so CI builds take effect.
 - **`livenessProbe: ray status`** — if `ray status` fails for 30s, k8s kills the pod; the Deployment replaces it.
 - **Workers via DaemonSets** — one pod per `worker=true` node: `ray-worker` (1 GPU) on `gpu=true` nodes, `ray-worker-cpu` (`--num-gpus=0`) elsewhere. All pods register against `ray-head.cortexgrid.svc.cluster.local:6379` and share one resource pool.
+- **Worker VRAM as a custom resource** — a GPU worker starts via a shell that sums what `nvidia-smi` reports for the GPUs it was given and passes it to Ray as `--resources='{"vram_mib": <MiB>}'`. Ray tracks GPUs but not their memory, and a served model's `vram_gb` requirement is matched against this ([model-serving.md](../../../cortexgrid/model-serving.md#model-requirements)). A worker whose `nvidia-smi` reports no GPU exits rather than advertise none.
+- **No worker memory limit** — Ray sizes its `memory` resource from the pod's cgroup limit, so a limit here, not the host's RAM, would cap what a served model may reserve. The pods keep their `4Gi` request, so scheduling is unchanged, and the host's RAM is what Ray hands out.
 
 ## Files
 
