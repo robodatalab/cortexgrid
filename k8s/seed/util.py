@@ -431,13 +431,29 @@ def wipe_host_packages(c: Connection) -> None:
     )
 
 
+# `nvidia-smi` exit codes that mean the host has no GPU: not installed (127),
+# "No devices were found" (6).
+_NO_GPU_EXIT_CODES = (127, 6)
+
+
 def has_gpu(c: Connection) -> bool:
     """True iff `nvidia-smi -L` on the host lists at least one GPU.
 
-    Exits non-zero when the driver is missing or no device is found.
+    Any other `nvidia-smi` failure (e.g. a driver/library version mismatch
+    pending a reboot) exits instead of reporting no GPU, which would relabel a
+    GPU node CPU-only.
     """
     result = c.run("nvidia-smi -L", hide=True, warn=True)
-    return result.ok and "GPU" in result.stdout
+    if result.ok:
+        return "GPU" in result.stdout
+    if result.exited in _NO_GPU_EXIT_CODES:
+        return False
+    sys.exit(
+        f"Error: `nvidia-smi -L` on {c.host} failed with exit code {result.exited}, "
+        f"so it is unknown whether the host has a GPU. Fix the NVIDIA driver "
+        f"(a reboot clears a driver/library version mismatch) and re-run.\n"
+        f"{result.stdout}{result.stderr}"
+    )
 
 
 def compute_labels(gpu: bool) -> list[str]:
