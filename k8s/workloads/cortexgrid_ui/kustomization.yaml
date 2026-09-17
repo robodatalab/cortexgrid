@@ -8,5 +8,5 @@ helmCharts:
     namespace: cortexgrid
     valuesInline:
       images:
-        backend: ghcr.io/robodatalab/cortexgrid-ui-backend:e9b39aa5fbbf848e986262bafd4a76b655be86fa
+        backend: ghcr.io/robodatalab/cortexgrid-ui-backend:e06244ee2927f3cf1034c97f3073bf6546edd1c6
         frontend: ghcr.io/robodatalab/cortexgrid-ui-frontend:bbeec4fab11b223ff45ae7047318c66beabc662b
