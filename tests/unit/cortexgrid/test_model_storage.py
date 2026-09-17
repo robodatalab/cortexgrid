@@ -14,7 +14,7 @@ from mlflow.exceptions import MlflowException
 
 import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
-from cortexgrid.model_serving import BundleMetadata, ServeBundle
+from cortexgrid.model_serving import BundleMetadata, ModelRequirements, ServeBundle
 from cortexgrid.model_storage import (
     IMPORTED,
     delete_model,
@@ -24,6 +24,7 @@ from cortexgrid.model_storage import (
     load_model,
     model_registry_status,
     save_model,
+    set_model_requirements,
 )
 
 
@@ -31,6 +32,9 @@ class _FakeServeApp:
     """Stand-in for the Ray Serve ingress class paired with the weights at save
     time. `bundle_class` is mocked in these tests, so this only needs to be a
     type that `save_model` can hand to the (mocked) bundler."""
+
+
+_GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
 
 
 def _recent_ms() -> int:
@@ -369,6 +373,38 @@ class TestSaveModel(unittest.TestCase):
             self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
         )
 
+    def test_stores_requirements_as_tags(self) -> None:
+        save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+            requirements=_GPU_REQUIREMENTS,
+        )
+        tags = self.mlflow.versions[0].tags
+        self.assertEqual(
+            (tags["num_gpus"], tags["ram_gb"], tags["vram_gb"]),
+            ("1", "16.0", "24.0"),
+        )
+
+    def test_returns_savedmodel_with_requirements(self) -> None:
+        result = save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+            requirements=_GPU_REQUIREMENTS,
+        )
+        self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
+
+    def test_stores_no_requirement_tags_without_requirements(self) -> None:
+        result = save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+        tags = self.mlflow.versions[0].tags
+        self.assertFalse({"num_gpus", "ram_gb", "vram_gb"} & tags.keys())
+        self.assertEqual(result.requirements, ModelRequirements())
+
 
 class TestImportModel(unittest.TestCase):
     def setUp(self) -> None:
@@ -514,6 +550,47 @@ class TestImportModel(unittest.TestCase):
         self.assertEqual(result.phase, "ready")
         self.assertEqual(len(self.mlflow.versions), 1)
 
+    def test_first_import_stores_requirements(self) -> None:
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+
+        self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
+        self.assertEqual(self.mlflow.versions[0].tags["vram_gb"], "24.0")
+
+    def test_reimport_keeps_stored_requirements(self) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+        edited = ModelRequirements(num_gpus=2, ram_gb=32.0, vram_gb=48.0)
+        set_model_requirements("Qwen2", "base", IMPORTED, edited)
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+
+        self.assertEqual(result.requirements, edited)
+        self.assertEqual(self.mlflow.versions[0].tags["num_gpus"], "2")
+
+    def test_reimport_stores_requirements_on_a_model_without_them(self) -> None:
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+
+        self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
+        self.assertEqual(self.mlflow.versions[0].tags["ram_gb"], "16.0")
+
+    def test_reimport_without_requirements_keeps_stored_ones(self) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+
+        result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
+
     def test_survives_deleting_a_run(self) -> None:
         self.mlflow.runs["r1"] = FakeRun("r1", "boogey-46")
         import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
@@ -652,6 +729,40 @@ class TestListModels(unittest.TestCase):
         result = list_models()
 
         self.assertEqual(result[0].phase, "ready")
+
+    def test_defaults_requirements_for_untagged_version(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        result = list_models()
+
+        self.assertEqual(result[0].requirements, ModelRequirements())
+
+
+class TestSetModelRequirements(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        for p in _patches(self.mlflow, self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_replaces_stored_requirements(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        v.tags.update({"num_gpus": "1", "ram_gb": "8.0", "vram_gb": "12.0"})
+
+        set_model_requirements(
+            "Qwen2", "instruct", "boogey-46", _GPU_REQUIREMENTS
+        )
+
+        status = model_registry_status("Qwen2", "instruct", "boogey-46")
+        assert status is not None
+        self.assertEqual(status.requirements, _GPU_REQUIREMENTS)
+
+    def test_raises_when_model_was_never_registered(self) -> None:
+        with self.assertRaises(ValueError):
+            set_model_requirements(
+                "Qwen2", "instruct", "missing", _GPU_REQUIREMENTS
+            )
 
 
 class TestModelRegistryStatus(unittest.TestCase):

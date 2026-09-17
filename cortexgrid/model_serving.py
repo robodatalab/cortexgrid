@@ -268,6 +268,61 @@ def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
     )
 
 
+@dataclass
+class ModelRequirements:
+    """Hardware one replica of a model needs to be served. Persisted as tags on
+    the ModelVersion next to the bundle metadata, so it is read without
+    touching the weights or importing the serve-app class.
+
+    Zero means no requirement: a model with no requirements is served on any
+    node, CPU-only included. Models saved before requirements existed carry
+    no tags and read as the defaults."""
+
+    num_gpus: int = 0
+    ram_gb: float = 0.0
+    # Memory of the GPU the replica runs on, so it needs num_gpus >= 1.
+    vram_gb: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.num_gpus < 0 or self.ram_gb < 0 or self.vram_gb < 0:
+            raise ValueError(f"Model requirements cannot be negative: {self}")
+        if self.vram_gb > 0 and self.num_gpus == 0:
+            raise ValueError(
+                f"vram_gb={self.vram_gb} needs a GPU; set num_gpus >= 1"
+            )
+
+
+# MLflow tag keys for the ModelRequirements.
+_NUM_GPUS_TAG = "num_gpus"
+_RAM_GB_TAG = "ram_gb"
+_VRAM_GB_TAG = "vram_gb"
+
+
+def has_requirement_tags(tags: dict[str, str]) -> bool:
+    """Whether requirements were ever stored on the ModelVersion."""
+    return any(key in tags for key in (_NUM_GPUS_TAG, _RAM_GB_TAG, _VRAM_GB_TAG))
+
+
+def requirements_to_tags(requirements: ModelRequirements) -> dict[str, str]:
+    """Serialise ModelRequirements to MLflow tags. The inverse of
+    `requirements_from_tags`."""
+    return {
+        _NUM_GPUS_TAG: str(requirements.num_gpus),
+        _RAM_GB_TAG: str(requirements.ram_gb),
+        _VRAM_GB_TAG: str(requirements.vram_gb),
+    }
+
+
+def requirements_from_tags(tags: dict[str, str]) -> ModelRequirements:
+    """Deserialise ModelRequirements from a ModelVersion's MLflow tags; a
+    missing tag reads as no requirement."""
+    return ModelRequirements(
+        num_gpus=int(tags.get(_NUM_GPUS_TAG, "0")),
+        ram_gb=float(tags.get(_RAM_GB_TAG, "0")),
+        vram_gb=float(tags.get(_VRAM_GB_TAG, "0")),
+    )
+
+
 def _load_bundle_metadata(
     family: str, suffix: str, run_name: str
 ) -> BundleMetadata:

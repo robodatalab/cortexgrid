@@ -16,6 +16,7 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
     ModelDeployFailed,
+    ModelRequirements,
     ServeBundle,
     _build_application_spec,
     _load_bundle_metadata,
@@ -26,6 +27,8 @@ from cortexgrid.model_serving import (
     metadata_to_tags,
     model_serving_messages,
     model_serving_status,
+    requirements_from_tags,
+    requirements_to_tags,
     undeploy_model,
     wait_for_model_serving,
 )
@@ -648,6 +651,28 @@ class TestServeDependencies(unittest.TestCase):
         tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
 
         self.assertEqual(self._load_with_tags(tags).fingerprint, "")
+
+
+class TestModelRequirements(unittest.TestCase):
+    def test_round_trips_through_tags(self) -> None:
+        requirements = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.5)
+
+        self.assertEqual(
+            requirements_from_tags(requirements_to_tags(requirements)),
+            requirements,
+        )
+
+    def test_model_saved_without_tags_has_no_requirements(self) -> None:
+        self.assertEqual(requirements_from_tags({}), ModelRequirements())
+
+    def test_rejects_negative_values(self) -> None:
+        for kwargs in ({"num_gpus": -1}, {"ram_gb": -1.0}, {"vram_gb": -1.0}):
+            with self.subTest(**kwargs), self.assertRaises(ValueError):
+                ModelRequirements(**kwargs)
+
+    def test_rejects_vram_without_a_gpu(self) -> None:
+        with self.assertRaises(ValueError):
+            ModelRequirements(num_gpus=0, vram_gb=8.0)
 
 
 if __name__ == "__main__":
