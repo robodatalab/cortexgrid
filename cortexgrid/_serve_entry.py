@@ -4,9 +4,9 @@ Ray Serve's REST `import_path` resolves to `cortexgrid._serve_entry:build`.
 On the cluster replica, `build` imports the serve-app class bundled at
 `save_model` time (its import path was stored as an MLflow tag), applies Ray's
 ingress with the app it was marked with by `cortexgrid.serve.ingress` (again on
-each replica, see `_IngressOnReplica`), reads its
-`num_gpus`/`num_replicas` class attributes for actor placement, wraps it as a
-Ray Serve deployment, and binds it with the (family, suffix, run_name)
+each replica, see `_IngressOnReplica`), wraps it as a Ray Serve deployment
+with the replica count and Ray resource requests `deploy_model` derived from
+the model's requirements, and binds it with the (family, suffix, run_name)
 identifiers.
 
 The serve-app owns everything about traffic: its own routes, request schemas,
@@ -14,11 +14,9 @@ streaming, and timeouts. cortexgrid does not interpose a request/response
 contract - it only schedules the app and hands it the identifiers it needs to
 fetch its own weights via `cortexgrid.load_model`.
 
-Design note: resource needs (`num_gpus`/`num_replicas`) are read from plain
-class attributes rather than a cortexgrid decorator or base class. This is a
-deliberate, provisional choice - kept minimal until we see how serve-apps
-declare resources in practice; revisit if plain class attributes prove too
-limited.
+The serve-app declares no resources: the hardware a replica needs belongs to
+the model and is stored in the registry (`cortexgrid.ModelRequirements`), and
+the replica count is chosen per `deploy_model`.
 """
 
 from __future__ import annotations
@@ -72,12 +70,13 @@ def build(args: dict[str, Any]) -> Application:
             {"_serve_app": serve_app},
         )
         serve_app = serve.ingress(app)(on_replica)
-    num_gpus = getattr(serve_app, "num_gpus", 0)
-    num_replicas = getattr(serve_app, "num_replicas", 1)
     return serve.deployment(serve_app).options(
-        num_replicas=num_replicas,
+        # This builder ships in the bundle, frozen at save time, while `args`
+        # come from the cortexgrid that deploys it; one older than the bundle
+        # sends neither key.
+        num_replicas=args.get("num_replicas", 1),
         # Ray 2.32 lowered the default from 100 to 5; keep what serve-apps
         # had on Ray 2.9.
         max_ongoing_requests=_MAX_ONGOING_REQUESTS,
-        ray_actor_options={"num_gpus": num_gpus},
+        ray_actor_options=args.get("ray_actor_options", {}),
     ).bind(args["family"], args["suffix"], args["run_name"])

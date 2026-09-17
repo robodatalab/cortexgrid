@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from cortexgrid.model_serving import ModelRequirements
 from cortexgrid.model_storage import list_models
 
 from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
@@ -32,6 +33,8 @@ class Model:
     # "ready" once registered, "upload_failed" on error. Lets the dashboard show
     # a model that is still uploading and not yet deployable.
     phase: str
+    # Hardware one replica needs; the dashboard shows it and can edit it.
+    requirements: ModelRequirements
 
 
 def model_id(family: str, suffix: str, run_name: str) -> ModelId:
@@ -51,6 +54,7 @@ def poll_models(_: None) -> dict[ModelId, Model]:
             data_blob_path=m.data_blob_path,
             size_bytes=m.size_bytes,
             phase=m.phase,
+            requirements=m.requirements,
         )
     return out
 

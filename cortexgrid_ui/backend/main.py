@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket
@@ -16,12 +17,13 @@ from cortexgrid.experiment import (
 from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.model_serving import (
+    ModelRequirements,
     ServingMessage,
     deploy_model,
     model_serving_messages,
     undeploy_model,
 )
-from cortexgrid.model_storage import delete_model
+from cortexgrid.model_storage import delete_model, set_model_requirements
 from cortexgrid.ray_util import get_ray_logs
 from cortexgrid.secrets import (
     delete_secret,
@@ -87,6 +89,14 @@ class SecretValue(BaseModel):
 
 class NoteBody(BaseModel):
     body: str
+
+
+class Requirements(BaseModel):
+    """Hardware one replica of a model needs, as the dashboard edits it."""
+
+    num_gpus: int = 0
+    ram_gb: float = 0.0
+    vram_gb: float = 0.0
 
 
 class RunByName(BaseModel):
@@ -183,6 +193,31 @@ async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str
         models_stream.META_TOPIC,
         models_stream.model_id(family, suffix, run_name),
     )
+    return {"status": "ok"}
+
+
+@app.put("/api/models/{family}/{suffix}/{run_name}/requirements")
+async def model_requirements_update(
+    family: str, suffix: str, run_name: str, body: Requirements
+) -> dict[str, str]:
+    try:
+        requirements = ModelRequirements(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        set_model_requirements(family, suffix, run_name, requirements)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Push the edit into the stream so the dashboard shows it without waiting
+    # for the next sweep.
+    model_id = models_stream.model_id(family, suffix, run_name)
+    cached = models_stream.models_cache.get(models_stream.META_TOPIC).get(model_id)
+    if cached is not None:
+        await models_stream.models_refresher.update_or_insert(
+            models_stream.META_TOPIC,
+            model_id,
+            replace(cached, requirements=requirements),
+        )
     return {"status": "ok"}
 
 

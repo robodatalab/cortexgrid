@@ -8,6 +8,7 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
     run linkage         -> ModelVersion.run_id  (built-in MLflow field; unset
                            for imported models)
+    requirements        -> ModelVersion.tags["num_gpus"], ["ram_gb"], ["vram_gb"]
 
 Two ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
@@ -36,10 +37,14 @@ from mlflow.tracking import MlflowClient
 from cortexgrid import s3_util
 from cortexgrid.infra import get_mlflow_tracking_uri, get_s3_bucket
 from cortexgrid.model_serving import (
+    ModelRequirements,
     build_bundle,
     bundle_class,
+    has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
+    requirements_from_tags,
+    requirements_to_tags,
     upload_bundle,
 )
 
@@ -81,6 +86,8 @@ class SavedModel:
     # _UPLOAD_DEADLINE (writer presumed dead). Versions written before this tag
     # existed report "ready".
     phase: str
+    # Hardware one replica needs; defaults for versions stored without it.
+    requirements: ModelRequirements
 
 
 def _phase_for(version: Any) -> str:
@@ -111,6 +118,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         data_blob_path=version.source,
         size_bytes=int(version.tags.get("size_bytes", "0")),
         phase=_phase_for(version),
+        requirements=requirements_from_tags(version.tags),
     )
 
 
@@ -150,6 +158,7 @@ def save_model(
     family: str,
     run_id: str,
     run_name: str,
+    requirements: ModelRequirements | None = None,
 ) -> SavedModel:
     """Upload a weights directory to S3 and register a new MLflow ModelVersion
     paired with the serve-app that fronts it.
@@ -168,8 +177,13 @@ def save_model(
     weights.
     Its code is bundled and its import path, bundle URL, and pip list are
     stored as tags on the ModelVersion so `deploy_model` can bind it later
-    without the caller holding the class object."""
-    return _upload_model(weights_dir, serve_app, suffix, family, run_id, run_name)
+    without the caller holding the class object.
+
+    `requirements` is the hardware one replica needs; None stores none, which
+    reads as no requirement. Change it later with `set_model_requirements`."""
+    return _upload_model(
+        weights_dir, serve_app, suffix, family, run_id, run_name, requirements
+    )
 
 
 def import_model(
@@ -177,6 +191,7 @@ def import_model(
     serve_app: type,
     family: str,
     suffix: str,
+    requirements: ModelRequirements | None = None,
 ) -> SavedModel:
     """Register a model produced elsewhere (e.g. a pretrained base model) under
     the fixed key (family, suffix, IMPORTED), once.
@@ -190,7 +205,9 @@ def import_model(
     If a version is already registered under the key:
       - "ready": returns it without calling `source`. If `serve_app`'s code no
         longer matches the stored bundle, it is re-bundled first and the
-        weights are kept (see `_refresh_bundle`). To replace the weights,
+        weights are kept (see `_refresh_bundle`). `requirements` are stored
+        only if the version has none yet, so values changed since with
+        `set_model_requirements` are kept. To replace the weights,
         `delete_model` it first.
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
@@ -202,6 +219,10 @@ def import_model(
     if existing is not None:
         if existing.phase == _PHASE_READY:
             _refresh_bundle(serve_app, family, suffix)
+            if requirements is not None:
+                existing.requirements = _set_missing_requirements(
+                    family, suffix, requirements
+                )
             return existing
         if existing.phase == _PHASE_UPLOADING:
             raise RuntimeError(
@@ -209,7 +230,9 @@ def import_model(
                 "another process"
             )
         delete_model(family, suffix, IMPORTED)
-    return _upload_model(source, serve_app, suffix, family, None, IMPORTED)
+    return _upload_model(
+        source, serve_app, suffix, family, None, IMPORTED, requirements
+    )
 
 
 def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
@@ -233,6 +256,23 @@ def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
         client.set_model_version_tag(name, version.version, key, value)
 
 
+def _set_missing_requirements(
+    family: str, suffix: str, requirements: ModelRequirements
+) -> ModelRequirements:
+    """Store `requirements` on an imported model whose version has none yet.
+    Returns the requirements the version holds afterwards."""
+    name = f"{family}__{suffix}"
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    version = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{IMPORTED}'"
+    )[0]
+    if has_requirement_tags(version.tags):
+        return requirements_from_tags(version.tags)
+    for key, value in requirements_to_tags(requirements).items():
+        client.set_model_version_tag(name, version.version, key, value)
+    return requirements
+
+
 def _upload_model(
     weights: str | Path | Callable[[], str | Path],
     serve_app: type,
@@ -240,6 +280,7 @@ def _upload_model(
     family: str,
     run_id: str | None,
     run_name: str,
+    requirements: ModelRequirements | None,
 ) -> SavedModel:
     """Register a ModelVersion in "uploading", resolve `weights` to a directory
     (calling it when it is a callable), upload the weights and the serve-app
@@ -255,7 +296,8 @@ def _upload_model(
     # fetched and uploaded, and a concurrent `import_model` sees the import in
     # flight for the whole download instead of starting one of its own. The
     # size is stamped once the directory exists; the bundle tags and the flip
-    # to "ready" happen only after the upload lands.
+    # to "ready" happen only after the upload lands. No requirements leaves
+    # their tags unset, so a later `import_model` can still store them.
     version = client.create_model_version(
         name=name,
         source=source,
@@ -265,6 +307,7 @@ def _upload_model(
             "suffix": suffix,
             "run_name": run_name,
             _LIFECYCLE_TAG: _PHASE_UPLOADING,
+            **(requirements_to_tags(requirements) if requirements is not None else {}),
         },
     )
     try:
@@ -331,6 +374,23 @@ def model_registry_status(
         f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
     )
     return _to_saved_model(versions[0]) if versions else None
+
+
+def set_model_requirements(
+    family: str, suffix: str, run_name: str, requirements: ModelRequirements
+) -> None:
+    """Replace the hardware requirements stored on a model. Takes effect on
+    its next `deploy_model`; a replica already running keeps its placement.
+    Raises ValueError if the model was never registered."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    name = f"{family}__{suffix}"
+    versions = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{run_name}'"
+    )
+    if not versions:
+        raise ValueError(f"No model {family}/{suffix}/{run_name}")
+    for key, value in requirements_to_tags(requirements).items():
+        client.set_model_version_tag(name, versions[0].version, key, value)
 
 
 def delete_model(family: str, suffix: str, run_name: str) -> None:

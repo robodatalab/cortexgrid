@@ -2,9 +2,22 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { ModelDashboard } from '../src/components/ModelDashboard'
-import type { Deployment, Model } from '../src/components/ModelsTree'
+import type {
+  Deployment,
+  Model,
+  ModelRequirements,
+} from '../src/components/ModelsTree'
 
-function makeModel(phase: string): Model {
+const NO_REQUIREMENTS: ModelRequirements = {
+  num_gpus: 0,
+  ram_gb: 0,
+  vram_gb: 0,
+}
+
+function makeModel(
+  phase: string,
+  requirements: ModelRequirements = NO_REQUIREMENTS,
+): Model {
   return {
     id: 'Qwen2/instruct/boogey-46',
     family: 'Qwen2',
@@ -14,6 +27,7 @@ function makeModel(phase: string): Model {
     data_blob_path: 's3://b/models/boogey-46/Qwen2/instruct/weights/',
     size_bytes: 100,
     phase,
+    requirements,
   }
 }
 
@@ -31,6 +45,10 @@ function renderCard(
   handlers: Partial<{
     onDeploy: (m: Model) => void
     onNavigateToDeployment: (id: string) => void
+    onSaveRequirements: (
+      m: Model,
+      requirements: ModelRequirements,
+    ) => Promise<void>
   }> = {},
 ) {
   render(
@@ -40,8 +58,15 @@ function renderCard(
       onNavigateToRun={vi.fn()}
       onNavigateToDeployment={handlers.onNavigateToDeployment ?? vi.fn()}
       onDeploy={handlers.onDeploy ?? vi.fn()}
+      onSaveRequirements={
+        handlers.onSaveRequirements ?? vi.fn().mockResolvedValue(undefined)
+      }
     />,
   )
+}
+
+function requirementField(label: string): HTMLInputElement {
+  return screen.getByLabelText(label) as HTMLInputElement
 }
 
 describe('ModelDashboard', () => {
@@ -88,5 +113,65 @@ describe('ModelDashboard', () => {
     renderCard(model, null, { onDeploy })
     await userEvent.click(screen.getByRole('button', { name: 'Deploy' }))
     expect(onDeploy).toHaveBeenCalledWith(model)
+  })
+
+  it('shows the requirements stored on the model', () => {
+    renderCard(makeModel('ready', { num_gpus: 1, ram_gb: 16, vram_gb: 24 }), null)
+    expect(requirementField('GPUs').value).toBe('1')
+    expect(requirementField('RAM (GiB)').value).toBe('16')
+    expect(requirementField('VRAM (GiB)').value).toBe('24')
+  })
+
+  it('saves edited requirements', async () => {
+    const onSaveRequirements = vi.fn().mockResolvedValue(undefined)
+    const model = makeModel('ready', { num_gpus: 1, ram_gb: 16, vram_gb: 24 })
+    renderCard(model, null, { onSaveRequirements })
+
+    await userEvent.clear(requirementField('RAM (GiB)'))
+    await userEvent.type(requirementField('RAM (GiB)'), '32')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onSaveRequirements).toHaveBeenCalledWith(model, {
+      num_gpus: 1,
+      ram_gb: 32,
+      vram_gb: 24,
+    })
+  })
+
+  it('keeps Save disabled until a requirement changes', async () => {
+    renderCard(makeModel('ready', { num_gpus: 1, ram_gb: 16, vram_gb: 24 }), null)
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+
+    await userEvent.clear(requirementField('GPUs'))
+    await userEvent.type(requirementField('GPUs'), '2')
+
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+  })
+
+  it('refuses VRAM without a GPU and explains why', async () => {
+    const onSaveRequirements = vi.fn().mockResolvedValue(undefined)
+    renderCard(makeModel('ready'), null, { onSaveRequirements })
+
+    await userEvent.clear(requirementField('VRAM (GiB)'))
+    await userEvent.type(requirementField('VRAM (GiB)'), '24')
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'VRAM needs a GPU: set GPUs to at least 1.',
+    )
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(onSaveRequirements).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed save', async () => {
+    const onSaveRequirements = vi
+      .fn()
+      .mockRejectedValue(new Error('HTTP 404: No model'))
+    renderCard(makeModel('ready'), null, { onSaveRequirements })
+
+    await userEvent.clear(requirementField('RAM (GiB)'))
+    await userEvent.type(requirementField('RAM (GiB)'), '8')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404: No model')
   })
 })

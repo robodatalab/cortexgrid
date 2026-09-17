@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import unittest
 from contextlib import ExitStack
+from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+from cortexgrid.model_serving import ModelRequirements
 
 from cortexgrid_ui.backend.main import app
 from cortexgrid_ui.backend.streams import models_stream
@@ -43,7 +46,12 @@ def _patched_infra(s3: FakeS3, mlflow: FakeMlflowClient) -> ExitStack:
     return stack
 
 
-def _make_model(family: str, suffix: str, run_name: str) -> Model:
+def _make_model(
+    family: str,
+    suffix: str,
+    run_name: str,
+    requirements: ModelRequirements | None = None,
+) -> Model:
     mid = models_stream.model_id(family, suffix, run_name)
     return Model(
         id=mid,
@@ -54,6 +62,7 @@ def _make_model(family: str, suffix: str, run_name: str) -> Model:
         data_blob_path=f"s3://test-bucket/models/{run_name}/{family}/{suffix}/weights/",
         size_bytes=100,
         phase="ready",
+        requirements=requirements or ModelRequirements(),
     )
 
 
@@ -157,6 +166,58 @@ class TestDeleteModelEndpoint(unittest.TestCase):
         cache_after = models_stream.models_cache.get(models_stream.META_TOPIC)
         self.assertNotIn("Qwen2/instruct/boogey-46", cache_after)
         self.assertNotIn("Qwen2/chat/rocky-99", cache_after)
+
+
+class TestModelRequirementsEndpoint(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        _reset_models_stream()
+        self.addCleanup(_reset_models_stream)
+        self.mlflow = FakeMlflowClient().seed(
+            model_versions=[_make_version("Qwen2", "instruct", "boogey-46")]
+        )
+
+    def _put(self, body: dict[str, float], path: str = "") -> Any:
+        with _patched_infra(FakeS3(), self.mlflow):
+            return self.client.put(
+                path or "/api/models/Qwen2/instruct/boogey-46/requirements",
+                json=body,
+            )
+
+    def test_stores_the_requirements_on_the_model(self) -> None:
+        response = self._put({"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0})
+
+        self.assertEqual(response.status_code, 200)
+        tags = self.mlflow.model_versions[0].tags
+        self.assertEqual(
+            (tags["num_gpus"], tags["ram_gb"], tags["vram_gb"]),
+            ("1", "16.0", "24.0"),
+        )
+
+    def test_pushes_the_edit_into_the_models_stream(self) -> None:
+        _seed_models_cache([_make_model("Qwen2", "instruct", "boogey-46")])
+
+        self._put({"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0})
+
+        cached = models_stream.models_cache.get(models_stream.META_TOPIC)
+        self.assertEqual(
+            cached["Qwen2/instruct/boogey-46"].requirements,
+            ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0),
+        )
+
+    def test_rejects_vram_without_a_gpu(self) -> None:
+        response = self._put({"num_gpus": 0, "ram_gb": 0.0, "vram_gb": 24.0})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("vram_gb", self.mlflow.model_versions[0].tags)
+
+    def test_returns_404_for_a_model_that_is_not_registered(self) -> None:
+        response = self._put(
+            {"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0},
+            path="/api/models/Qwen2/instruct/missing/requirements",
+        )
+
+        self.assertEqual(response.status_code, 404)
 
 
 class TestRunByNameEndpoint(unittest.TestCase):

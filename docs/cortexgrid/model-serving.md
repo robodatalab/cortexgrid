@@ -31,7 +31,7 @@ No `ray.init` anywhere in cortexgrid.model_serving.
 
 ## The serve-app
 
-A serve-app is an ordinary class fronted by a FastAPI app, marked with `cortexgrid.serve.ingress`. It declares its resource needs as plain class attributes, takes `(family, suffix, run_name)` in `__init__`, downloads its weights from the registry, and defines whatever routes it wants:
+A serve-app is an ordinary class fronted by a FastAPI app, marked with `cortexgrid.serve.ingress`. It takes `(family, suffix, run_name)` in `__init__`, downloads its weights from the registry, and defines whatever routes it wants. It declares no resources: what a replica needs is a property of the model, stored in the registry (see [Model requirements](#model-requirements)).
 
 ```python
 import cortexgrid
@@ -43,9 +43,6 @@ app = FastAPI()
 
 @serve.ingress(app)
 class MyServeApp:
-    num_gpus = 1          # class attrs configure the Ray Serve actor
-    num_replicas = 1
-
     def __init__(self, family: str, suffix: str, run_name: str) -> None:
         weights_dir = cortexgrid.load_model(family, suffix, run_name)  # a Path
         self._model = load_however_you_like(weights_dir)
@@ -55,11 +52,61 @@ class MyServeApp:
         ...   # stream, batch, long-running - cortexgrid does not care
 ```
 
-`serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. cortexgrid does not constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` to a thin subclass of it (see [On the replica](#on-the-replica)) and `serve.deployment(...)` (reading `num_gpus`/`num_replicas`) and binds it with the triple. There is no `cortexgrid.Model` base class and no generic `/infer` route.
+`serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. cortexgrid does not constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` to a thin subclass of it (see [On the replica](#on-the-replica)) and `serve.deployment(...)` (with the resources and replica count `deploy_model` put in the spec) and binds it with the triple. There is no `cortexgrid.Model` base class and no generic `/infer` route.
 
 Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (e.g. 2.9, which the cluster image ran before 2.58) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
 
-Design note: resource needs are read from plain class attributes rather than a cortexgrid decorator or base class. This is a deliberate, provisional choice (documented in [_serve_entry.py](../../cortexgrid/_serve_entry.py)) - kept minimal until we see how serve-apps declare resources in practice.
+Serve-apps written before this carried `num_gpus` / `num_replicas` class attributes. They are ignored now; move the hardware into `ModelRequirements` at save/import time and pass the replica count to `deploy_model`.
+
+## Model requirements
+
+What one replica of a model needs to run - GPUs, RAM, VRAM - belongs to the model, not to the serve-app code that fronts it: the same completion app serves a 0.5B model on a CPU and a 7B one on a GPU. `cortexgrid.ModelRequirements` holds it, `save_model` / `import_model` store it, and `deploy_model` turns it into what Ray needs to place the replica.
+
+```python
+requirements = cortexgrid.ModelRequirements(num_gpus=1, ram_gb=8.0, vram_gb=16.0)
+
+cortexgrid.import_model(fetch, MyServeApp, family="qwen", suffix="base", requirements=requirements)
+
+# Corrected later, from code or from the model card in the dashboard:
+cortexgrid.set_model_requirements("qwen", "base", cortexgrid.IMPORTED, requirements)
+```
+
+RAM and VRAM are in GiB, and all three fields default to 0, which means "no requirement": such a model runs anywhere, a CPU-only node included. `vram_gb` is the GPU memory across the replica's `num_gpus` GPUs and needs at least one GPU; negative values and VRAM without a GPU raise `ValueError`. Requirements are stored as tags on the `ModelVersion`, so `list_models` and the dashboard read them without touching the weights or importing the serve-app class:
+
+| Tag | Meaning |
+|---|---|
+| `num_gpus` | whole GPUs one replica gets |
+| `ram_gb` | GiB of RAM reserved for one replica |
+| `vram_gb` | GiB of GPU memory across the replica's GPUs |
+
+A model saved before requirements existed carries none of these tags and reads as no requirement.
+
+### How Ray places a replica
+
+`deploy_model` translates the requirements into the replica's Ray actor resources: `num_gpus` as-is, `ram_gb` as `memory` in bytes, and `vram_gb` as `vram_mib` - a custom Ray resource each GPU worker advertises at startup, being the MiB `nvidia-smi` reports for the GPUs that worker was given (see the [ray-worker DaemonSet](../../k8s/charts/cortexgrid/templates/ray/worker_daemonset.yaml)). Ray then schedules the replica only on a node that has all three free, and reserves them there, so two replicas cannot both claim the same GPU's memory.
+
+MiB, not GiB, because `nvidia-smi` reports MiB and a card's memory is not a whole number of GiB: a "24GB" card has 24564 MiB, and a worker rounding that down to 23 GiB would look too small for a model that fits it.
+
+Two cluster-side limits shape what can actually be asked for:
+
+- Ray sizes a worker's `memory` from the pod's cgroup limit, so the worker pods carry no memory limit and Ray sees the host's own RAM. Ray keeps roughly 30% of it for its object store; the rest is what replicas can reserve.
+- A GPU worker gets one GPU, so a model needing `num_gpus > 1` has no node to land on today.
+
+A requirement no node can satisfy is not an error: the app stays `deploying` until one frees up, or until `deploy_model(wait=True)` times out.
+
+### Migrating a serve-app written before this
+
+A serve-app that declared `num_gpus` / `num_replicas` as class attributes (the shape cortexgrid documented until now) needs three changes, all in the repo that owns it:
+
+1. Delete both attributes from the class.
+2. Pass `requirements=ModelRequirements(...)` to every `save_model` / `import_model` call for the models that class fronts.
+3. Pass `num_replicas` to `deploy_model` where more than one replica was wanted.
+
+Do them together. The attributes keep working only while the model's bundle predates this change; the first `import_model` after upgrading cortexgrid re-bundles the serve-app (the bundled `_serve_entry.py` changed, so its fingerprint did), and from that deploy on the attributes are ignored. A model whose requirements are still unset then asks for no GPU and is placed on whatever node is free - including a CPU-only one. A model already in the registry keeps its stored requirements, so step 2 fills them in for models that have none and leaves corrected ones alone.
+
+### Changing them later
+
+`set_model_requirements(family, suffix, run_name, requirements)` replaces the stored values; the dashboard's model card edits them the same way. It takes effect on the next `deploy_model` - a replica already running keeps the placement it started with. `import_model` stores requirements only when it uploads the model or finds none stored, so an edit made since is not overwritten by the next run that imports it.
 
 ## Quick start
 
@@ -76,6 +123,8 @@ saved = cortexgrid.save_model(
     MyServeApp,           # the @serve.ingress class above
     family="qwen",
     suffix="instruct",
+    # What one replica needs to run. Placement is matched against it.
+    requirements=cortexgrid.ModelRequirements(num_gpus=1, ram_gb=8, vram_gb=16),
 )
 
 # 2. Deploy on the cluster. No class object needed; cortexgrid re-imports the
@@ -132,10 +181,11 @@ Weights are never shipped via `runtime_env` - they stay in S3 and the serve-app'
 
 1. Imports the serve-app class from `class_import_path`.
 2. If the class was marked by `cortexgrid.serve.ingress`, subclasses it with `_IngressOnReplica` and wraps the subclass with Ray's `ray.serve.ingress(app)`. A class without the mark (a model saved before `cortexgrid.serve` existed, whose class Ray's decorator already wrapped) is used as imported.
-3. Reads `num_gpus` / `num_replicas` class attrs.
-4. Wraps the class with `serve.deployment(...).options(...)` (`max_ongoing_requests=100`) and binds it with `(family, suffix, run_name)`.
+3. Wraps the class with `serve.deployment(...).options(...)` - the replica count and Ray resources from the spec's `args`, `max_ongoing_requests=100` - and binds it with `(family, suffix, run_name)`.
 
 That is the whole of `build` - beyond Ray's own ingress wrapper and `_IngressOnReplica`, it interposes no wrapper and no route.
+
+`build` ships inside the model's bundle, frozen at save time, while the `args` come from whichever cortexgrid deploys it, so the two versions can differ. A `build` older than the requirements reads neither key and falls back to the serve-app's class attributes, which is how models saved before this change keep deploying as they did. A `build` newer than the deployer falls back to one replica and no resource requests.
 
 `_IngressOnReplica` applies `ray.serve.ingress(app)` a second time, in the replica's own process, as Ray creates the instance. Ray's ingress rewrites each route method's signature in place so FastAPI injects the replica instance as `self`, but `build` runs in a different process: the replica imports the serve-app's module afresh, and its route methods carry no rewrite. FastAPI < 0.137 analysed routes once, in `build`'s process, and the replica received the result. FastAPI >= 0.137 analyses them in the replica on the first request, and without the rewrite reads `self` as a required query parameter, so every route answers HTTP 422. The subclass hooks `__new__`, which Ray calls on its own before the serve-app's `__init__`, whether that is sync or async. Checked on Ray 2.9.3 with FastAPI 0.108 and Ray 2.58 with FastAPI 0.141. The serve-app's own `__init__` runs on the replica (calling `cortexgrid.load_model` to download weights), and the serve-app's own routes are what the application exposes under `/r/<family>/<suffix>/<run_name>`.
 
@@ -153,20 +203,21 @@ All exported from `cortexgrid.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `save_model(weights_dir, serve_app, family, suffix) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
-| `import_model(source, serve_app, family, suffix) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
+| `save_model(weights_dir, serve_app, family, suffix, requirements=None) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
+| `import_model(source, serve_app, family, suffix, requirements=None) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Stores `requirements` only on the upload, or when the model has none. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
+| `set_model_requirements(family, suffix, run_name, requirements)` | Replace the hardware one replica of the model needs. Takes effect on its next `deploy_model`. Raises `ValueError` if the model was never registered. See [Model requirements](#model-requirements). |
 | `model_registry_status(family, suffix, run_name) -> SavedModel \| None` | The registry lifecycle of one model, or `None` if never registered. `SavedModel.phase` is `uploading` / `ready` / `upload_failed` / `broken`. |
 | `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. |
 | `list_models() -> list[SavedModel]` | Every `ModelVersion` in the registry (including `uploading` / `upload_failed` / `broken`), mapped to a `SavedModel`. |
 | `delete_model(family, suffix, run_name)` | Drop the `ModelVersion`, the weights blob, and the serve bundle. Does not undeploy a running Serve app. |
 
-`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`.
+`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`, `requirements`. `ModelRequirements`: `num_gpus`, `ram_gb`, `vram_gb`.
 
 ### Serving
 
 | Function | Purpose |
 |----------|---------|
-| `deploy_model(family, suffix, run_name, wait=False, timeout=300.0) -> Deployment` | Read bundle metadata from MLflow, PUT the Serve app spec. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. A `DEPLOY_FAILED` app from an earlier attempt is undeployed and, like an app still `deleting`, waited out before the PUT, so the retry starts afresh. With `wait=True`, then blocks as `wait_for_model_serving` does. `timeout` (default 300) caps the whole call. Returns a `Deployment` carrying the app URL. |
+| `deploy_model(family, suffix, run_name, num_replicas=1, wait=False, timeout=300.0) -> Deployment` | Read the bundle metadata and requirements from MLflow, PUT the Serve app spec - each replica requesting the model's requirements. Idempotent on `(family, suffix, run_name)`: the app name is deterministic, so a re-PUT replaces. A `DEPLOY_FAILED` app from an earlier attempt is undeployed and, like an app still `deleting`, waited out before the PUT, so the retry starts afresh. With `wait=True`, then blocks as `wait_for_model_serving` does. `timeout` (default 300) caps the whole call. Returns a `Deployment` carrying the app URL. |
 | `wait_for_model_serving(family, suffix, run_name, timeout=None)` | Block until the controller reports the app `RUNNING`. Raises `ModelDeployFailed` on `DEPLOY_FAILED` (with the controller's message) and as soon as no app exists for the model; exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded; an app that never leaves `deploying` hangs forever. |
 | `undeploy_model(family, suffix, run_name)` | Re-PUT the applications list with this app removed. |
 | `model_serving_status(family, suffix, run_name) -> ServingStatus` | The serving lifecycle of one model from the Ray Serve controller; `not_deployed` when no app exists (never raises for a missing app). See [Model serving lifecycle](#model-serving-lifecycle). |
@@ -356,7 +407,7 @@ Re-PUTs the applications list without this app; the controller tears down the re
 | symptom | cause | fix |
 |---|---|---|
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
-| `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - not enough free GPUs for `num_gpus`, a slow image pull, or a hung `__init__` | check GPU availability and the app in the Ray dashboard; free GPUs by undeploying others; raise `timeout` or pass `timeout=None`. |
+| `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - no node has the model's [requirements](#model-requirements) free (GPUs, RAM, VRAM), or none can ever satisfy them; a slow image pull; a hung `__init__` | compare the requirements with the cluster's free resources in the Ray dashboard; free some by undeploying others, or correct the requirements on the model card; raise `timeout` or pass `timeout=None`. |
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... does not exist` | the app was never deployed, was undeployed, or was dropped by a concurrent `deploy_model` (each deploy PUTs the whole applications list, so a later PUT can drop an app an earlier one added) | check `list_deployed_models`; deploy again. |
 | `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing - `deploy_model` clears the failed app itself. |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
@@ -373,7 +424,13 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
   "import_path": "cortexgrid._serve_entry:build",
   "args": {
     "class_import_path": "<module>:<ServeAppClass>",
-    "family": "...", "suffix": "...", "run_name": "..."
+    "family": "...", "suffix": "...", "run_name": "...",
+    "num_replicas": 1,
+    "ray_actor_options": {
+      "num_gpus": 1,
+      "memory": 8589934592,
+      "resources": {"vram_mib": 16384}
+    }
   },
   "runtime_env": {
     "working_dir": "s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip",
@@ -382,7 +439,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
 }
 ```
 
-Replica options (`num_replicas`, `max_ongoing_requests`, `ray_actor_options.num_gpus`) are not in the spec - `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment, reading `num_replicas` and `num_gpus` from the class attrs. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
+Replica options travel in `args`: `deploy_model` derives `ray_actor_options` from the model's [requirements](#model-requirements) (`memory` in bytes, `vram_mib` in MiB) and `_serve_entry.build` applies them, with `num_replicas`, via `.options(...)` on the serve-app deployment. `memory` and `resources` are left out when the requirement is 0, so nothing is reserved. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
 
 `deploy_model` reconstructs the full applications list (GET, replace this entry, PUT) because `/api/serve/applications/` is declarative: the PUT body is the desired complete set.
 
@@ -392,7 +449,7 @@ Replica options (`num_replicas`, `max_ongoing_requests`, `ray_actor_options.num_
 caller (laptop / arc-runner / training job)
   |
   | cortexgrid.save_model(weights_dir, ServeApp, family, suffix)   [synchronous / blocking]
-  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, lifecycle=uploading})
+  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, lifecycle=uploading, num_gpus, ram_gb, vram_gb})
   |   2. set tag size_bytes; upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
   |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip
   |   4. set tags {serve_bundle_url, class_import_path, serve_pip_requirements, serve_bundle_fingerprint}; flip lifecycle=ready
@@ -403,12 +460,13 @@ MLflow Model Registry (ModelVersion + tags)
 caller
   |
   | cortexgrid.deploy_model(family, suffix, run_name, wait=True)
-  |   1. read bundle metadata from MLflow tags
+  |   1. read bundle metadata + requirements from MLflow tags
   |   2. app DEPLOY_FAILED? undeploy it; failed or DELETING: poll GET until it is gone
   |   3. PUT /api/serve/applications/  (full applications list)
   |   4. poll GET until the app is RUNNING (DEPLOY_FAILED or a missing app raises ModelDeployFailed)
   v
 Ray Serve controller on the cluster
+  places each replica on a node with the requested GPUs / memory / vram_mib free
   fetches the bundle zip via runtime_env.working_dir and pip-installs runtime_env.pip into a cached virtualenv
   imports cortexgrid._serve_entry:build, which re-imports the serve-app class
   applies ray.serve.ingress(app) to a subclass of the class marked by cortexgrid.serve.ingress
@@ -441,6 +499,8 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 ## Pending work
 
 - **Tear-down policy** for idle deployments. Today only explicit `undeploy_model` releases the GPU; consider an idle eviction policy when the registry has more deployable runs than cluster GPUs.
+- **Fractional GPUs.** `num_gpus` is a whole number, so a GPU model takes a whole GPU and `vram_gb` only filters which node it lands on. Making it fractional would let several small models share one card, with `vram_mib` doing the accounting.
+- **Multi-GPU replicas.** A worker gets one GPU, so `num_gpus > 1` cannot be placed until the DaemonSet hands a worker more than one.
 - **Stale-bundle GC.** Bundles for undeployed-but-not-deleted runs are not currently garbage-collected. If it becomes a problem, the cleanest signal is "no Serve application currently references this bundle URL"; implement at that point, not before.
 
 ## Alternatives that were considered
@@ -452,6 +512,8 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | Library shape | cortexgrid + model-gateway separate | merged | Keeps cortexgrid torch-free for laptop callers; model-gateway stays reusable as a generic LLM client. |
 | Endpoint discovery | static URL composed from `RAY_SERVE_URI` + route prefix | jobs-control-plane lookup, MagicDNS, MLflow tag | URL is fully determined by `(family, suffix, run_name)`; no extra state to keep in sync. |
 | Caller -> cluster transport | Serve REST API (`/api/serve/applications/`) | (a) `ray.init` + `serve.run` in caller; (b) submit a Ray job that calls `serve.run` | (a) makes the caller a Ray driver - works on Ray nodes / jobs only, breaks on arc-runners; (b) decouples application lifetime from a job lifetime, then we'd have to babysit the job. REST keeps cortexgrid.model_serving HTTP-only and parallels how `cortexgrid.remote` talks to Ray Jobs. |
+| Where a replica's hardware needs live | `ModelRequirements` stored as tags on the `ModelVersion` | `num_gpus` / `num_replicas` class attributes on the serve-app | The hardware depends on the weights, not on the code fronting them, and the dashboard has to show and edit it - which the class attributes make impossible without importing the serve-app on the cluster. Tags come back with the registry query the dashboard already makes. The replica count is neither: it is a per-deploy choice, so it is an argument to `deploy_model`. |
+| VRAM accounting | a custom `vram_mib` Ray resource each GPU worker advertises from `nvidia-smi` | (a) cortexgrid picks a node itself and pins the replica to it; (b) Ray node labels + label selectors | (a) re-implements the scheduler and pins a replica to a node that may be gone by the next restart, with no reservation, so two deploys can both claim the same GPU. (b) filters but does not reserve, and the label-selector API is newer than the Ray versions cortexgrid supports. A consumable resource both filters and reserves. |
 | User-facing shape | user writes their own `@cortexgrid.serve.ingress` serve-app; cortexgrid only stores + deploys it | abstract `cortexgrid.Model` + generic `/infer` wrapper | A generic wrapper forces one request/response contract (unary JSON, fixed timeout) on every model. Real models need token streaming, multi-minute diffusion calls, and custom request schemas - all traffic concerns the serve-app must own. Letting cortexgrid own the wrapper collapsed those; the BYO serve-app keeps cortexgrid framework-free and imposes no HTTP shape. |
 | Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time, and `_IngressOnReplica` applies it again in each replica | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)), and importing `ray.serve` needs the `ray[serve]` extras wherever a serve-app is defined. (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. Its cost: the wrap runs outside the replica, which FastAPI >= 0.137 needs it in, hence the second application (see [On the replica](#on-the-replica)). |
 | Bundle timing | bundle the serve-app class at `save_model` time, persist URL+import path as MLflow tags | bundle at `deploy_model` time from a passed-in `cls` | Save-time bundling lets `deploy_model` callers be stateless - deploy from any process with just `(family, suffix, run_name)`. Re-pairing old weights with a new serve-app requires re-saving (acceptable: it forces an explicit decision and a fresh registry entry). |

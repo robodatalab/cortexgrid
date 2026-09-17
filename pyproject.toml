@@ -1,6 +1,6 @@
 [project]
 name = "cortexgrid"
-version = "0.2.96"
+version = "0.2.97"
 description = "Connect your ML code to the RoboLab compute cluster — Ray, MLflow, and S3"
 readme = "docs/cortexgrid/README.md"
 license = "Apache-2.0"

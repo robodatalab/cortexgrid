@@ -137,18 +137,22 @@ app = FastAPI()
 
 @serve.ingress(app)
 class MyServeApp:
-    num_gpus = 1
-
     def __init__(self, family: str, suffix: str, run_name: str) -> None:
         self._weights_dir = cortexgrid.load_model(family, suffix, run_name)
 
     @app.post("/complete")
     async def complete(self, body: dict): ...
 
-saved = cortexgrid.save_model(weights_dir, MyServeApp, family="qwen", suffix="instruct")
+saved = cortexgrid.save_model(
+    weights_dir, MyServeApp, family="qwen", suffix="instruct",
+    # What one replica needs; the model is deployed only on a host that has it.
+    requirements=cortexgrid.ModelRequirements(num_gpus=1, ram_gb=8, vram_gb=16),
+)
 deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name, wait=True)
 print(deployed.url)
 ```
+
+The requirements are part of the model, not of the serve-app class: GPUs, RAM and VRAM (GiB, 0 meaning no requirement) are stored with it and matched against what the cluster's hosts have free. Correct them later with `cortexgrid.set_model_requirements(family, suffix, run_name, requirements)` or on the model card in the dashboard; `cortexgrid.deploy_model(..., num_replicas=2)` chooses how many copies to run.
 
 `save_model` saves a new copy under every run - meant for weights the run produced (e.g. a fine-tune). For a model produced elsewhere (e.g. a pretrained base model), `cortexgrid.import_model(source, MyServeApp, family, suffix)` uploads it once under `run_name=cortexgrid.IMPORTED` and on later runs only re-bundles `MyServeApp` if its code changed; deploy it with `deploy_model(family, suffix, cortexgrid.IMPORTED)`.
 

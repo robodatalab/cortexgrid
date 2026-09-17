@@ -15,7 +15,12 @@ import { SecretsDashboard } from './components/SecretsDashboard'
 import { IconRail } from './components/IconRail'
 import type { RailView } from './components/IconRail'
 import { ModelsTree } from './components/ModelsTree'
-import type { Deployment, Model, ModelSelection } from './components/ModelsTree'
+import type {
+  Deployment,
+  Model,
+  ModelRequirements,
+  ModelSelection,
+} from './components/ModelsTree'
 import { DeploymentsTree } from './components/DeploymentsTree'
 import type { DeploymentSelection } from './components/DeploymentsTree'
 import { deploymentId } from './ids'
@@ -206,6 +211,23 @@ function App() {
     }
   }
 
+  async function handleSaveRequirements(
+    model: Model,
+    requirements: ModelRequirements,
+  ) {
+    const res = await fetch(
+      `/api/models/${encodeURIComponent(model.family)}/${encodeURIComponent(model.suffix)}/${encodeURIComponent(model.run_name)}/requirements`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requirements),
+      },
+    )
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+    }
+  }
+
   async function handleStopDeployment(deployment: Deployment) {
     const res = await fetch(deploymentPath(deployment), { method: 'DELETE' })
     if (!res.ok) {
@@ -285,6 +307,7 @@ function App() {
                         setModelsSelection({ kind: 'deployment', id })
                       }
                       onDeploy={handleDeploy}
+                      onSaveRequirements={handleSaveRequirements}
                     />
                   ) : selectedDeployment ? (
                     <DeploymentDashboard

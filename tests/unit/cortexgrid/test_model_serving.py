@@ -16,9 +16,10 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
     ModelDeployFailed,
+    ModelRequirements,
     ServeBundle,
     _build_application_spec,
-    _load_bundle_metadata,
+    _load_deploy_metadata,
     build_bundle,
     bundle_class,
     deploy_model,
@@ -26,6 +27,8 @@ from cortexgrid.model_serving import (
     metadata_to_tags,
     model_serving_messages,
     model_serving_status,
+    requirements_from_tags,
+    requirements_to_tags,
     undeploy_model,
     wait_for_model_serving,
 )
@@ -35,6 +38,8 @@ _FAKE_META = BundleMetadata(
     bundle_url="s3://bucket/stub.zip",
     class_import_path="stub:Stub",
 )
+
+_GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
 
 
 class FakeServeState:
@@ -62,7 +67,12 @@ class FakeServeState:
 
 
 def _stub_build_spec(
-    family: str, suffix: str, run_name: str, meta: BundleMetadata
+    family: str,
+    suffix: str,
+    run_name: str,
+    meta: BundleMetadata,
+    requirements: ModelRequirements,
+    num_replicas: int,
 ) -> dict[str, Any]:
     return {
         "name": f"{family}__{suffix}__{run_name}",
@@ -90,17 +100,31 @@ class TestModelServing(unittest.TestCase):
                 return_value="http://ray:30000",
             ),
             patch(
-                "cortexgrid.model_serving._build_application_spec",
-                side_effect=_stub_build_spec,
-            ),
-            patch(
-                "cortexgrid.model_serving._load_bundle_metadata",
-                return_value=_FAKE_META,
+                "cortexgrid.model_serving._load_deploy_metadata",
+                return_value=(_FAKE_META, _GPU_REQUIREMENTS),
             ),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+        build_spec = patch(
+            "cortexgrid.model_serving._build_application_spec",
+            side_effect=_stub_build_spec,
+        )
+        self.build_spec = build_spec.start()
+        self.addCleanup(build_spec.stop)
+
+    def test_deploy_builds_the_spec_from_the_stored_requirements(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=3)
+
+        self.build_spec.assert_called_once_with(
+            "Qwen2", "instruct", "boogey-46", _FAKE_META, _GPU_REQUIREMENTS, 3
+        )
+
+    def test_deploy_runs_one_replica_by_default(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(self.build_spec.call_args.args[-1], 1)
 
     def test_deployed_model_appears_in_listings(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -602,7 +626,9 @@ class TestServeDependencies(unittest.TestCase):
             pip_requirements=["tqdm==4.67.3"],
         )
 
-        spec = _build_application_spec("fam", "suf", "run", meta)
+        spec = _build_application_spec(
+            "fam", "suf", "run", meta, ModelRequirements(), 1
+        )
 
         self.assertEqual(
             spec["runtime_env"],
@@ -611,11 +637,37 @@ class TestServeDependencies(unittest.TestCase):
 
     def test_spec_without_pip_requirements_has_no_pip_key(self) -> None:
         # A pip key, even an empty one, makes Ray build a virtualenv.
-        spec = _build_application_spec("fam", "suf", "run", _FAKE_META)
+        spec = _build_application_spec(
+            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1
+        )
 
         self.assertEqual(spec["runtime_env"], {"working_dir": _FAKE_META.bundle_url})
 
-    def _load_with_tags(self, tags: dict[str, str]) -> BundleMetadata:
+    def test_spec_requests_the_requirements_from_ray(self) -> None:
+        spec = _build_application_spec(
+            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2
+        )
+
+        self.assertEqual(spec["args"]["num_replicas"], 2)
+        self.assertEqual(
+            spec["args"]["ray_actor_options"],
+            {
+                "num_gpus": 1,
+                "memory": 16 * 1024**3,
+                "resources": {"vram_mib": 24 * 1024},
+            },
+        )
+
+    def test_spec_without_requirements_requests_no_resources(self) -> None:
+        spec = _build_application_spec(
+            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1
+        )
+
+        self.assertEqual(spec["args"]["ray_actor_options"], {"num_gpus": 0})
+
+    def _load_with_tags(
+        self, tags: dict[str, str]
+    ) -> tuple[BundleMetadata, ModelRequirements]:
         client = MagicMock()
         client.search_model_versions.return_value = [SimpleNamespace(tags=tags)]
         with (
@@ -625,7 +677,7 @@ class TestServeDependencies(unittest.TestCase):
                 return_value="http://test:5000",
             ),
         ):
-            return _load_bundle_metadata("fam", "suf", "run")
+            return _load_deploy_metadata("fam", "suf", "run")
 
     def test_bundle_metadata_round_trips_through_tags(self) -> None:
         meta = BundleMetadata(
@@ -635,19 +687,49 @@ class TestServeDependencies(unittest.TestCase):
             fingerprint="abc123",
         )
 
-        self.assertEqual(self._load_with_tags(metadata_to_tags(meta)), meta)
+        self.assertEqual(self._load_with_tags(metadata_to_tags(meta))[0], meta)
+
+    def test_requirements_load_from_the_same_version(self) -> None:
+        tags = {
+            **metadata_to_tags(_FAKE_META),
+            **requirements_to_tags(_GPU_REQUIREMENTS),
+        }
+
+        self.assertEqual(self._load_with_tags(tags)[1], _GPU_REQUIREMENTS)
 
     def test_model_saved_without_pip_tag_loads_with_no_requirements(self) -> None:
         tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
 
-        self.assertEqual(self._load_with_tags(tags).pip_requirements, [])
+        self.assertEqual(self._load_with_tags(tags)[0].pip_requirements, [])
 
     def test_model_saved_without_fingerprint_tag_loads_with_no_fingerprint(
         self,
     ) -> None:
         tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
 
-        self.assertEqual(self._load_with_tags(tags).fingerprint, "")
+        self.assertEqual(self._load_with_tags(tags)[0].fingerprint, "")
+
+
+class TestModelRequirements(unittest.TestCase):
+    def test_round_trips_through_tags(self) -> None:
+        requirements = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.5)
+
+        self.assertEqual(
+            requirements_from_tags(requirements_to_tags(requirements)),
+            requirements,
+        )
+
+    def test_model_saved_without_tags_has_no_requirements(self) -> None:
+        self.assertEqual(requirements_from_tags({}), ModelRequirements())
+
+    def test_rejects_negative_values(self) -> None:
+        for kwargs in ({"num_gpus": -1}, {"ram_gb": -1.0}, {"vram_gb": -1.0}):
+            with self.subTest(**kwargs), self.assertRaises(ValueError):
+                ModelRequirements(**kwargs)
+
+    def test_rejects_vram_without_a_gpu(self) -> None:
+        with self.assertRaises(ValueError):
+            ModelRequirements(num_gpus=0, vram_gb=8.0)
 
 
 if __name__ == "__main__":

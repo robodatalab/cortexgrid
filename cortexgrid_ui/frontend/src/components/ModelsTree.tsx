@@ -3,6 +3,13 @@ import { Layers, Box, Trash2 } from "lucide-react";
 import "./ModelsTree.css";
 import { registryTier, worstTier } from "../phases";
 
+// Hardware one replica of the model needs; 0 means no requirement.
+export type ModelRequirements = {
+    num_gpus: number;
+    ram_gb: number;
+    vram_gb: number;
+};
+
 export type Model = {
     id: string;
     family: string;
@@ -13,6 +20,7 @@ export type Model = {
     size_bytes: number;
     // Registry lifecycle phase: uploading | ready | upload_failed | broken.
     phase: string;
+    requirements: ModelRequirements;
 };
 
 export type Deployment = {
