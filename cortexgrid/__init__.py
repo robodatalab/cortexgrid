@@ -74,8 +74,10 @@ from cortexgrid.ray_util import (
 )
 from cortexgrid.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
 from cortexgrid.model_storage import (
+    IMPORTED,
     SavedModel,
     delete_model,
+    import_model,
     list_models,
     load_model,
     model_registry_status,
@@ -119,7 +121,11 @@ def save_model(
     weights_dir: str | Path, serve_app: type, family: str, suffix: str
 ) -> SavedModel:
     """Persist a weights directory under the current Experiment's run, paired
-    with the serve-app class that will front it at deploy time."""
+    with the serve-app class that will front it at deploy time.
+
+    Every run saves a new copy under its own run_name - meant for weights the
+    run produced (e.g. a fine-tune). For a model produced elsewhere that should
+    be uploaded once and reused across runs, use `import_model`."""
     experiment = Experiment.get_instance()
     return _save_model_storage(
         weights_dir,
@@ -179,8 +185,10 @@ __all__ = [
     "list_secrets",
     "delete_secret",
     # Model registry
+    "IMPORTED",
     "SavedModel",
     "save_model",
+    "import_model",
     "load_model",
     "list_models",
     "model_registry_status",
