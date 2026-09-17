@@ -51,18 +51,42 @@ spec:
               {{- if $flavour.gpu }}
               nvidia.com/gpu: "1"
               {{- end }}
+            # No memory limit: Ray sizes its `memory` resource from the pod's
+            # cgroup limit, so a limit here - not the host's RAM - would cap
+            # what a model can ask for (cortexgrid.ModelRequirements.ram_gb).
             limits:
               cpu: "8"
-              memory: 32Gi
               {{- if $flavour.gpu }}
               nvidia.com/gpu: "1"
               {{- end }}
+          {{- if $flavour.gpu }}
+          # Ray has no notion of GPU memory, so the worker advertises the MiB
+          # nvidia-smi reports for the GPUs it was given as the custom
+          # "vram_mib" resource. A replica requests its model's vram_gb of it
+          # (see cortexgrid.model_serving), so Ray places it only on a node
+          # whose GPUs have that much memory left.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              vram_mib=0
+              for gpu_mib in $(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits); do
+                vram_mib=$((vram_mib + gpu_mib))
+              done
+              [ "$vram_mib" -gt 0 ] || { echo "nvidia-smi reported no GPU" >&2; exit 1; }
+              exec ray start \
+                --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }} \
+                --num-gpus=1 \
+                --resources="{\"vram_mib\": $vram_mib}" \
+                --block
+          {{- else }}
           command:
             - ray
             - start
             - --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }}
-            - --num-gpus={{ ternary 1 0 $flavour.gpu }}
+            - --num-gpus=0
             - --block
+          {{- end }}
           env:
             # User code shipped via cortexgrid.remote runs in Ray actors here;
             # its cortexgrid.secrets calls go to the head secrets server.

@@ -207,10 +207,13 @@ def upload_bundle(
     )
 
 
-# Custom Ray resource each GPU worker advertises: the GiB of memory its GPUs
-# have. A replica requests its vram_gb of it, so Ray places it only on a node
-# with that much VRAM left.
-_VRAM_RESOURCE = "vram_gb"
+# Custom Ray resource each GPU worker advertises: the MiB of memory its GPUs
+# have (see the ray-worker DaemonSet). A replica requests its vram_gb of it in
+# MiB, so Ray places it only on a node with that much VRAM left. MiB because
+# nvidia-smi reports MiB and a GPU's memory is not a whole number of GiB.
+_VRAM_RESOURCE = "vram_mib"
+
+_MIB_PER_GIB = 1024
 
 _GIB = 1024**3
 
@@ -223,7 +226,9 @@ def _ray_actor_options(requirements: ModelRequirements) -> dict[str, Any]:
     if requirements.ram_gb > 0:
         options["memory"] = int(requirements.ram_gb * _GIB)
     if requirements.vram_gb > 0:
-        options["resources"] = {_VRAM_RESOURCE: requirements.vram_gb}
+        options["resources"] = {
+            _VRAM_RESOURCE: round(requirements.vram_gb * _MIB_PER_GIB)
+        }
     return options
 
 

@@ -61,7 +61,7 @@ class TestBuild(unittest.TestCase):
         self.assertIsInstance(instance, _MarkedServeApp)
 
     def test_applies_resources_from_the_args(self) -> None:
-        actor_options = {"num_gpus": 1, "memory": 1024, "resources": {"vram_gb": 8.0}}
+        actor_options = {"num_gpus": 1, "memory": 1024, "resources": {"vram_mib": 8192}}
         with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
             build({
                 **_ARGS,

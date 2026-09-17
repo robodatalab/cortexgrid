@@ -654,7 +654,7 @@ class TestServeDependencies(unittest.TestCase):
             {
                 "num_gpus": 1,
                 "memory": 16 * 1024**3,
-                "resources": {"vram_gb": 24.0},
+                "resources": {"vram_mib": 24 * 1024},
             },
         )
 
