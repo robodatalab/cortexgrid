@@ -8,6 +8,7 @@ NodeLabel is strict in direct mode: the agent was just installed against a
 running head, so a node that does not register is a failed join and must fail
 setup. In deferred mode the node cannot have registered yet; it labels itself
 (`node-label` in the agent config JoinCluster writes) when it joins.
+ComputeLabels follows the same strictness.
 """
 
 from typing import Literal
@@ -21,4 +22,5 @@ def build(*, mode: Literal["direct", "deferred"]) -> Pipeline:
         operators.InstallPrereqs(),
         operators.JoinCluster(mode=mode),
         operators.NodeLabel(role="worker", strict=(mode == "direct")),
+        operators.ComputeLabels(strict=(mode == "direct")),
     ])

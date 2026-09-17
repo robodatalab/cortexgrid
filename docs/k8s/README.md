@@ -4,14 +4,14 @@ GitOps manifests watched by Argo CD. See [argo_deployments/](../../k8s/argo_depl
 
 ## Topology
 
-The platform is a hybrid: a single k3s **head** plus zero or more **GPU workers**. The head can run on AWS EC2 or on a local box; workers can be the DGX, a ThinkStation, or any GPU node reachable over Tailscale. The same manifests apply in both cases - placement is decided by node labels, not by environment.
+The platform is a hybrid: a single k3s **head** plus zero or more **workers**. The head can run on AWS EC2 or on a local box; workers can be the DGX, a ThinkStation, or any node (GPU or CPU-only) reachable over Tailscale. The same manifests apply in both cases - placement is decided by node labels, not by environment.
 
 | Role | Label | What lands there | Typical box |
 |------|-------|------------------|-------------|
 | `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexgrid-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`head-aws-apply` + `head-setup`) **or** on-prem ThinkStation/DGX (`head-setup` only) |
-| `worker` | `role=worker` | ray-worker DaemonSet (1 Pod per node, requests 1 GPU) | DGX, ThinkStation, GPU EC2 - anything joined via `worker-setup` |
+| `worker` | `role=worker`, `worker=true`, `gpu=true` (GPU hosts only) | `ray-worker` (GPU, requests 1 GPU) or `ray-worker-cpu` DaemonSet, 1 Pod per node | DGX, ThinkStation, EC2 - anything joined via `worker-setup` |
 
-Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../../infra-config.yaml) at the repo root. That file is written by the seed scripts and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs.
+Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../../infra-config.yaml) at the repo root. That file is written by the seed scripts and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs. Ray worker placement uses separate compute labels: `worker=true`, plus `gpu=true` when `nvidia-smi -L` on the host lists a GPU (`ComputeLabels`).
 
 ### Profiles
 
@@ -84,12 +84,13 @@ In the AWS profile, mlflow's backend store and artifact store are RDS + S3 - no 
 
 ### Ray topology
 
-Ray is split into a CPU-only control plane on the head and a GPU-bearing worker DaemonSet on every joined GPU node. Both shapes are in [workloads/ray/deployment.yaml](../../k8s/workloads/ray/deployment.yaml).
+Ray is split into a CPU-only control plane on the head and worker DaemonSets on every `worker=true` node: the GPU flavour on `gpu=true` nodes, the CPU-only flavour elsewhere. All shapes are in [charts/cortexgrid/templates/ray/](../../k8s/charts/cortexgrid/templates/ray/).
 
 | | nodeSelector | GPU | Replicas |
 |------|--------------|-----|----------|
 | `ray-head` | `role=head` | none (no `nvidia.com/gpu` request, no `--num-gpus`, no `runtimeClassName`) | 1 (Deployment) |
-| `ray-worker` | `role=worker` | 1 (`nvidia.com/gpu: 1`, `runtimeClassName: nvidia`) | 1 per worker node (DaemonSet) |
+| `ray-worker` | `worker=true`, `gpu=true` | 1 (`nvidia.com/gpu: 1`, `--num-gpus=1`, `runtimeClassName: nvidia`) | 1 per GPU worker node (DaemonSet) |
+| `ray-worker-cpu` | `worker=true`, no `gpu` label | none (`--num-gpus=0`) | 1 per CPU-only worker node (DaemonSet) |
 
 Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexgrid submission site.
 
@@ -99,7 +100,7 @@ Workers register with the head's GCS via the in-cluster Service at `ray-head.ray
 
 **To run ray fully on-prem:** seed the head on an on-prem box (`head-setup` only, no `head-aws-apply`), then join GPU workers. The auto-detected `onprem` profile brings in MinIO + Postgres so mlflow has somewhere to store metadata and artifacts.
 
-**Adding/removing GPU capacity at runtime:** `worker-setup IP=<new-gpu-box>` or `node-teardown IP=<old-gpu-box>` - DaemonSet self-adjusts; ray-head's GCS picks up the new worker (or notices the missing one) on the next heartbeat.
+**Adding/removing capacity at runtime:** `worker-setup IP=<new-box>` or `node-teardown IP=<old-box>` - the DaemonSets self-adjust; ray-head's GCS picks up the new worker (or notices the missing one) on the next heartbeat.
 
 ## Future extensions
 

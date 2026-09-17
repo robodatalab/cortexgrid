@@ -95,7 +95,7 @@ Both `head-setup` and `worker-setup` bind k3s to Tailscale with a systemd drop-i
 
 The head and every worker install the same k3s version, `K3S_VERSION` in [k8s/seed/util.py](../k8s/seed/util.py); a deferred worker gets it through the env file its join timer reads. Without the pin the installer takes k3s's current "stable" channel, so a worker joined later can run a newer Kubernetes than the server, which Kubernetes does not support. Setup skips a node that already has k3s installed, so bumping `K3S_VERSION` only takes effect on nodes that are torn down and set up again - the head included.
 
-A worker's k3s agent registers already labelled `role=worker` (`node-label` in the agent config `JoinCluster` writes), which is what the `ray-worker` DaemonSet selects - so a deferred worker is labelled whenever it eventually joins. When the head is already up (direct join), `worker-setup` waits up to 60 s for the node to register and fails if it does not, rather than recording a join that never happened.
+A worker's k3s agent registers already labelled `role=worker`, `worker=true` and, when `nvidia-smi -L` lists a GPU, `gpu=true` (`node-label` in the agent config `JoinCluster` writes). The `ray-worker` (GPU) and `ray-worker-cpu` DaemonSets select on these - so a deferred worker is labelled whenever it eventually joins. k3s applies `node-label` only at registration, so `ComputeLabels` also applies the compute labels with kubectl on every direct `worker-setup`; re-run it on a worker that joined before these labels existed. When the head is already up (direct join), `worker-setup` waits up to 60 s for the node to register and fails if it does not, rather than recording a join that never happened.
 
 ### Secrets management
 

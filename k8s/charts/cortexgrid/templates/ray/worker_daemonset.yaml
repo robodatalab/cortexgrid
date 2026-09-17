@@ -1,47 +1,73 @@
+{{- /*
+One Ray worker DaemonSet per compute flavour, both on `worker=true` nodes (the
+seed's ComputeLabels). `gpu=true` nodes (nvidia-smi found a GPU) get the nvidia
+runtime and 1 GPU; the rest get a CPU-only worker.
+*/}}
+{{- $flavours := list
+  (dict "name" "ray-worker" "gpu" true)
+  (dict "name" "ray-worker-cpu" "gpu" false)
+}}
+{{- range $flavour := $flavours }}
+---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: ray-worker
+  name: {{ $flavour.name }}
   labels:
-    {{- include "cortexgrid.labels" . | nindent 4 }}
-    app: ray-worker
+    {{- include "cortexgrid.labels" $ | nindent 4 }}
+    app: {{ $flavour.name }}
 spec:
   selector:
     matchLabels:
-      app: ray-worker
+      app: {{ $flavour.name }}
   template:
     metadata:
       labels:
-        app: ray-worker
+        app: {{ $flavour.name }}
     spec:
-      runtimeClassName: nvidia
       nodeSelector:
-        role: worker
+        worker: "true"
+      {{- if $flavour.gpu }}
+        gpu: "true"
+      runtimeClassName: nvidia
+      {{- else }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: gpu
+                    operator: DoesNotExist
+      {{- end }}
       imagePullSecrets:
         - name: ghcr-pull
       containers:
-        - name: ray-worker
-          image: {{ .Values.images.ray }}
+        - name: {{ $flavour.name }}
+          image: {{ $.Values.images.ray }}
           resources:
             requests:
               cpu: "1"
               memory: 4Gi
+              {{- if $flavour.gpu }}
               nvidia.com/gpu: "1"
+              {{- end }}
             limits:
               cpu: "8"
               memory: 32Gi
+              {{- if $flavour.gpu }}
               nvidia.com/gpu: "1"
+              {{- end }}
           command:
             - ray
             - start
-            - --address={{ .Values.services.ray.headHost }}:{{ .Values.services.ray.headPort }}
-            - --num-gpus=1
+            - --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }}
+            - --num-gpus={{ ternary 1 0 $flavour.gpu }}
             - --block
           env:
             # User code shipped via cortexgrid.remote runs in Ray actors here;
             # its cortexgrid.secrets calls go to the head secrets server.
             - name: CORTEXGRID_HEAD_URL
-              value: "{{ .Values.services.head.url }}"
+              value: "{{ $.Values.services.head.url }}"
             # Ray's runtime_env_agent fetches s3:// working_dir URIs for Serve
             # replicas with unmodified boto3, which only reads the standard
             # AWS_* env names; map them from the s3-creds Secret's S3_* keys.
@@ -78,3 +104,4 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+{{- end }}

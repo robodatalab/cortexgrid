@@ -431,6 +431,21 @@ def wipe_host_packages(c: Connection) -> None:
     )
 
 
+def has_gpu(c: Connection) -> bool:
+    """True iff `nvidia-smi -L` on the host lists at least one GPU.
+
+    Exits non-zero when the driver is missing or no device is found.
+    """
+    result = c.run("nvidia-smi -L", hide=True, warn=True)
+    return result.ok and "GPU" in result.stdout
+
+
+def compute_labels(gpu: bool) -> list[str]:
+    """Node labels that place Ray workers: `worker=true` on every node that runs
+    one, plus `gpu=true` to pick the GPU flavour over the CPU-only one."""
+    return ["worker=true", "gpu=true"] if gpu else ["worker=true"]
+
+
 def await_node(node_ip: str) -> str:
     name = resolve_node_name(node_ip, wait_for=60.0)
     if name is None:

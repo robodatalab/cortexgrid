@@ -14,8 +14,9 @@ spec:
     helm:
       values: |
         runtimeClassName: nvidia
+        # Only nodes the seed's ComputeLabels saw a GPU on (nvidia-smi).
         nodeSelector:
-          role: worker
+          gpu: "true"
         affinity:
           nodeAffinity:
             requiredDuringSchedulingIgnoredDuringExecution:

@@ -18,7 +18,7 @@ _CONFIG_HEREDOC = re.compile(
 
 class TestAgentConfig(unittest.TestCase):
     """Both join modes write the same agent config, and it labels the node
-    role=worker at registration."""
+    role=worker + worker=true (+ gpu=true on a GPU host) at registration."""
 
     def setUp(self) -> None:
         self.scripts: list[str] = []
@@ -30,6 +30,7 @@ class TestAgentConfig(unittest.TestCase):
             ("sudo_script", sudo_script),
             ("write_remote_file", mock.MagicMock()),
             ("bind_k3s_to_tailscale", mock.MagicMock()),
+            ("has_gpu", lambda _c: self.gpu),
         ):
             p = mock.patch.object(util, name, fake)
             p.start()
@@ -43,10 +44,20 @@ class TestAgentConfig(unittest.TestCase):
         return yaml.safe_load(configs[0])
 
     @parameterized.expand([
-        ("direct", {"head_ip": "100.110.47.88", "head_token": "token"}),
-        ("deferred", {"head_url": "http://robolab-head:7700"}),
+        (mode, deps, gpu, labels)
+        for mode, deps in (
+            ("direct", {"head_ip": "100.110.47.88", "head_token": "token"}),
+            ("deferred", {"head_url": "http://robolab-head:7700"}),
+        )
+        for gpu, labels in (
+            (True, ["role=worker", "worker=true", "gpu=true"]),
+            (False, ["role=worker", "worker=true"]),
+        )
     ])
-    def test_agent_registers_labelled_role_worker(self, mode: str, deps: dict) -> None:
+    def test_agent_registers_labelled_for_its_compute(
+        self, mode: str, deps: dict, gpu: bool, labels: list[str]
+    ) -> None:
+        self.gpu = gpu
         JoinCluster(mode=mode).setup(
             {"connection": self.c, "node_ip": "100.80.27.32", **deps}
         )
@@ -56,7 +67,7 @@ class TestAgentConfig(unittest.TestCase):
             {
                 "node-ip": "100.80.27.32",
                 "flannel-iface": "tailscale0",
-                "node-label": ["role=worker"],
+                "node-label": labels,
             },
         )
 
