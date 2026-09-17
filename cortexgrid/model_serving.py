@@ -3,11 +3,12 @@
 Caller stays HTTP-only: deploy/undeploy/list talk to the Ray dashboard's
 declarative `/api/serve/applications/` endpoint via [cortexgrid.ray_util],
 never `ray.init`. The deployment class is bundled at `save_model` time, zipped,
-uploaded to MinIO under `serve-bundles/<run_name>/<family>__<suffix>.zip`, and
+uploaded to MinIO under
+`serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip`, and
 referenced via `runtime_env.working_dir` so Ray workers fetch it from there.
-The bundle URL, class import path, and pip list are persisted as MLflow tags
-on the ModelVersion so `deploy_model` can find them later without the caller
-holding the class object.
+The bundle URL, class import path, pip list, and fingerprint are persisted as
+MLflow tags on the ModelVersion so `deploy_model` can find them later without
+the caller holding the class object.
 
 Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
 This relies on family/suffix/run_name not containing the literal "__".
@@ -26,13 +27,14 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from mlflow.tracking import MlflowClient
 from ray.serve.schema import ApplicationStatus
 
-from cortexgrid._bundle import bundle, stage, worker_provides
+from cortexgrid._bundle import bundle, digest, stage, worker_provides
 from cortexgrid.infra import get_mlflow_tracking_uri, get_ray_serve_uri
 from cortexgrid.ray_util import (
     get_serve_details,
@@ -95,17 +97,28 @@ class BundleMetadata:
     # pinned third-party requirements the replica pip-installs (the bundle's
     # distributions the Ray image does not already provide)
     pip_requirements: list[str] = field(default_factory=list)
+    # ServeBundle.fingerprint of the uploaded bundle; empty for models saved
+    # before bundles were fingerprinted
+    fingerprint: str = ""
 
 
-def bundle_class(
-    cls: type, family: str, suffix: str, run_name: str
-) -> BundleMetadata:
-    """Bundle the serve-app class's code (and the serve entrypoint), zip it, and
-    upload to MinIO.
+@dataclass
+class ServeBundle:
+    """A serve-app's bundle, resolved locally but not uploaded yet: what
+    `build_bundle` finds and `upload_bundle` ships."""
 
-    Returns the metadata `deploy_model` needs later; callers (typically
-    `save_model`) persist it on the ModelVersion so the deploy step can run
-    without holding the class object.
+    files: set[Path]
+    class_import_path: str
+    pip_requirements: list[str]
+    # Hash of everything the replica runs: the staged files, the class it
+    # imports, and the requirements it installs. Equal fingerprints mean the
+    # same code, so an uploaded bundle can be reused.
+    fingerprint: str
+
+
+def build_bundle(cls: type) -> ServeBundle:
+    """Resolve the serve-app class's code (and the serve entrypoint) into a
+    bundle, without uploading it.
 
     Raises ValueError for a class wrapped by `ray.serve.ingress`: that wrapper
     is a subclass Ray defines in its own module, and on older Ray (e.g. 2.9) it
@@ -120,17 +133,51 @@ def bundle_class(
     entry_file = Path(inspect.getfile(cls)).resolve()
     serve_entry = Path(__file__).with_name("_serve_entry.py")
     desc = bundle(entry_file).merge(bundle(serve_entry))
+    class_import_path = f"{cls.__module__}:{cls.__name__}"
     pip_requirements = desc.pip_requirements(worker_provides())
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            [digest(desc.local_files), class_import_path, pip_requirements]
+        ).encode()
+    ).hexdigest()
+    return ServeBundle(
+        files=desc.local_files,
+        class_import_path=class_import_path,
+        pip_requirements=pip_requirements,
+        fingerprint=fingerprint,
+    )
+
+
+def bundle_class(
+    cls: type, family: str, suffix: str, run_name: str
+) -> BundleMetadata:
+    """Bundle the serve-app class's code (and the serve entrypoint), zip it, and
+    upload to MinIO: `build_bundle` followed by `upload_bundle`.
+
+    Returns the metadata `deploy_model` needs later; callers (typically
+    `save_model`) persist it on the ModelVersion so the deploy step can run
+    without holding the class object."""
+    return upload_bundle(build_bundle(cls), family, suffix, run_name)
+
+
+def upload_bundle(
+    serve_bundle: ServeBundle, family: str, suffix: str, run_name: str
+) -> BundleMetadata:
+    """Zip a built bundle and upload it under its fingerprint.
+
+    The fingerprint is part of the URL because Ray keeps a remote working_dir
+    it has downloaded and reuses it for the same URL: new code at an old URL
+    would never reach a replica."""
     with tempfile.TemporaryDirectory() as tmp:
         code_root = Path(tmp) / "code"
-        stage(desc.local_files, code_root)
+        stage(serve_bundle.files, code_root)
         log.info(
             "Serve bundle for %s/%s/%s: %d files, pip: %s",
             family,
             suffix,
             run_name,
-            len(desc.local_files),
-            pip_requirements,
+            len(serve_bundle.files),
+            serve_bundle.pip_requirements,
         )
         # Ray unpacks a remote (s3://) working_dir zip by stripping its
         # top-level directory when there is exactly one, so a bundle of a single
@@ -146,12 +193,16 @@ def bundle_class(
         )
         bundle_url = upload(
             archive,
-            dest_path=f"serve-bundles/{run_name}/{family}__{suffix}.zip",
+            dest_path=(
+                f"serve-bundles/{run_name}/{family}__{suffix}/"
+                f"{serve_bundle.fingerprint}.zip"
+            ),
         )
     return BundleMetadata(
         bundle_url=bundle_url,
-        class_import_path=f"{cls.__module__}:{cls.__name__}",
-        pip_requirements=pip_requirements,
+        class_import_path=serve_bundle.class_import_path,
+        pip_requirements=serve_bundle.pip_requirements,
+        fingerprint=serve_bundle.fingerprint,
     )
 
 
@@ -189,17 +240,32 @@ def _build_application_spec(
 _CLASS_IMPORT_PATH_TAG = "class_import_path"
 _BUNDLE_URL_TAG = "serve_bundle_url"
 _PIP_REQUIREMENTS_TAG = "serve_pip_requirements"
+_BUNDLE_FINGERPRINT_TAG = "serve_bundle_fingerprint"
 
 
 def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
     """Serialise BundleMetadata to MLflow tags. The inverse of
-    `_load_bundle_metadata`; lives here next to the consumer so the tag schema
+    `metadata_from_tags`; lives here next to the consumer so the tag schema
     stays in one place."""
     return {
         _CLASS_IMPORT_PATH_TAG: meta.class_import_path,
         _BUNDLE_URL_TAG: meta.bundle_url,
         _PIP_REQUIREMENTS_TAG: json.dumps(meta.pip_requirements),
+        _BUNDLE_FINGERPRINT_TAG: meta.fingerprint,
     }
+
+
+def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
+    """Deserialise BundleMetadata from a ModelVersion's MLflow tags. Raises
+    KeyError for a missing bundle URL or class import path."""
+    return BundleMetadata(
+        bundle_url=tags[_BUNDLE_URL_TAG],
+        class_import_path=tags[_CLASS_IMPORT_PATH_TAG],
+        # Absent on models saved before dependencies were pip-installed.
+        pip_requirements=json.loads(tags.get(_PIP_REQUIREMENTS_TAG, "[]")),
+        # Absent on models saved before bundles were fingerprinted.
+        fingerprint=tags.get(_BUNDLE_FINGERPRINT_TAG, ""),
+    )
 
 
 def _load_bundle_metadata(
@@ -215,14 +281,8 @@ def _load_bundle_metadata(
         raise ValueError(
             f"No saved model for {family}/{suffix}/{run_name}; cannot deploy."
         )
-    tags = versions[0].tags or {}
     try:
-        return BundleMetadata(
-            bundle_url=tags[_BUNDLE_URL_TAG],
-            class_import_path=tags[_CLASS_IMPORT_PATH_TAG],
-            # Absent on models saved before dependencies were pip-installed.
-            pip_requirements=json.loads(tags.get(_PIP_REQUIREMENTS_TAG, "[]")),
-        )
+        return metadata_from_tags(versions[0].tags or {})
     except KeyError as exc:
         raise ValueError(
             f"Saved model {family}/{suffix}/{run_name} is missing the deployment "
