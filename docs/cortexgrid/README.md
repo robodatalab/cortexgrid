@@ -87,11 +87,41 @@ print(f"Submitted: {job.job_id}")
 
 ##### Blocking on the result
 
+`JobFuture.result(timeout=None)` blocks until Ray reports the job terminal, then behaves like a local call: it returns whatever the function returned, or raises whatever the function raised.
+
 ```python
-loss = cortexgrid.remote(train_step, batch, num_gpus=1).result()
+def score(batch) -> dict[str, float]:
+    # runs on the DGX
+    return {"loss": 0.12}
+
+# Fire-and-forget — the form training uses. Nothing blocks, and a retry=True
+# job cannot be waited on at all (see below).
+training = cortexgrid.remote(train_step, batch, num_gpus=1, retry=True)
+print(training.job_id, training.status().value)   # "blue-42 running"
+
+# Blocking — the value comes back as if score() had run locally.
+job = cortexgrid.remote(score, batch, num_gpus=1)
+metrics = job.result()                            # {"loss": 0.12}
+
+# ...or with a deadline. On TimeoutError the job keeps running; wait again later.
+metrics = job.result(timeout=600)
+
+# From another process — the handle is gone, the job id is enough.
+metrics = cortexgrid.get_job_result(job_id, timeout=600)
 ```
 
-`JobFuture.result(timeout=None)` blocks until Ray reports the job terminal and then behaves like a local call: it returns whatever the function returned, or raises whatever the function raised. `cortexgrid.get_job_result(job_id, timeout=None)` does the same for a job of the current run known only by its id, so a process that did not submit the job can still collect it.
+Failures arrive as exceptions, not as a status to inspect:
+
+```python
+try:
+    metrics = job.result()
+except BadBatch as exc:                # exactly what score() raised on the DGX
+    print(exc.__cause__)               # JobFailed, carrying the remote traceback
+except cortexgrid.JobFailed:           # the job never got as far as returning
+    ...                                # submission failed, driver died, or stopped
+except cortexgrid.JobResultUnavailable:
+    ...                                # it returned, but the value is not transportable
+```
 
 The driver cloudpickles the outcome to `job/{job_id}/result.pkl`, beside the payload manifest and the lifecycle, and the waiting side reads it back:
 
