@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 import time
@@ -22,8 +23,10 @@ from cortexgrid.model_storage import (
     import_model,
     list_models,
     load_model,
+    model_config,
     model_registry_status,
     save_model,
+    set_model_config,
     set_model_requirements,
 )
 
@@ -35,6 +38,10 @@ class _FakeServeApp:
 
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+# What a serve-app that downloads no weights needs instead: which model to call
+# and where to find the credential. cortexgrid never reads either key.
+_CONFIG = {"model": "claude-opus-5", "api_key_secret": "anthropic-api-key"}
 
 
 def _recent_ms() -> int:
@@ -405,6 +412,38 @@ class TestSaveModel(unittest.TestCase):
         self.assertFalse({"num_gpus", "ram_gb", "vram_gb"} & tags.keys())
         self.assertEqual(result.requirements, ModelRequirements())
 
+    def test_stores_config_as_one_json_tag(self) -> None:
+        result = save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+            config=_CONFIG,
+        )
+
+        self.assertEqual(
+            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
+        )
+        self.assertEqual(result.config, _CONFIG)
+
+    def test_stores_no_config_tag_without_config(self) -> None:
+        result = save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+        )
+
+        self.assertNotIn("config", self.mlflow.versions[0].tags)
+        self.assertEqual(result.config, {})
+
+    def test_rejects_a_config_that_is_not_strings(self) -> None:
+        with self.assertRaises(ValueError):
+            save_model(
+                self.weights_dir, _FakeServeApp,
+                "instruct", "Qwen2",
+                run_id="r1", run_name="boogey-46",
+                config={"max_tokens": 1024},  # type: ignore[dict-item]
+            )
+
 
 class TestImportModel(unittest.TestCase):
     def setUp(self) -> None:
@@ -591,6 +630,47 @@ class TestImportModel(unittest.TestCase):
 
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
 
+    def test_first_import_stores_config(self) -> None:
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", config=_CONFIG
+        )
+
+        self.assertEqual(result.config, _CONFIG)
+        self.assertEqual(
+            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
+        )
+
+    def test_reimport_keeps_stored_config(self) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", config=_CONFIG
+        )
+        edited = {"model": "claude-sonnet-5"}
+        set_model_config("Qwen2", "base", IMPORTED, edited)
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", config=_CONFIG
+        )
+
+        self.assertEqual(result.config, edited)
+
+    def test_reimport_stores_config_on_a_model_without_it(self) -> None:
+        import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", config=_CONFIG
+        )
+
+        self.assertEqual(result.config, _CONFIG)
+
+    def test_reimport_without_config_keeps_the_stored_one(self) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", config=_CONFIG
+        )
+
+        result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
+
+        self.assertEqual(result.config, _CONFIG)
+
     def test_survives_deleting_a_run(self) -> None:
         self.mlflow.runs["r1"] = FakeRun("r1", "boogey-46")
         import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
@@ -737,6 +817,13 @@ class TestListModels(unittest.TestCase):
 
         self.assertEqual(result[0].requirements, ModelRequirements())
 
+    def test_defaults_config_for_untagged_version(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        result = list_models()
+
+        self.assertEqual(result[0].config, {})
+
 
 class TestSetModelRequirements(unittest.TestCase):
     def setUp(self) -> None:
@@ -763,6 +850,55 @@ class TestSetModelRequirements(unittest.TestCase):
             set_model_requirements(
                 "Qwen2", "instruct", "missing", _GPU_REQUIREMENTS
             )
+
+
+class TestModelConfig(unittest.TestCase):
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        for p in _patches(self.mlflow, self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_reads_back_what_was_stored(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        set_model_config("Qwen2", "instruct", "boogey-46", _CONFIG)
+
+        self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), _CONFIG)
+
+    def test_reads_empty_config_for_a_model_without_one(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), {})
+
+    def test_replaces_the_whole_mapping(self) -> None:
+        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        v.tags["config"] = json.dumps(_CONFIG)
+
+        set_model_config(
+            "Qwen2", "instruct", "boogey-46", {"model": "claude-sonnet-5"}
+        )
+
+        # api_key_secret was left out of the new mapping, so it is gone.
+        self.assertEqual(
+            model_config("Qwen2", "instruct", "boogey-46"),
+            {"model": "claude-sonnet-5"},
+        )
+
+    def test_rejects_a_blank_key(self) -> None:
+        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+
+        with self.assertRaises(ValueError):
+            set_model_config("Qwen2", "instruct", "boogey-46", {" ": "x"})
+
+    def test_set_raises_when_model_was_never_registered(self) -> None:
+        with self.assertRaises(ValueError):
+            set_model_config("Qwen2", "instruct", "missing", _CONFIG)
+
+    def test_read_raises_when_model_was_never_registered(self) -> None:
+        with self.assertRaises(ValueError):
+            model_config("Qwen2", "instruct", "missing")
 
 
 class TestModelRegistryStatus(unittest.TestCase):

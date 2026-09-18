@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from contextlib import ExitStack
 from typing import Any
@@ -215,6 +216,66 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         response = self._put(
             {"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0},
             path="/api/models/Qwen2/instruct/missing/requirements",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
+class TestModelConfigEndpoint(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        _reset_models_stream()
+        self.addCleanup(_reset_models_stream)
+        self.mlflow = FakeMlflowClient().seed(
+            model_versions=[_make_version("Qwen2", "instruct", "boogey-46")]
+        )
+
+    def _put(self, config: dict[str, str], path: str = "") -> Any:
+        with _patched_infra(FakeS3(), self.mlflow):
+            return self.client.put(
+                path or "/api/models/Qwen2/instruct/boogey-46/config",
+                json={"config": config},
+            )
+
+    def test_stores_the_config_on_the_model(self) -> None:
+        response = self._put({"model": "claude-opus-5"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            json.loads(self.mlflow.model_versions[0].tags["config"]),
+            {"model": "claude-opus-5"},
+        )
+
+    def test_pushes_the_edit_into_the_models_stream(self) -> None:
+        _seed_models_cache([_make_model("Qwen2", "instruct", "boogey-46")])
+
+        self._put({"model": "claude-opus-5"})
+
+        cached = models_stream.models_cache.get(models_stream.META_TOPIC)
+        self.assertEqual(
+            cached["Qwen2/instruct/boogey-46"].config, {"model": "claude-opus-5"}
+        )
+
+    def test_removes_a_key_left_out_of_the_mapping(self) -> None:
+        self._put({"model": "claude-opus-5", "region": "eu"})
+
+        self._put({"model": "claude-opus-5"})
+
+        self.assertEqual(
+            json.loads(self.mlflow.model_versions[0].tags["config"]),
+            {"model": "claude-opus-5"},
+        )
+
+    def test_rejects_a_blank_key(self) -> None:
+        response = self._put({" ": "x"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("config", self.mlflow.model_versions[0].tags)
+
+    def test_returns_404_for_a_model_that_is_not_registered(self) -> None:
+        response = self._put(
+            {"model": "claude-opus-5"},
+            path="/api/models/Qwen2/instruct/missing/config",
         )
 
         self.assertEqual(response.status_code, 404)

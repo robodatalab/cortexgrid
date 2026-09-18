@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import "./ModelDashboard.css";
-import type { Deployment, Model, ModelRequirements } from "./ModelsTree";
+import type {
+    Deployment,
+    Model,
+    ModelConfig,
+    ModelRequirements,
+} from "./ModelsTree";
 import {
     registryLabel,
     registryTier,
@@ -18,6 +23,7 @@ type Props = {
         model: Model,
         requirements: ModelRequirements,
     ) => Promise<void>;
+    onSaveConfig: (model: Model, config: ModelConfig) => Promise<void>;
 };
 
 // What the user is typing, before it is a number: an input cleared mid-edit
@@ -67,6 +73,41 @@ function isStored(
     );
 }
 
+// The config as the card edits it: an ordered list of pairs, so a key can be
+// renamed and an empty row can exist while it is being typed. The stored form
+// is an object, which has neither.
+type ConfigRow = { key: string; value: string };
+
+function toRows(config: ModelConfig): ConfigRow[] {
+    return Object.entries(config).map(([key, value]) => ({ key, value }));
+}
+
+function toConfig(rows: ConfigRow[]): ModelConfig {
+    return Object.fromEntries(rows.map(({ key, value }) => [key.trim(), value]));
+}
+
+// The same rules the backend enforces, checked here so the card explains the
+// problem instead of the save failing. Blank values are allowed.
+function problemWithConfig(rows: ConfigRow[]): string | null {
+    if (rows.some((row) => row.key.trim() === "")) {
+        return "Config keys cannot be blank.";
+    }
+    const keys = rows.map((row) => row.key.trim());
+    if (new Set(keys).size !== keys.length) {
+        return "Config keys must be unique.";
+    }
+    return null;
+}
+
+function isStoredConfig(rows: ConfigRow[], stored: ModelConfig): boolean {
+    const edited = toConfig(rows);
+    const keys = Object.keys(edited);
+    return (
+        keys.length === Object.keys(stored).length &&
+        keys.every((key) => stored[key] === edited[key])
+    );
+}
+
 function formatSize(bytes: number): string {
     if (bytes <= 0) return "—";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -91,6 +132,7 @@ export function ModelDashboard({
     onNavigateToDeployment,
     onDeploy,
     onSaveRequirements,
+    onSaveConfig,
 }: Props) {
     const servingTierValue = deployment ? servingTier(deployment.phase) : null;
     const regTier = registryTier(model.phase);
@@ -112,6 +154,19 @@ export function ModelDashboard({
         setFailure(null);
     }, [model.id, storedGpus, storedRam, storedVram]);
 
+    const storedConfig = model.config;
+    const [rows, setRows] = useState<ConfigRow[]>(() => toRows(storedConfig));
+    const [savingConfig, setSavingConfig] = useState(false);
+    const [configFailure, setConfigFailure] = useState<string | null>(null);
+    // Follow the model the card is showing, and what a save (here or in
+    // another dashboard) put in the stream. Keyed on the serialized mapping:
+    // the stream hands us a new object on every poll, equal or not.
+    const storedConfigJson = JSON.stringify(storedConfig);
+    useEffect(() => {
+        setRows(toRows(JSON.parse(storedConfigJson) as ModelConfig));
+        setConfigFailure(null);
+    }, [model.id, storedConfigJson]);
+
     const edited = parseDraft(draft);
     const problem = problemWith(edited);
     const canSave = edited !== null && problem === null && !isStored(edited, stored);
@@ -126,6 +181,22 @@ export function ModelDashboard({
             setFailure(err instanceof Error ? err.message : String(err));
         } finally {
             setSaving(false);
+        }
+    }
+
+    const configProblem = problemWithConfig(rows);
+    const canSaveConfig =
+        configProblem === null && !isStoredConfig(rows, storedConfig);
+
+    async function saveConfig() {
+        setSavingConfig(true);
+        setConfigFailure(null);
+        try {
+            await onSaveConfig(model, toConfig(rows));
+        } catch (err: unknown) {
+            setConfigFailure(err instanceof Error ? err.message : String(err));
+        } finally {
+            setSavingConfig(false);
         }
     }
 
@@ -240,6 +311,83 @@ export function ModelDashboard({
                 {(problem || failure) && (
                     <div className="model-dashboard__requirement-problem" role="alert">
                         {problem ?? failure}
+                    </div>
+                )}
+            </section>
+            <section className="model-dashboard__requirements">
+                <h2 className="model-dashboard__section-title">Config</h2>
+                <p className="model-dashboard__hint">
+                    Settings the serve-app reads when a replica starts - a
+                    provider's model name, an endpoint, the name of a secret it
+                    looks up. cortexgrid passes them through untouched. A change
+                    reaches the model on its next deploy.
+                </p>
+                <div className="model-dashboard__config-rows">
+                    {rows.map((row, i) => (
+                        <div className="model-dashboard__config-row" key={i}>
+                            <input
+                                aria-label={`Config key ${i + 1}`}
+                                placeholder="key"
+                                value={row.key}
+                                onChange={(e) =>
+                                    setRows(
+                                        rows.map((r, j) =>
+                                            j === i
+                                                ? { ...r, key: e.target.value }
+                                                : r,
+                                        ),
+                                    )
+                                }
+                            />
+                            <input
+                                aria-label={`Config value ${i + 1}`}
+                                placeholder="value"
+                                value={row.value}
+                                onChange={(e) =>
+                                    setRows(
+                                        rows.map((r, j) =>
+                                            j === i
+                                                ? { ...r, value: e.target.value }
+                                                : r,
+                                        ),
+                                    )
+                                }
+                            />
+                            <button
+                                type="button"
+                                className="model-dashboard__link"
+                                aria-label={`Remove config ${row.key || i + 1}`}
+                                onClick={() =>
+                                    setRows(rows.filter((_, j) => j !== i))
+                                }
+                            >
+                                Remove
+                            </button>
+                        </div>
+                    ))}
+                </div>
+                <div className="model-dashboard__config-actions">
+                    <button
+                        type="button"
+                        className="btn"
+                        aria-label="Add config"
+                        onClick={() => setRows([...rows, { key: "", value: "" }])}
+                    >
+                        Add
+                    </button>
+                    <button
+                        type="button"
+                        className="btn"
+                        aria-label="Save config"
+                        onClick={saveConfig}
+                        disabled={!canSaveConfig || savingConfig}
+                    >
+                        Save
+                    </button>
+                </div>
+                {(configProblem || configFailure) && (
+                    <div className="model-dashboard__requirement-problem" role="alert">
+                        {configProblem ?? configFailure}
                     </div>
                 )}
             </section>

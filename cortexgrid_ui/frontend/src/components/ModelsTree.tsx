@@ -10,6 +10,10 @@ export type ModelRequirements = {
     vram_gb: number;
 };
 
+// Free-form settings the serve-app reads at construction; cortexgrid stores
+// them on the registry entry without interpreting them.
+export type ModelConfig = Record<string, string>;
+
 export type Model = {
     id: string;
     family: string;
@@ -21,6 +25,7 @@ export type Model = {
     // Registry lifecycle phase: uploading | ready | upload_failed | broken.
     phase: string;
     requirements: ModelRequirements;
+    config: ModelConfig;
 };
 
 export type Deployment = {

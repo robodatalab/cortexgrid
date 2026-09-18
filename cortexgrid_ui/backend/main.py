@@ -23,7 +23,11 @@ from cortexgrid.model_serving import (
     model_serving_messages,
     undeploy_model,
 )
-from cortexgrid.model_storage import delete_model, set_model_requirements
+from cortexgrid.model_storage import (
+    delete_model,
+    set_model_config,
+    set_model_requirements,
+)
 from cortexgrid.ray_util import get_ray_logs
 from cortexgrid.secrets import (
     delete_secret,
@@ -97,6 +101,13 @@ class Requirements(BaseModel):
     num_gpus: int = 0
     ram_gb: float = 0.0
     vram_gb: float = 0.0
+
+
+class ModelConfig(BaseModel):
+    """Free-form settings the serve-app reads, as the dashboard edits them.
+    The whole mapping replaces what is stored, so a key left out is removed."""
+
+    config: dict[str, str] = {}
 
 
 class RunByName(BaseModel):
@@ -217,6 +228,31 @@ async def model_requirements_update(
             models_stream.META_TOPIC,
             model_id,
             replace(cached, requirements=requirements),
+        )
+    return {"status": "ok"}
+
+
+@app.put("/api/models/{family}/{suffix}/{run_name}/config")
+async def model_config_update(
+    family: str, suffix: str, run_name: str, body: ModelConfig
+) -> dict[str, str]:
+    # The same rule `set_model_config` enforces, checked here so a blank key
+    # reads as a bad request rather than a missing model.
+    if any(not key.strip() for key in body.config):
+        raise HTTPException(status_code=400, detail="Config keys cannot be blank")
+    try:
+        set_model_config(family, suffix, run_name, body.config)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # Push the edit into the stream so the dashboard shows it without waiting
+    # for the next sweep.
+    model_id = models_stream.model_id(family, suffix, run_name)
+    cached = models_stream.models_cache.get(models_stream.META_TOPIC).get(model_id)
+    if cached is not None:
+        await models_stream.models_refresher.update_or_insert(
+            models_stream.META_TOPIC,
+            model_id,
+            replace(cached, config=body.config),
         )
     return {"status": "ok"}
 
