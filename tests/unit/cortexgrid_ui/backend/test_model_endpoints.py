@@ -8,9 +8,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from cortexgrid.model_serving import ModelRequirements
+from cortexgrid.model_serving import ModelRequirements, ReplicaPlacement
 
 from cortexgrid_ui.backend.main import app
+from cortexgrid_ui.backend.models.infra_status import PodStatus
 from cortexgrid_ui.backend.streams import models_stream
 from cortexgrid_ui.backend.streams.models_stream import Model
 
@@ -192,8 +193,15 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         tags = self.mlflow.model_versions[0].tags
         self.assertEqual(
             (tags["num_gpus"], tags["ram_gb"], tags["vram_gb"]),
-            ("1", "16.0", "24.0"),
+            ("1.0", "16.0", "24.0"),
         )
+
+    def test_stores_a_fraction_of_a_gpu(self) -> None:
+        # A share of a card, so several small models can be served on one.
+        response = self._put({"num_gpus": 0.25, "ram_gb": 4.0, "vram_gb": 6.0})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.mlflow.model_versions[0].tags["num_gpus"], "0.25")
 
     def test_pushes_the_edit_into_the_models_stream(self) -> None:
         _seed_models_cache([_make_model("Qwen2", "instruct", "boogey-46")])
@@ -359,3 +367,81 @@ class TestDeploymentMessagesEndpoint(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDeploymentDevicesEndpoint(unittest.TestCase):
+    """The deployment card asks which machine each replica landed on. The
+    endpoint joins Ray's view (an address) to kubernetes' (a node and a health
+    verdict), so the card shows the same slate as the infrastructure tab
+    instead of forming its own opinion."""
+
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+
+    def _get(
+        self, placements: list[ReplicaPlacement], device: PodStatus | None
+    ) -> Any:
+        with (
+            patch(
+                "cortexgrid_ui.backend.main.model_replica_placements",
+                return_value=placements,
+            ),
+            patch(
+                "cortexgrid_ui.backend.main.device_for_ip", return_value=device
+            ) as lookup,
+        ):
+            response = self.client.get(
+                "/api/deployments/Qwen2/instruct/boogey-46/devices"
+            )
+        self.lookup = lookup
+        return response
+
+    @staticmethod
+    def _pod(healthy: bool = True) -> PodStatus:
+        return PodStatus(
+            name="ray-worker-abcde",
+            namespace="cortexgrid",
+            node="dgx-spark-01",
+            pod_ip="10.0.0.7",
+            state="Running",
+            health="ready" if healthy else "CrashLoopBackOff",
+            healthy=healthy,
+        )
+
+    def test_reports_the_machine_a_replica_runs_on(self) -> None:
+        placement = ReplicaPlacement(
+            replica_id="r1", state="RUNNING", node_id="n1", node_ip="10.0.0.7"
+        )
+
+        response = self._get([placement], self._pod())
+
+        self.assertEqual(response.status_code, 200)
+        [replica] = response.json()
+        self.assertEqual(replica["replica_id"], "r1")
+        self.assertEqual(replica["device"]["node"], "dgx-spark-01")
+
+    def test_carries_the_health_verdict_the_infra_tab_shows(self) -> None:
+        placement = ReplicaPlacement(
+            replica_id="r1", state="RUNNING", node_id="n1", node_ip="10.0.0.7"
+        )
+
+        response = self._get([placement], self._pod(healthy=False))
+
+        device = response.json()[0]["device"]
+        self.assertFalse(device["healthy"])
+        self.assertEqual(device["health"], "CrashLoopBackOff")
+
+    def test_a_replica_whose_host_is_unknown_still_appears(self) -> None:
+        # Losing the machine must not hide the replica from the card.
+        placement = ReplicaPlacement(
+            replica_id="r1", state="STARTING", node_id=None, node_ip="10.0.0.9"
+        )
+
+        response = self._get([placement], None)
+
+        [replica] = response.json()
+        self.assertEqual(replica["state"], "STARTING")
+        self.assertIsNone(replica["device"])
+
+    def test_a_deployment_with_no_replicas_reports_none(self) -> None:
+        self.assertEqual(self._get([], None).json(), [])

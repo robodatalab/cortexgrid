@@ -12,7 +12,11 @@ from typing import Any
 
 import requests  # type: ignore
 
-from cortexgrid.infra import get_ray_job_server_uri, get_ray_serve_applications_uri
+from cortexgrid.infra import (
+    get_ray_job_server_uri,
+    get_ray_nodes_uri,
+    get_ray_serve_applications_uri,
+)
 from ray.job_submission import JobSubmissionClient
 
 
@@ -153,6 +157,18 @@ def get_serve_details() -> dict[str, Any]:
     response = requests.get(get_ray_serve_applications_uri(), timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+def get_ray_nodes() -> list[dict[str, Any]]:
+    """GET the state API's view of the cluster's nodes.
+
+    One dict per node, carrying at least `node_id`, `node_ip`, `state`,
+    `labels` and `resources_total`. Raises for any non-2xx response
+    (HTTPError carries the body).
+    """
+    response = requests.get(get_ray_nodes_uri(), timeout=30)
+    response.raise_for_status()
+    return response.json()["data"]["result"]["result"]
 
 
 def put_serve_applications(applications: list[dict[str, Any]]) -> None:

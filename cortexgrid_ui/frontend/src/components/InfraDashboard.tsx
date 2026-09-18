@@ -1,17 +1,6 @@
 import { useEffect, useState } from 'react'
-import { TitledFrame } from './TitledFrame'
+import { DeviceCard, type PodStatus } from './DeviceCard'
 import './InfraDashboard.css'
-
-type PodStatus = {
-  name: string
-  namespace: string
-  kind: string
-  node: string | null
-  state: string
-  health: string
-  healthy: boolean
-  logs: string | null
-}
 
 type InfraStatus = {
   overall: boolean
@@ -49,29 +38,6 @@ function useInfraStatus(): LoadState {
   return state
 }
 
-function PodCard({ p }: { p: PodStatus }) {
-  const heartClass = p.healthy ? 'infra-card__heart--ok' : 'infra-card__heart--bad'
-  return (
-    <TitledFrame title={p.name}>
-      <div className="infra-card__meta">
-        <span className={`infra-card__heart ${heartClass}`}>♥</span>
-        <span>state: {p.state}</span>
-        <span>health: {p.health}</span>
-        <span>node: {p.node ?? '—'}</span>
-      </div>
-      {p.logs && (
-        <details className="infra-card__logs">
-          <summary>Recent logs</summary>
-          <pre>{p.logs}</pre>
-        </details>
-      )}
-      <div className="infra-card__footer">
-        <span className="infra-card__kind">{p.kind}</span>
-      </div>
-    </TitledFrame>
-  )
-}
-
 function groupByNamespace(pods: PodStatus[]): Map<string, PodStatus[]> {
   const groups = new Map<string, PodStatus[]>()
   for (const p of pods) {
@@ -100,7 +66,7 @@ export function InfraDashboard() {
         <section key={ns} className="infra-dashboard__namespace">
           <h2>{ns}</h2>
           <div className="infra-dashboard__grid">
-            {pods.map((p) => <PodCard key={`${ns}/${p.name}`} p={p} />)}
+            {pods.map((p) => <DeviceCard key={`${ns}/${p.name}`} pod={p} />)}
           </div>
         </section>
       ))}

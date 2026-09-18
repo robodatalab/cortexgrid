@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from cortexgrid_ui.backend.models.infra_status import (
     _classify,
     _collect_unreachable_nodes,
+    device_for_ip,
     get_infra_status,
 )
 
@@ -30,6 +31,7 @@ def _make_pod(
     phase="Running",
     containers_ready=True,
     waiting_reason=None,
+    pod_ip="10.0.0.1",
 ):
     if waiting_reason is not None:
         cs = [
@@ -45,7 +47,7 @@ def _make_pod(
     return SimpleNamespace(
         metadata=SimpleNamespace(name=name, namespace=namespace),
         spec=SimpleNamespace(node_name=node_name),
-        status=SimpleNamespace(phase=phase, container_statuses=cs),
+        status=SimpleNamespace(phase=phase, container_statuses=cs, pod_ip=pod_ip),
     )
 
 
@@ -166,6 +168,52 @@ class TestGetInfraStatus(unittest.TestCase):
         self.assertTrue(result.overall)
         self.assertEqual(len(result.pods), 1)
         self.assertEqual(result.pods[0].health, "ready")
+
+
+
+class TestDeviceForIp(unittest.TestCase):
+    """Ray knows only the address of the worker hosting a replica; this is what
+    turns it into a machine the deployment card can name."""
+
+    @patch("cortexgrid_ui.backend.models.infra_status._load_kube_config")
+    @patch("cortexgrid_ui.backend.models.infra_status.client.CoreV1Api")
+    def test_finds_the_worker_answering_to_the_address(self, mock_api_cls, _cfg):
+        pod = _make_pod(name="ray-worker-abcde", node_name="dgx-01", pod_ip="10.0.0.7")
+        mock_api_cls.return_value = _v1_with(pods=[pod])
+
+        device = device_for_ip("10.0.0.7")
+
+        assert device is not None
+        self.assertEqual((device.name, device.node), ("ray-worker-abcde", "dgx-01"))
+        self.assertTrue(device.healthy)
+
+    @patch("cortexgrid_ui.backend.models.infra_status._load_kube_config")
+    @patch("cortexgrid_ui.backend.models.infra_status.client.CoreV1Api")
+    def test_asks_the_cluster_only_for_that_address(self, mock_api_cls, _cfg):
+        # Listing every pod to find one would scale with the cluster, not with
+        # the deployment being looked at.
+        v1 = _v1_with(pods=[_make_pod(pod_ip="10.0.0.7")])
+        mock_api_cls.return_value = v1
+
+        device_for_ip("10.0.0.7")
+
+        self.assertEqual(
+            v1.list_pod_for_all_namespaces.call_args.kwargs["field_selector"],
+            "status.podIP=10.0.0.7",
+        )
+
+    @patch("cortexgrid_ui.backend.models.infra_status._load_kube_config")
+    @patch("cortexgrid_ui.backend.models.infra_status.client.CoreV1Api")
+    def test_an_address_the_cluster_does_not_know_is_no_device(
+        self, mock_api_cls, _cfg
+    ):
+        mock_api_cls.return_value = _v1_with(pods=[])
+
+        self.assertIsNone(device_for_ip("10.0.0.9"))
+
+    def test_a_replica_with_no_address_is_not_looked_up(self) -> None:
+        # Not placed yet: there is nothing to ask kubernetes about.
+        self.assertIsNone(device_for_ip(None))
 
 
 if __name__ == "__main__":

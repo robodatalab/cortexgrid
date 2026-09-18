@@ -184,6 +184,25 @@
     border-top: 1px solid #e5e5e5;
 }
 
+/* The deployment card's Devices section. Same framing as the requirements
+   block above it; the slates themselves come from DeviceCard.css. */
+.model-dashboard__devices {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e5e5;
+}
+
+.model-dashboard__devices-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.model-dashboard__devices-empty {
+    font-size: var(--font-sm);
+    color: #666;
+}
+
 .model-dashboard__section-title {
     font-size: var(--font-md);
     font-weight: 500;

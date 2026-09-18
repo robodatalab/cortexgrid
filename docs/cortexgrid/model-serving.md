@@ -71,13 +71,19 @@ cortexgrid.import_model(fetch, MyServeApp, family="qwen", suffix="base", require
 cortexgrid.set_model_requirements("qwen", "base", cortexgrid.IMPORTED, requirements)
 ```
 
-RAM and VRAM are in GiB, and all three fields default to 0, which means "no requirement": such a model runs anywhere, a CPU-only node included. `vram_gb` is the GPU memory across the replica's `num_gpus` GPUs and needs at least one GPU; negative values and VRAM without a GPU raise `ValueError`. Requirements are stored as tags on the `ModelVersion`, so `list_models` and the dashboard read them without touching the weights or importing the serve-app class:
+RAM and VRAM are in GiB, and all three fields default to 0, which means "no requirement": such a model runs anywhere, a CPU-only node included. `vram_gb` is the GPU memory across the replica's GPUs and needs a GPU share; negative values and VRAM without a GPU raise `ValueError`. Requirements are stored as tags on the `ModelVersion`, so `list_models` and the dashboard read them without touching the weights or importing the serve-app class:
 
 | Tag | Meaning |
 |---|---|
-| `num_gpus` | whole GPUs one replica gets |
+| `num_gpus` | GPUs one replica gets, whole or a fraction of one |
 | `ram_gb` | GiB of RAM reserved for one replica |
 | `vram_gb` | GiB of GPU memory across the replica's GPUs |
+
+### Sharing a GPU between models
+
+`num_gpus` is fractional, so a card is not all-or-nothing: `num_gpus=0.25` lets four replicas be served on one GPU. Ray subtracts the share from the node's `GPU` resource like any other, and a model saved before this stored a whole number, which still reads as one.
+
+What makes sharing safe is `vram_gb`, not `num_gpus`. Ray does not isolate co-located replicas - they are handed the same device and can each allocate all of its memory - so the fraction only decides how many may sit on a card, while the `vram_mib` reservation decides whether their combined memory actually fits. Set `vram_gb` honestly on a shared model: two replicas whose real usage exceeds the card will OOM each other, and the one that dies need not be the one that overallocated. Conversely a `num_gpus=1` model has a card to itself no matter how little VRAM it asks for.
 
 A model saved before requirements existed carries none of these tags and reads as no requirement.
 
@@ -92,9 +98,45 @@ A GPU with **unified memory** (e.g. the DGX Spark's GB10) has no memory of its o
 Two cluster-side limits shape what can actually be asked for:
 
 - Ray sizes a worker's `memory` from the pod's cgroup limit, so the worker pods carry no memory limit and Ray sees the host's own RAM. Ray keeps roughly 30% of it for its object store; the rest is what replicas can reserve.
-- A GPU worker gets one GPU, so a model needing `num_gpus > 1` has no node to land on today.
+- A GPU worker gets one GPU, so a model needing `num_gpus > 1` has no node to land on today. A fraction of one is fine - see [Sharing a GPU between models](#sharing-a-gpu-between-models).
 
 A requirement no node can satisfy is not an error: the app stays `deploying` until one frees up, or until `deploy_model(wait=True)` times out.
+
+### Which GPU it picks, when several fit
+
+Resources decide *whether* a node can host a replica; they say nothing about *which* of the nodes that can should. Ray's default policy is hybrid packing - it fills the first feasible node to about half its capacity, then spreads - so a 4 GiB model was as likely to land on a 128 GiB card as on a 12 GiB one, and the 128 GiB card was then unavailable for a model that genuinely needed it.
+
+So `deploy_model` asks for the smallest card that fits, and only moves up when the smaller ones are full. Each GPU worker sets the MiB it advertises as `vram_mib` as a **node label** of the same name, next to the resource. The two are deliberately different things:
+
+| | what it is | what it says |
+|---|---|---|
+| `vram_mib` resource | consumable, shrinks as replicas take it | how much of the card is still free |
+| `vram_mib` label | static, fixed at worker startup | how big the card is |
+
+`vram_tiers()` reduces the labels of the ALIVE nodes to the cluster's distinct GPU **size classes**, smallest first - one entry per size, not per node. `deploy_model` then hands the replica the smallest class the model fits in as `label_selector`, and the larger ones, in order, as `fallback_strategy`. For a 4 GiB model on a cluster of 12 GiB and 128 GiB cards:
+
+```python
+{"label_selector": {"vram_mib": "12282"},
+ "fallback_strategy": [{"label_selector": {"vram_mib": "131072"}}]}
+```
+
+A fallback fires on **exhaustion**, not merely on a size class being absent, which is what makes this "the smallest card that is free" rather than "the smallest card that exists". Verified on Ray 2.58 against a two-node cluster: of three 4 GiB replicas, two filled the 12282 MiB card (a third would need 12288 MiB) and the next spilled to the 128 GiB one. This is why `pyproject.toml` floors Ray at 2.58 - Ray Serve only accepts `label_selector` / `fallback_strategy` in a replica's `ray_actor_options` from 2.55 on.
+
+Three things follow from these being *preferences* over an unchanged reservation:
+
+- **Nothing is pinned to a node.** The selectors name a size class, not a machine, so a replica that has to restart is placed against whatever is alive then.
+- **The chain never goes stale silently.** Its last link is a catch-all excluding the sizes known to be *too small* (`!in(12282)`) rather than naming the ones that fit, so a larger card joining the cluster after a deploy is still placeable. It is dropped when no known size is too small, having nothing left to say. A model that no current card fits gets only the catch-all, so it waits for a big enough card instead of being offered one that cannot work.
+- **A model with no `vram_gb` gets no selector at all**, leaving it placeable on a CPU-only node - which carries no `vram_mib` label. The same is true when the cluster reports no GPU sizes, so a label-less cluster places exactly as it did before.
+
+The tiers are re-read on every `deploy_model`, so adding or removing a GPU changes the spec and re-PUTs it rather than being remembered from an earlier deploy.
+
+### Seeing where a replica actually landed
+
+`model_replica_placements(family, suffix, run_name)` reports one `ReplicaPlacement` per live replica - its id, its state, and the node Ray put it on. Ray already carries this under each deployment's `replicas` in the Serve details, so reading it costs nothing beyond the GET `model_serving_status` makes anyway.
+
+`node_ip` is the address of the Ray worker, which on the cluster is the ray-worker **pod's** IP - the DaemonSet does not use `hostNetwork`. That address alone does not name a machine, so the dashboard's `/api/deployments/{family}/{suffix}/{run_name}/devices` joins it to kubernetes with `infra_status.device_for_ip`, which looks the pod up by `status.podIP` and returns it with the same health verdict the Infrastructure Status tab computes. The deployment card renders it with the same `DeviceCard` slate that tab uses, so there is one rendering of a machine's health rather than two that can disagree.
+
+A replica Ray has not placed yet has no `node_ip`, and a worker that has since gone has one kubernetes no longer knows; both still appear on the card, without a device.
 
 ### Migrating a serve-app written before this
 
@@ -628,7 +670,6 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 ## Pending work
 
 - **Tear-down policy** for idle deployments. Today only explicit `undeploy_model` releases the GPU; consider an idle eviction policy when the registry has more deployable runs than cluster GPUs.
-- **Fractional GPUs.** `num_gpus` is a whole number, so a GPU model takes a whole GPU and `vram_gb` only filters which node it lands on. Making it fractional would let several small models share one card, with `vram_mib` doing the accounting.
 - **Multi-GPU replicas.** A worker gets one GPU, so `num_gpus > 1` cannot be placed until the DaemonSet hands a worker more than one.
 - **Stale-bundle GC.** Bundles for undeployed-but-not-deleted runs are not currently garbage-collected. If it becomes a problem, the cleanest signal is "no Serve application currently references this bundle URL"; implement at that point, not before.
 
@@ -643,7 +684,8 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | Caller -> cluster transport | Serve REST API (`/api/serve/applications/`) | (a) `ray.init` + `serve.run` in caller; (b) submit a Ray job that calls `serve.run` | (a) makes the caller a Ray driver - works on Ray nodes / jobs only, breaks on arc-runners; (b) decouples application lifetime from a job lifetime, then we'd have to babysit the job. REST keeps cortexgrid.model_serving HTTP-only and parallels how `cortexgrid.remote` talks to Ray Jobs. |
 | Where a replica's hardware needs live | `ModelRequirements` stored as tags on the `ModelVersion` | `num_gpus` / `num_replicas` class attributes on the serve-app | The hardware depends on the weights, not on the code fronting them, and the dashboard has to show and edit it - which the class attributes make impossible without importing the serve-app on the cluster. Tags come back with the registry query the dashboard already makes. The replica count is neither: it is a per-deploy choice, so it is an argument to `deploy_model`. |
 | How a model's non-weight settings reach the serve-app | a `config` string mapping on the `ModelVersion`, read at construction with `model_config` | (a) a fourth `__init__` argument bound by `_serve_entry.build`; (b) one MLflow tag per config key | (a) every serve-app's `__init__` would have to grow a parameter, and a bundle frozen before the change binds only three - the migration `ModelRequirements` needed; a lookup with the identifiers the app already holds needs neither. (b) MLflow constrains tag keys to its own charset and 250 characters, and dropping a key would need a tag deletion; one JSON object is replaced in a single write. |
-| VRAM accounting | a custom `vram_mib` Ray resource each GPU worker advertises from `nvidia-smi` | (a) cortexgrid picks a node itself and pins the replica to it; (b) Ray node labels + label selectors | (a) re-implements the scheduler and pins a replica to a node that may be gone by the next restart, with no reservation, so two deploys can both claim the same GPU. (b) filters but does not reserve, and the label-selector API is newer than the Ray versions cortexgrid supports. A consumable resource both filters and reserves. |
+| VRAM accounting | a custom `vram_mib` Ray resource each GPU worker advertises from `nvidia-smi` | cortexgrid picks a node itself and pins the replica to it | Pinning re-implements the scheduler and ties a replica to a node that may be gone by its next restart, and it reserves nothing, so two deploys can both claim the same GPU. A consumable resource both filters and reserves. |
+| Preferring the smallest card that fits | a static `vram_mib` node label per size class, ranked with `label_selector` + `fallback_strategy` | (a) rank the nodes in cortexgrid and pin with the `node:<ip>` resource; (b) rank on each node's *free* VRAM, read from `/api/cluster_status` | (a) is the rejected pinning above wearing a different hat: exact, but a replica whose node dies never reschedules. (b) is unnecessary once a fallback is known to fire on exhaustion rather than infeasibility (measured, see [Which GPU it picks](#which-gpu-it-picks-when-several-fit)), and it would depend on that endpoint's camelCased `usageByNode` mangling a custom resource name into `vramMib`. Labels keep Ray the scheduler, keep the reservation where it was, and are read from the state API's unmangled `/api/v0/nodes`. |
 | User-facing shape | user writes their own `@cortexgrid.serve.ingress` serve-app; cortexgrid only stores + deploys it | abstract `cortexgrid.Model` + generic `/infer` wrapper | A generic wrapper forces one request/response contract (unary JSON, fixed timeout) on every model. Real models need token streaming, multi-minute diffusion calls, and custom request schemas - all traffic concerns the serve-app must own. Letting cortexgrid own the wrapper collapsed those; the BYO serve-app keeps cortexgrid framework-free and imposes no HTTP shape. |
 | Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time, and `_IngressOnReplica` applies it again in each replica | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)), and importing `ray.serve` needs the `ray[serve]` extras wherever a serve-app is defined. (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. Its cost: the wrap runs outside the replica, which FastAPI >= 0.137 needs it in, hence the second application (see [On the replica](#on-the-replica)). |
 | Bundle timing | bundle the serve-app class at `save_model` time, persist URL+import path as MLflow tags | bundle at `deploy_model` time from a passed-in `cls` | Save-time bundling lets `deploy_model` callers be stateless - deploy from any process with just `(family, suffix, run_name)`. Re-pairing old weights with a new serve-app requires re-saving (acceptable: it forces an explicit decision and a fresh registry entry). |

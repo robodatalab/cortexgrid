@@ -30,17 +30,43 @@ function renderCard(
   )
 }
 
-function stubFetch(body: unknown) {
-  const fetch = vi.fn(() =>
+// The card fetches two endpoints; `bodies` maps a url fragment to what that
+// one answers, so a test can stub the devices call without also standing in
+// for the messages call.
+function stubFetch(body: unknown, devices: unknown = []) {
+  const fetch = vi.fn((url: string) =>
     Promise.resolve({
       ok: true,
       status: 200,
-      json: () => Promise.resolve(body),
+      json: () => Promise.resolve(url.endsWith('/devices') ? devices : body),
     } as Response),
   )
   vi.stubGlobal('fetch', fetch)
   return fetch
 }
+
+function urlsFetched(fetch: ReturnType<typeof stubFetch>): string[] {
+  return fetch.mock.calls.map(([url]) => url as string)
+}
+
+const runningOn = (node: string, healthy = true) => [
+  {
+    replica_id: 'r1',
+    state: 'RUNNING',
+    node_ip: '10.0.0.7',
+    device: {
+      name: 'ray-worker-abcde',
+      namespace: 'cortexgrid',
+      kind: 'pod',
+      node: node,
+      pod_ip: '10.0.0.7',
+      state: 'Running',
+      health: healthy ? 'ready' : 'CrashLoopBackOff',
+      healthy,
+      logs: null,
+    },
+  },
+]
 
 describe('DeploymentDashboard', () => {
   afterEach(() => {
@@ -92,9 +118,50 @@ describe('DeploymentDashboard', () => {
     )
   })
 
-  it('does not fetch messages for a running deployment', () => {
+  it('does not fetch messages for a running deployment', async () => {
     const fetch = stubFetch([])
     renderCard(true)
-    expect(fetch).not.toHaveBeenCalled()
+    await screen.findByText('Devices')
+
+    expect(urlsFetched(fetch)).not.toContain(
+      '/api/deployments/Qwen2/instruct/boogey-46/messages',
+    )
+  })
+
+  it('names the device a replica landed on', async () => {
+    stubFetch([], runningOn('dgx-spark-01'))
+    renderCard(true)
+
+    expect(await screen.findByText('dgx-spark-01')).toBeInTheDocument()
+    expect(screen.getByText('replica: RUNNING')).toBeInTheDocument()
+  })
+
+  it('shows the health of the device, not just its name', async () => {
+    stubFetch([], runningOn('dgx-spark-01', false))
+    renderCard(true)
+
+    expect(await screen.findByLabelText('unhealthy')).toBeInTheDocument()
+    expect(screen.getByText('health: CrashLoopBackOff')).toBeInTheDocument()
+  })
+
+  it('says so when no replica has been placed yet', async () => {
+    stubFetch([], [])
+    renderCard(true)
+
+    expect(
+      await screen.findByText('No replica is running yet.'),
+    ).toBeInTheDocument()
+  })
+
+  it('still shows a replica whose host the cluster does not know', async () => {
+    stubFetch([], [
+      { replica_id: 'r1', state: 'STARTING', node_ip: '10.0.0.9', device: null },
+    ])
+    renderCard(true)
+
+    expect(await screen.findByText('10.0.0.9')).toBeInTheDocument()
+    expect(
+      screen.getByText('host not found in the cluster'),
+    ).toBeInTheDocument()
   })
 })

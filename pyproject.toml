@@ -7,7 +7,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "ray[default]>=2.9,<3",
+    # 2.58 is the floor: the smallest-device scheduler uses node labels with
+    # `label_selector` / `fallback_strategy` in a replica's ray_actor_options,
+    # which Ray Serve only accepts from 2.55 on, and it is what the cluster image runs.
+    "ray[default]>=2.58,<3",
     "mlflow>=3.11,<4",
     "packaging>=24",
     "boto3>=1.34",

@@ -20,6 +20,15 @@ def get_ray_serve_applications_uri() -> str:
     return f"{get_ray_job_server_uri()}/api/serve/applications/"
 
 
+def get_ray_nodes_uri() -> str:
+    """Dashboard state-API endpoint listing the cluster's nodes.
+
+    Unlike the older `/nodes` dashboard route, this one reports each node's
+    labels and totals in snake_case, exactly as the raylet holds them.
+    """
+    return f"{get_ray_job_server_uri()}/api/v0/nodes"
+
+
 def get_s3_endpoint_url() -> str:
     # AWS profile: regional s3.amazonaws.com URL (stored as "" = no override).
     # On-prem: tailnet-reachable MinIO NodePort URL.

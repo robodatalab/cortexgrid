@@ -38,6 +38,7 @@ from ray.serve.schema import ApplicationStatus
 from cortexgrid._bundle import bundle, digest, stage, worker_provides
 from cortexgrid.infra import get_mlflow_tracking_uri, get_ray_serve_uri
 from cortexgrid.ray_util import (
+    get_ray_nodes,
     get_serve_details,
     put_serve_applications,
 )
@@ -218,10 +219,101 @@ _MIB_PER_GIB = 1024
 _GIB = 1024**3
 
 
-def _ray_actor_options(requirements: ModelRequirements) -> dict[str, Any]:
+# Node label each GPU worker sets to the same MiB it advertises as the
+# `_VRAM_RESOURCE` (see the ray-worker DaemonSet). The resource reserves VRAM;
+# the label names the size class of the node's GPUs, which is what lets a
+# replica ask for the smallest card that fits. Nodes with no GPU carry neither.
+_VRAM_LABEL = "vram_mib"
+
+
+def vram_tiers() -> list[int]:
+    """The distinct GPU sizes in the cluster, in MiB, smallest first.
+
+    One entry per size class, not per node: two 12 GiB workers are one tier.
+    Nodes that are not ALIVE, and nodes with no `vram_mib` label (CPU workers,
+    the head), contribute none - so a cluster with no GPUs reports no tiers.
+    """
+    tiers = set()
+    for node in get_ray_nodes():
+        if node.get("state") != "ALIVE":
+            continue
+        label = (node.get("labels") or {}).get(_VRAM_LABEL)
+        # A worker that could not size its GPUs never starts, so a malformed
+        # label means someone set it by hand; skip it rather than fail every
+        # deploy in the cluster.
+        if label is not None and label.isdigit():
+            tiers.add(int(label))
+    return sorted(tiers)
+
+
+def _placement_preferences(needed_mib: int, tiers: list[int]) -> list[dict[str, Any]]:
+    """The size classes a replica needing `needed_mib` should be offered, best
+    first: every tier large enough, smallest first, then a catch-all for any
+    tier that is not too small.
+
+    The catch-all is what keeps this from going stale. It excludes the sizes
+    known to be too small rather than naming the ones that fit, so a larger
+    GPU joining the cluster after this deploy is still placeable without a
+    redeploy. It is dropped when no known tier is too small, since there is
+    then nothing left for it to say.
+
+    Excluding rather than naming also matches a node carrying no `vram_mib`
+    label at all. That is harmless: a model reaching here has VRAM to reserve,
+    so it also requests `num_gpus` and `_VRAM_RESOURCE`, neither of which a
+    CPU-only node has. The resource request, not the selector, is what keeps
+    a GPU model off a CPU node.
+    """
+    # Sorted here rather than trusted from the caller: the whole contract is
+    # "smallest first", and it must not rest on how the tiers arrived.
+    ordered = sorted(tiers)
+    fits = [tier for tier in ordered if tier >= needed_mib]
+    too_small = [str(tier) for tier in ordered if tier < needed_mib]
+    preferences = [{_VRAM_LABEL: str(tier)} for tier in fits]
+    if too_small:
+        preferences.append({_VRAM_LABEL: f"!in({', '.join(too_small)})"})
+    return preferences
+
+
+def _placement_options(
+    requirements: ModelRequirements, tiers: list[int]
+) -> dict[str, Any]:
+    """Ask Ray for the smallest GPU that fits, falling back to larger ones.
+
+    `label_selector` names the smallest size class the model fits on, and
+    `fallback_strategy` the larger ones in order, so Ray reaches for a bigger
+    card only once every smaller one is out of VRAM. That a fallback fires on
+    exhaustion, and not merely on a size class being absent, is what makes
+    this "smallest that is free" rather than "smallest that exists"; checked
+    against Ray 2.58, which is the floor this package pins for it.
+
+    These only order the candidates. The reservation is still the `vram_mib`
+    resource, so two replicas can no more share a card's memory than before,
+    and a selector matching nothing leaves the replica pending exactly as an
+    unsatisfiable resource request does.
+
+    A model with no VRAM requirement gets no selector at all, so it stays
+    placeable on a CPU-only node - and so does every model when the cluster
+    reports no GPU sizes, which is the pre-label behaviour.
+    """
+    if requirements.vram_gb <= 0 or not tiers:
+        return {}
+    preferences = _placement_preferences(
+        round(requirements.vram_gb * _MIB_PER_GIB), tiers
+    )
+    first, *rest = preferences
+    options: dict[str, Any] = {"label_selector": first}
+    if rest:
+        options["fallback_strategy"] = [{"label_selector": r} for r in rest]
+    return options
+
+
+def _ray_actor_options(
+    requirements: ModelRequirements, tiers: list[int]
+) -> dict[str, Any]:
     """Translate ModelRequirements into a replica's Ray actor resource requests.
     Ray places the replica only on a node with that much free and reserves it
-    there; a zero requirement requests nothing."""
+    there; a zero requirement requests nothing. `tiers` are the cluster's GPU
+    size classes, which decide which node Ray prefers among those that fit."""
     options: dict[str, Any] = {"num_gpus": requirements.num_gpus}
     if requirements.ram_gb > 0:
         options["memory"] = int(requirements.ram_gb * _GIB)
@@ -229,6 +321,7 @@ def _ray_actor_options(requirements: ModelRequirements) -> dict[str, Any]:
         options["resources"] = {
             _VRAM_RESOURCE: round(requirements.vram_gb * _MIB_PER_GIB)
         }
+    options.update(_placement_options(requirements, tiers))
     return options
 
 
@@ -239,9 +332,10 @@ def _build_application_spec(
     meta: BundleMetadata,
     requirements: ModelRequirements,
     num_replicas: int,
+    tiers: list[int],
 ) -> dict[str, Any]:
-    """Assemble a Ray Serve application schema from pre-bundled metadata and
-    the model's requirements."""
+    """Assemble a Ray Serve application schema from pre-bundled metadata, the
+    model's requirements, and the cluster's GPU size classes."""
     # working_dir carries the serve-app's own source; Ray pip-installs the
     # third-party distributions the image lacks into a per-node cached
     # virtualenv layered on the image. No pip key when there are none, so Ray
@@ -263,7 +357,7 @@ def _build_application_spec(
             "suffix": suffix,
             "run_name": run_name,
             "num_replicas": num_replicas,
-            "ray_actor_options": _ray_actor_options(requirements),
+            "ray_actor_options": _ray_actor_options(requirements, tiers),
         },
         "runtime_env": runtime_env,
     }
@@ -312,9 +406,13 @@ class ModelRequirements:
     node, CPU-only included. Models saved before requirements existed carry
     no tags and read as the defaults."""
 
-    num_gpus: int = 0
+    # Fractional, so several models can share one card: 0.25 puts four
+    # replicas on a GPU. Ray does not isolate them - they all see the same
+    # device - so what keeps them from overcommitting its memory is `vram_gb`,
+    # which is reserved from the card's `vram_mib` and is the real limit.
+    num_gpus: float = 0.0
     ram_gb: float = 0.0
-    # GPU memory across the replica's num_gpus GPUs, so it needs num_gpus >= 1.
+    # GPU memory across the replica's num_gpus GPUs, so it needs a GPU share.
     vram_gb: float = 0.0
 
     def __post_init__(self) -> None:
@@ -322,7 +420,7 @@ class ModelRequirements:
             raise ValueError(f"Model requirements cannot be negative: {self}")
         if self.vram_gb > 0 and self.num_gpus == 0:
             raise ValueError(
-                f"vram_gb={self.vram_gb} needs a GPU; set num_gpus >= 1"
+                f"vram_gb={self.vram_gb} needs a GPU; set num_gpus > 0"
             )
 
 
@@ -351,7 +449,9 @@ def requirements_from_tags(tags: dict[str, str]) -> ModelRequirements:
     """Deserialise ModelRequirements from a ModelVersion's MLflow tags; a
     missing tag reads as no requirement."""
     return ModelRequirements(
-        num_gpus=int(tags.get(_NUM_GPUS_TAG, "0")),
+        # float, not int: models saved before GPUs could be shared stored a
+        # whole number, which parses as one.
+        num_gpus=float(tags.get(_NUM_GPUS_TAG, "0")),
         ram_gb=float(tags.get(_RAM_GB_TAG, "0")),
         vram_gb=float(tags.get(_VRAM_GB_TAG, "0")),
     )
@@ -540,8 +640,11 @@ def deploy_model(
     """
     deadline = _deadline(timeout)
     meta, requirements = _load_deploy_metadata(family, suffix, run_name)
+    # Read afresh on every deploy: the tiers are what the model is placed
+    # against, so a GPU joining or leaving the cluster has to change the spec
+    # (and therefore re-PUT it), not be remembered from an earlier call.
     spec = _build_application_spec(
-        family, suffix, run_name, meta, requirements, num_replicas
+        family, suffix, run_name, meta, requirements, num_replicas, vram_tiers()
     )
     _clear_failed_application(family, suffix, run_name, timeout, deadline)
     if not _spec_already_deployed(spec):
@@ -651,6 +754,48 @@ def model_serving_status(
         message=str(app.get("message", "")) or raw,
         url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
     )
+
+
+@dataclass
+class ReplicaPlacement:
+    """Where one replica of a model's Serve app ended up.
+
+    `node_ip` is the address of the Ray worker running it, which on the
+    cluster is the ray-worker pod's IP - the dashboard joins on it to name the
+    machine and report its health. It is None for a replica the controller has
+    accepted but not yet placed."""
+
+    replica_id: str
+    state: str
+    node_id: str | None
+    node_ip: str | None
+
+
+def model_replica_placements(
+    family: str, suffix: str, run_name: str
+) -> list[ReplicaPlacement]:
+    """Report which worker each of a model's replicas is running on.
+
+    This is what the requirements and the size-class preferences actually
+    resolved to: `deploy_model` asks for the smallest GPU that fits, and this
+    is the card it got. Empty when no app exists, and while an app is
+    `deploying` it fills in as replicas are placed.
+    """
+    app = get_serve_details().get("applications", {}).get(
+        _app_name(family, suffix, run_name)
+    )
+    if app is None:
+        return []
+    return [
+        ReplicaPlacement(
+            replica_id=str(replica.get("replica_id", "")),
+            state=str(replica.get("state", "")),
+            node_id=replica.get("node_id"),
+            node_ip=replica.get("node_ip"),
+        )
+        for deployment in app.get("deployments", {}).values()
+        for replica in deployment.get("replicas", [])
+    ]
 
 
 @dataclass
