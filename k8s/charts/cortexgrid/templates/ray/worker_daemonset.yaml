@@ -66,6 +66,13 @@ spec:
           # (see cortexgrid.model_serving), so Ray places it only on a node
           # whose GPUs have that much memory left.
           #
+          # The same number is also set as a node *label*. The resource is
+          # consumable and says how much is left; the label is static and says
+          # how big the card is. cortexgrid.model_serving.vram_tiers reads the
+          # labels to offer a replica the smallest card that fits before any
+          # larger one, which the resource alone cannot express - it only
+          # filters, it does not rank.
+          #
           # A GPU with unified memory (e.g. the DGX Spark's GB10) has none of
           # its own - it shares the host's - and nvidia-smi reports "[N/A]" for
           # it. There the host's RAM is what the GPU can use, so it is
@@ -93,6 +100,7 @@ spec:
                 --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }} \
                 --num-gpus=1 \
                 --resources="{\"vram_mib\": $vram_mib}" \
+                --labels="vram_mib=$vram_mib" \
                 --block
           {{- else }}
           command:

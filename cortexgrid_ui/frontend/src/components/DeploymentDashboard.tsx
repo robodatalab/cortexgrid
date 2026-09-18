@@ -2,6 +2,7 @@
 // visual language as the registry card) but is driven purely by a Deployment.
 import { useEffect, useState } from "react";
 import "./ModelDashboard.css";
+import { DeviceCard, type PodStatus } from "./DeviceCard";
 import type { Deployment } from "./ModelsTree";
 import { TitledFrame } from "./TitledFrame";
 import { deploymentId } from "../ids";
@@ -42,6 +43,55 @@ function rayDashboardUrl(d: Deployment): string {
 function grafanaUrl(d: Deployment): string {
     const params = new URLSearchParams({ "var-Application": appName(d) });
     return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
+}
+
+// One replica and the machine serving it (backend ReplicaDevice). `device` is
+// null while Ray has yet to place the replica, and for a worker kubernetes no
+// longer knows.
+type ReplicaDevice = {
+    replica_id: string;
+    state: string;
+    node_ip: string | null;
+    device: PodStatus | null;
+};
+
+function devicesUrl(d: Deployment): string {
+    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/devices`;
+}
+
+// Which machines the deployment's replicas landed on, repolled while it is
+// live: replicas move as they restart, and a device's health changes under
+// them. Results are tagged with the url they were fetched for, so a response
+// for a deployment the user has navigated away from is never shown.
+function useReplicaDevices(deployment: Deployment): ReplicaDevice[] | null {
+    const url = devicesUrl(deployment);
+    const [loaded, setLoaded] = useState<{
+        url: string;
+        devices: ReplicaDevice[];
+    } | null>(null);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const poll = () => {
+            fetch(url, { signal: controller.signal })
+                .then((r) => (r.ok ? (r.json() as Promise<ReplicaDevice[]>) : null))
+                .then((devices) => {
+                    if (devices) setLoaded({ url, devices });
+                })
+                .catch((err: unknown) => {
+                    if (err instanceof DOMException && err.name === "AbortError")
+                        return;
+                });
+        };
+        poll();
+        const id = window.setInterval(poll, 10_000);
+        return () => {
+            controller.abort();
+            window.clearInterval(id);
+        };
+    }, [url]);
+
+    return loaded?.url === url ? loaded.devices : null;
 }
 
 function messagesUrl(d: Deployment): string {
@@ -89,6 +139,7 @@ export function DeploymentDashboard({
 }: Props) {
     const tier = servingTier(deployment.phase);
     const messages = useServingMessages(deployment);
+    const devices = useReplicaDevices(deployment);
     return (
         <div className="model-dashboard">
             <header className="model-dashboard__header">
@@ -165,6 +216,48 @@ export function DeploymentDashboard({
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
             </dl>
+            <section className="model-dashboard__devices">
+                <h2 className="model-dashboard__section-title">Devices</h2>
+                <p className="model-dashboard__hint">
+                    Where this deployment's replicas are running. A model is
+                    placed on the smallest GPU that fits it, so this is the card
+                    its requirements actually resolved to.
+                </p>
+                {devices === null ? (
+                    <div className="model-dashboard__devices-empty">Loading…</div>
+                ) : devices.length === 0 ? (
+                    <div className="model-dashboard__devices-empty">
+                        No replica is running yet.
+                    </div>
+                ) : (
+                    <div className="model-dashboard__devices-grid">
+                        {devices.map((replica) =>
+                            replica.device ? (
+                                <DeviceCard
+                                    key={replica.replica_id}
+                                    pod={replica.device}
+                                    title={replica.device.node ?? replica.device.name}
+                                    leading={<span>replica: {replica.state}</span>}
+                                />
+                            ) : (
+                                <TitledFrame
+                                    key={replica.replica_id}
+                                    title={replica.node_ip ?? "Not placed"}
+                                >
+                                    <div className="infra-card__meta">
+                                        <span>replica: {replica.state}</span>
+                                        <span>
+                                            {replica.node_ip
+                                                ? "host not found in the cluster"
+                                                : "awaiting a device"}
+                                        </span>
+                                    </div>
+                                </TitledFrame>
+                            ),
+                        )}
+                    </div>
+                )}
+            </section>
             {messages !== null && (
                 <section className="model-dashboard__messages">
                     {messages.length === 0 ? (

@@ -22,11 +22,14 @@ from cortexgrid.model_serving import (
     ServeBundle,
     _build_application_spec,
     _load_deploy_metadata,
+    _placement_options,
+    vram_tiers,
     build_bundle,
     bundle_class,
     deploy_model,
     list_deployed_models,
     metadata_to_tags,
+    model_replica_placements,
     model_serving_messages,
     model_serving_status,
     requirements_from_tags,
@@ -42,6 +45,12 @@ _FAKE_META = BundleMetadata(
 )
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+# The GPU size classes a cluster reports: a 12 GiB card and a 128 GiB one, the
+# shape the smallest-device placement exists for.
+_SMALL_TIER = 12282
+_BIG_TIER = 131072
+_TIERS = [_SMALL_TIER, _BIG_TIER]
 
 
 class FakeServeState:
@@ -75,6 +84,7 @@ def _stub_build_spec(
     meta: BundleMetadata,
     requirements: ModelRequirements,
     num_replicas: int,
+    tiers: list[int],
 ) -> dict[str, Any]:
     return {
         "name": f"{family}__{suffix}__{run_name}",
@@ -105,6 +115,10 @@ class TestModelServing(unittest.TestCase):
                 "cortexgrid.model_serving._load_deploy_metadata",
                 return_value=(_FAKE_META, _GPU_REQUIREMENTS),
             ),
+            patch(
+                "cortexgrid.model_serving.vram_tiers",
+                return_value=_TIERS,
+            ),
         ]
         for p in patches:
             p.start()
@@ -120,13 +134,13 @@ class TestModelServing(unittest.TestCase):
         deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=3)
 
         self.build_spec.assert_called_once_with(
-            "Qwen2", "instruct", "boogey-46", _FAKE_META, _GPU_REQUIREMENTS, 3
+            "Qwen2", "instruct", "boogey-46", _FAKE_META, _GPU_REQUIREMENTS, 3, _TIERS
         )
 
     def test_deploy_runs_one_replica_by_default(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
 
-        self.assertEqual(self.build_spec.call_args.args[-1], 1)
+        self.assertEqual(self.build_spec.call_args.args[-2], 1)
 
     def test_deployed_model_appears_in_listings(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -677,7 +691,7 @@ class TestServeDependencies(unittest.TestCase):
         )
 
         spec = _build_application_spec(
-            "fam", "suf", "run", meta, ModelRequirements(), 1
+            "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(
@@ -688,14 +702,14 @@ class TestServeDependencies(unittest.TestCase):
     def test_spec_without_pip_requirements_has_no_pip_key(self) -> None:
         # A pip key, even an empty one, makes Ray build a virtualenv.
         spec = _build_application_spec(
-            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1
+            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(spec["runtime_env"], {"working_dir": _FAKE_META.bundle_url})
 
     def test_spec_requests_the_requirements_from_ray(self) -> None:
         spec = _build_application_spec(
-            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2
+            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
         self.assertEqual(spec["args"]["num_replicas"], 2)
@@ -705,12 +719,18 @@ class TestServeDependencies(unittest.TestCase):
                 "num_gpus": 1,
                 "memory": 16 * 1024**3,
                 "resources": {"vram_mib": 24 * 1024},
+                # 24 GiB does not fit the 12 GiB tier, so the big one is the
+                # only candidate and the small one is what the catch-all bars.
+                "label_selector": {"vram_mib": str(_BIG_TIER)},
+                "fallback_strategy": [
+                    {"label_selector": {"vram_mib": f"!in({_SMALL_TIER})"}}
+                ],
             },
         )
 
     def test_spec_without_requirements_requests_no_resources(self) -> None:
         spec = _build_application_spec(
-            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1
+            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(spec["args"]["ray_actor_options"], {"num_gpus": 0})
@@ -782,7 +802,7 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
 
     def test_gpu_spec_survives_the_round_trip_unchanged(self) -> None:
         spec = _build_application_spec(
-            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2
+            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
         self.assertEqual(self._round_trip(spec), spec)
@@ -794,9 +814,170 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
             pip_requirements=["tqdm==4.67.3"],
         )
 
-        spec = _build_application_spec("fam", "suf", "run", meta, ModelRequirements(), 1)
+        spec = _build_application_spec(
+            "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
+        )
 
         self.assertEqual(self._round_trip(spec), spec)
+
+
+class TestReplicaPlacements(unittest.TestCase):
+    """`model_replica_placements` reports which worker each replica landed on -
+    what the requirements and the size-class preferences resolved to."""
+
+    def _placements(self, app: dict[str, Any] | None) -> list[Any]:
+        details = {"applications": {"fam__suf__run": app} if app else {}}
+        with patch(
+            "cortexgrid.model_serving.get_serve_details", return_value=details
+        ):
+            return model_replica_placements("fam", "suf", "run")
+
+    def test_reports_the_worker_each_replica_runs_on(self) -> None:
+        placements = self._placements(
+            {
+                "deployments": {
+                    "Model": {
+                        "replicas": [
+                            {
+                                "replica_id": "r1",
+                                "state": "RUNNING",
+                                "node_id": "n1",
+                                "node_ip": "10.0.0.7",
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+
+        self.assertEqual(
+            [(p.replica_id, p.state, p.node_ip) for p in placements],
+            [("r1", "RUNNING", "10.0.0.7")],
+        )
+
+    def test_reports_every_replica_across_deployments(self) -> None:
+        placements = self._placements(
+            {
+                "deployments": {
+                    "A": {"replicas": [{"replica_id": "r1"}, {"replica_id": "r2"}]},
+                    "B": {"replicas": [{"replica_id": "r3"}]},
+                }
+            }
+        )
+
+        self.assertEqual([p.replica_id for p in placements], ["r1", "r2", "r3"])
+
+    def test_a_replica_not_placed_yet_has_no_node(self) -> None:
+        # The controller has the replica but Ray has not found it a device.
+        placements = self._placements(
+            {"deployments": {"Model": {"replicas": [{"replica_id": "r1"}]}}}
+        )
+
+        self.assertIsNone(placements[0].node_ip)
+
+    def test_a_model_that_is_not_deployed_has_no_placements(self) -> None:
+        self.assertEqual(self._placements(None), [])
+
+
+class TestSmallestDevicePlacement(unittest.TestCase):
+    """`_placement_options` ranks the cluster's GPU size classes for one model.
+
+    It only orders the candidates - the `vram_mib` resource is still what
+    reserves the memory - so every case here is about which tier Ray is asked
+    for first, and about what remains placeable when the cluster changes under
+    a deploy.
+    """
+
+    def _options(self, vram_gb: float, tiers: list[int]) -> dict[str, Any]:
+        return _placement_options(
+            ModelRequirements(num_gpus=1, vram_gb=vram_gb), tiers
+        )
+
+    def _order(self, vram_gb: float, tiers: list[int]) -> list[str]:
+        """The tiers Ray is offered, best first, as bare selector values."""
+        options = self._options(vram_gb, tiers)
+        if not options:
+            return []
+        chain = [options["label_selector"]] + [
+            f["label_selector"] for f in options.get("fallback_strategy", [])
+        ]
+        return [selector["vram_mib"] for selector in chain]
+
+    def test_small_model_is_offered_the_smallest_card_first(self) -> None:
+        # The whole point: 4 GiB fits both cards, and the 12 GiB one must be
+        # asked for before the 128 GiB one.
+        self.assertEqual(self._order(4.0, _TIERS), [str(_SMALL_TIER), str(_BIG_TIER)])
+
+    def test_larger_cards_follow_in_ascending_order(self) -> None:
+        self.assertEqual(
+            self._order(4.0, [_BIG_TIER, 24564, _SMALL_TIER])[:3],
+            [str(_SMALL_TIER), "24564", str(_BIG_TIER)],
+        )
+
+    def test_a_card_too_small_is_never_offered(self) -> None:
+        self.assertNotIn(str(_SMALL_TIER), self._order(24.0, _TIERS))
+
+    def test_a_model_no_card_fits_is_left_to_the_catch_all(self) -> None:
+        # Nothing in the cluster is big enough today. Rather than name a tier
+        # that cannot work, bar the ones that cannot and let a bigger card
+        # joining later pick it up.
+        self.assertEqual(
+            self._order(512.0, _TIERS), [f"!in({_SMALL_TIER}, {_BIG_TIER})"]
+        )
+
+    def test_catch_all_is_dropped_when_every_card_fits(self) -> None:
+        # With nothing too small to exclude the catch-all would say nothing.
+        self.assertEqual(self._order(1.0, _TIERS), [str(_SMALL_TIER), str(_BIG_TIER)])
+
+    def test_a_model_needing_no_vram_is_not_confined_to_a_gpu(self) -> None:
+        # A CPU-only model must stay placeable on a node that has no GPU, and
+        # so carries no vram_mib label at all.
+        self.assertEqual(_placement_options(ModelRequirements(), _TIERS), {})
+
+    def test_a_cluster_reporting_no_sizes_places_as_it_did_before(self) -> None:
+        self.assertEqual(self._options(4.0, []), {})
+
+    def test_the_request_is_rounded_the_same_way_as_the_reservation(self) -> None:
+        # vram_gb 11.994 -> 12281 MiB, which the 12282 MiB card fits. Ranking
+        # the tiers on a differently-rounded number than the resource request
+        # would offer a card the reservation then rejects.
+        self.assertEqual(self._order(11.994, _TIERS)[0], str(_SMALL_TIER))
+
+
+class TestVramTiers(unittest.TestCase):
+    """`vram_tiers` reduces the cluster's nodes to the distinct GPU sizes."""
+
+    def _tiers(self, nodes: list[dict[str, Any]]) -> list[int]:
+        with patch("cortexgrid.model_serving.get_ray_nodes", return_value=nodes):
+            return vram_tiers()
+
+    @staticmethod
+    def _node(state: str = "ALIVE", **labels: str) -> dict[str, Any]:
+        return {"node_id": "n", "state": state, "labels": labels}
+
+    def test_identical_cards_collapse_to_one_tier(self) -> None:
+        nodes = [self._node(vram_mib="12282") for _ in range(3)]
+
+        self.assertEqual(self._tiers(nodes), [_SMALL_TIER])
+
+    def test_tiers_come_back_smallest_first(self) -> None:
+        nodes = [self._node(vram_mib="131072"), self._node(vram_mib="12282")]
+
+        self.assertEqual(self._tiers(nodes), [_SMALL_TIER, _BIG_TIER])
+
+    def test_a_dead_node_is_not_a_tier(self) -> None:
+        # Its card is gone, so offering it would strand the replica.
+        nodes = [self._node(vram_mib="12282"), self._node("DEAD", vram_mib="131072")]
+
+        self.assertEqual(self._tiers(nodes), [_SMALL_TIER])
+
+    def test_nodes_without_a_gpu_contribute_nothing(self) -> None:
+        self.assertEqual(self._tiers([self._node(), {"state": "ALIVE"}]), [])
+
+    def test_a_hand_set_label_that_is_not_a_size_is_skipped(self) -> None:
+        nodes = [self._node(vram_mib="huge"), self._node(vram_mib="12282")]
+
+        self.assertEqual(self._tiers(nodes), [_SMALL_TIER])
 
 
 class TestModelRequirements(unittest.TestCase):
@@ -819,6 +1000,32 @@ class TestModelRequirements(unittest.TestCase):
     def test_rejects_vram_without_a_gpu(self) -> None:
         with self.assertRaises(ValueError):
             ModelRequirements(num_gpus=0, vram_gb=8.0)
+
+    def test_a_share_of_a_gpu_round_trips(self) -> None:
+        # 0.25 of a card: four such replicas are served on one GPU, with
+        # vram_gb keeping them from overcommitting its memory.
+        shared = ModelRequirements(num_gpus=0.25, ram_gb=4.0, vram_gb=6.0)
+
+        self.assertEqual(requirements_from_tags(requirements_to_tags(shared)), shared)
+
+    def test_a_share_of_a_gpu_satisfies_the_vram_rule(self) -> None:
+        self.assertEqual(ModelRequirements(num_gpus=0.5, vram_gb=6.0).num_gpus, 0.5)
+
+    def test_a_whole_number_saved_before_sharing_still_reads(self) -> None:
+        self.assertEqual(requirements_from_tags({"num_gpus": "1"}).num_gpus, 1.0)
+
+    def test_a_share_is_requested_from_ray_as_it_was_stored(self) -> None:
+        spec = _build_application_spec(
+            "fam",
+            "suf",
+            "run",
+            _FAKE_META,
+            ModelRequirements(num_gpus=0.25, vram_gb=6.0),
+            1,
+            _TIERS,
+        )
+
+        self.assertEqual(spec["args"]["ray_actor_options"]["num_gpus"], 0.25)
 
 
 if __name__ == "__main__":

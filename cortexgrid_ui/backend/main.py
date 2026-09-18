@@ -20,6 +20,7 @@ from cortexgrid.model_serving import (
     ModelRequirements,
     ServingMessage,
     deploy_model,
+    model_replica_placements,
     model_serving_messages,
     undeploy_model,
 )
@@ -45,7 +46,12 @@ from cortexgrid_ui.backend.models.notes import (
     delete_experiment_notes_for_experiment,
     delete_run_notes_for_run,
 )
-from cortexgrid_ui.backend.models.infra_status import InfraStatus, get_infra_status
+from cortexgrid_ui.backend.models.infra_status import (
+    InfraStatus,
+    PodStatus,
+    device_for_ip,
+    get_infra_status,
+)
 from cortexgrid_ui.backend.streams import (
     deployments_stream,
     experiment_notes_stream,
@@ -98,7 +104,8 @@ class NoteBody(BaseModel):
 class Requirements(BaseModel):
     """Hardware one replica of a model needs, as the dashboard edits it."""
 
-    num_gpus: int = 0
+    # Fractional: a share of a card, not only whole ones.
+    num_gpus: float = 0.0
     ram_gb: float = 0.0
     vram_gb: float = 0.0
 
@@ -274,6 +281,35 @@ def deployment_messages(
     family: str, suffix: str, run_name: str
 ) -> list[ServingMessage]:
     return model_serving_messages(family, suffix, run_name)
+
+
+class ReplicaDevice(BaseModel):
+    """One replica of a deployment and the machine serving it.
+
+    `device` is the worker pod as the Infrastructure Status tab reports it, so
+    the deployment card can show the same health verdict rather than inventing
+    a second one. It is null for a replica Ray has not placed yet, and for one
+    whose worker kubernetes no longer knows."""
+
+    replica_id: str
+    state: str
+    node_ip: str | None = None
+    device: PodStatus | None = None
+
+
+@app.get("/api/deployments/{family}/{suffix}/{run_name}/devices")
+def deployment_devices(
+    family: str, suffix: str, run_name: str
+) -> list[ReplicaDevice]:
+    return [
+        ReplicaDevice(
+            replica_id=placement.replica_id,
+            state=placement.state,
+            node_ip=placement.node_ip,
+            device=device_for_ip(placement.node_ip),
+        )
+        for placement in model_replica_placements(family, suffix, run_name)
+    ]
 
 
 @app.delete("/api/models/{family}")

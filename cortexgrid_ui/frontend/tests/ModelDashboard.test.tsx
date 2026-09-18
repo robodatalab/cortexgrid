@@ -154,6 +154,23 @@ describe('ModelDashboard', () => {
     })
   })
 
+  it('accepts a fraction of a GPU so models can share a card', async () => {
+    const onSaveRequirements = vi.fn().mockResolvedValue(undefined)
+    const model = makeModel('ready', { num_gpus: 1, ram_gb: 16, vram_gb: 24 })
+    renderCard(model, null, { onSaveRequirements })
+
+    await userEvent.clear(requirementField('GPUs'))
+    await userEvent.type(requirementField('GPUs'), '0.25')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onSaveRequirements).toHaveBeenCalledWith(model, {
+      num_gpus: 0.25,
+      ram_gb: 16,
+      vram_gb: 24,
+    })
+  })
+
   it('keeps Save disabled until a requirement changes', async () => {
     renderCard(makeModel('ready', { num_gpus: 1, ram_gb: 16, vram_gb: 24 }), null)
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -172,7 +189,7 @@ describe('ModelDashboard', () => {
     await userEvent.type(requirementField('VRAM (GiB)'), '24')
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'VRAM needs a GPU: set GPUs to at least 1.',
+      'VRAM needs a GPU: set GPUs above 0.',
     )
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(onSaveRequirements).not.toHaveBeenCalled()

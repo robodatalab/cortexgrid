@@ -52,11 +52,9 @@ function parseDraft(draft: Draft): ModelRequirements | null {
 // dashboard explains the problem instead of the save failing.
 function problemWith(requirements: ModelRequirements | null): string | null {
     if (requirements === null) return "Requirements must be zero or more.";
-    if (!Number.isInteger(requirements.num_gpus)) {
-        return "GPUs must be a whole number.";
-    }
+    // GPUs are fractional on purpose: 0.5 shares a card with another model.
     if (requirements.vram_gb > 0 && requirements.num_gpus === 0) {
-        return "VRAM needs a GPU: set GPUs to at least 1.";
+        return "VRAM needs a GPU: set GPUs above 0.";
     }
     return null;
 }
@@ -293,10 +291,13 @@ export function ModelDashboard({
                 <h2 className="model-dashboard__section-title">Requirements</h2>
                 <p className="model-dashboard__hint">
                     What one replica needs to be served. A model is deployed only
-                    on a host that has it free; 0 means no requirement.
+                    on a host that has it free, and on the smallest GPU that
+                    fits; 0 means no requirement. GPUs can be a fraction (0.5
+                    shares a card with another model) - VRAM is what stops two
+                    models overcommitting the same card.
                 </p>
                 <div className="model-dashboard__requirement-fields">
-                    {field("num_gpus", "GPUs", "1")}
+                    {field("num_gpus", "GPUs", "0.25")}
                     {field("ram_gb", "RAM (GiB)", "0.5")}
                     {field("vram_gb", "VRAM (GiB)", "0.5")}
                     <button

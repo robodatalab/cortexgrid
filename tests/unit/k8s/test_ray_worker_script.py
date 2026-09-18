@@ -93,6 +93,28 @@ class RayWorkerScriptTest(unittest.TestCase):
         self.assertIn(f'--resources={{"vram_mib": {MEMINFO_MIB}}}', result.stdout)
         self.assertIn("shares with the host", result.stderr)
 
+    def test_the_node_label_always_matches_the_resource(self) -> None:
+        """The label names the card's size and the resource reserves from it.
+        cortexgrid ranks the tiers on the label and reserves on the resource
+        (see `_placement_options`), so if the two ever disagreed a replica
+        would be offered a card the reservation then refuses."""
+        for nvidia_smi in (
+            "echo 12282",
+            'printf "12282\\n24564\\n"',
+            'echo "[N/A]"',
+        ):
+            with self.subTest(nvidia_smi=nvidia_smi):
+                result = self.run_script(nvidia_smi)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                advertised = re.search(
+                    r'--resources=\{"vram_mib": (\d+)\}', result.stdout
+                )
+                assert advertised is not None, result.stdout
+                self.assertIn(
+                    f"--labels=vram_mib={advertised.group(1)}", result.stdout
+                )
+
     def test_no_gpu_at_all_fails_instead_of_joining(self) -> None:
         # A worker without a usable GPU must not take GPU work.
         result = self.run_script('echo "NVIDIA-SMI has failed" >&2; exit 9')
