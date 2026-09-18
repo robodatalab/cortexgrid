@@ -79,11 +79,31 @@ def train_step(batch):
     # MLflow and S3 env vars are injected automatically
     return loss
 
-job_id = cortexgrid.remote(train_step, batch, num_gpus=1, retry=True)
-print(f"Submitted: {job_id}")
+job = cortexgrid.remote(train_step, batch, num_gpus=1, retry=True)
+print(f"Submitted: {job.job_id}")
 ```
 
-`cortexgrid.remote` submits a job *request* (a pickled payload plus a `JobLifecycle` record) to MLflow and returns a job ID string immediately. It does not wait for the job to run or finish — use the UI at `http://<DGX_IP>:8000`, or poll `cortexgrid.list_experiment_run_jobs(run_id)`, to observe status.
+`cortexgrid.remote` submits a job *request* (a pickled payload plus a `JobLifecycle` record) to MLflow and returns a `JobFuture` immediately. It does not wait for the job to run or finish — use the UI at `http://<DGX_IP>:8000`, `job.status()`, or poll `cortexgrid.list_experiment_run_jobs(run_id)`, to observe status.
+
+##### Blocking on the result
+
+```python
+loss = cortexgrid.remote(train_step, batch, num_gpus=1).result()
+```
+
+`JobFuture.result(timeout=None)` blocks until Ray reports the job terminal and then behaves like a local call: it returns whatever the function returned, or raises whatever the function raised. `cortexgrid.get_job_result(job_id, timeout=None)` does the same for a job of the current run known only by its id, so a process that did not submit the job can still collect it.
+
+The driver cloudpickles the outcome to `job/{job_id}/result.pkl`, beside the payload manifest and the lifecycle, and the waiting side reads it back:
+
+| Outcome | What `result()` does |
+|---|---|
+| The function returned | Returns its value |
+| The function raised | Raises that exception, with the remote traceback attached as a chained `JobFailed` cause |
+| The job never got as far as returning (submission failed, driver died, job stopped) | Raises `JobFailed` |
+| The value or the exception did not survive cloudpickle | Raises `JobResultUnavailable` (value) or `JobFailed` (exception). A value that cannot be pickled never fails the job itself |
+| `timeout` elapsed | Raises `TimeoutError`; the job keeps running |
+
+Waiting on a `retry=True` job raises `ValueError`: retries are unbounded by design (see below), so the wait would have no end. Fire-and-forget submission is the form training uses — submit, then watch the UI.
 
 A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
@@ -169,7 +189,9 @@ The requirements are part of the model, not of the serve-app class: GPUs, RAM an
 | `cortexgrid.log_artifact(path, artifact_path)` | Log a file as an artifact |
 | `cortexgrid.checkpoint()` | Context manager returning an attribute-based checkpoint saved to MLflow on exit |
 | `cortexgrid.resume()` | Load the latest checkpoint for the current job, or `None` |
-| `cortexgrid.remote(fn, *args, num_gpus=0, num_cpus=1, retry=False, **kwargs)` | Submit a function to the jobs control plane; returns a job ID |
+| `cortexgrid.remote(fn, *args, num_gpus=0, num_cpus=1, retry=False, **kwargs)` | Submit a function to the jobs control plane; returns a `JobFuture` |
+| `JobFuture.status()` / `.done()` / `.result(timeout=None)` | Live status of a submitted job, and its function's return value (blocking) |
+| `cortexgrid.get_job_result(job_id, timeout=None)` | Block on a job of the current run by id; returns its value or raises its exception |
 | `cortexgrid.list_experiment_run_jobs(run_id)` | List `JobLifecycle` records for every cortexgrid job in a run |
 | `cortexgrid.stop_experiment_run_jobs(run_id)` | Request every job in a run to stop (flips the `stop_requested` latch) |
 | `cortexgrid.get_ray_job_status(ray_job_id)` | Live Ray status for a submission id |

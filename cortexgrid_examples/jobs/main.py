@@ -1,20 +1,23 @@
 """Remote jobs — submits a job to the DGX, both sides log to the same experiment.
 
 The main script (laptop) logs main_metric.
-The remote job (DGX) logs job_metric.
+The remote job (DGX) logs job_metric and returns a value.
 After the job completes, both metrics should appear in the same MLflow run.
+
+`remote` hands back a JobFuture immediately; `result()` blocks until the job
+reaches a terminal state and then behaves exactly like a local call — it
+returns what the function returned, or raises what it raised.
 
 Requires the full DGX stack: MLflow, Ray, and the jobs control plane.
 """
 
-import time
-
 import cortexgrid
 
 
-def job_fn():
+def job_fn(scale: float) -> dict[str, float]:
     cortexgrid.log_metric("job_metric", 42.0)
     print("Logged job_metric=42.0 from the DGX")
+    return {"scaled": 42.0 * scale}
 
 
 def main():
@@ -25,31 +28,25 @@ def main():
     cortexgrid.log_metric("main_metric", 1.0)
     print("Logged main_metric=1.0 from the laptop")
 
-    job_id = cortexgrid.remote(job_fn)
-    print(f"Submitted job: {job_id}")
+    job = cortexgrid.remote(job_fn, 2.0)
+    print(f"Submitted job: {job.job_id} (status: {job.status().value})")
 
     print("Waiting for the control plane to pick up and run the job...")
-    terminal = (cortexgrid.JobStatus.FINISHED, cortexgrid.JobStatus.FAILED)
-    while True:
-        lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-        ray_job_id = lifecycle.get_ray_job_id()
-        status = cortexgrid.get_ray_job_status(ray_job_id)
-        print(f"  status: {status.value}")
-        if status in terminal:
-            break
-        time.sleep(5)
+    try:
+        result = job.result()
+    except cortexgrid.JobFailed as exc:
+        # The job never got as far as returning: submission failed, or the
+        # driver died. Ray-reported errors live in the Ray logs.
+        print(f"\nJob did not run: {exc}")
+        return
+    except Exception as exc:
+        # Whatever job_fn raised on the DGX, re-raised here. The chained cause
+        # carries the remote traceback.
+        print(f"\nJob raised {type(exc).__name__}: {exc}")
+        return
 
-    if status == cortexgrid.JobStatus.FINISHED:
-        print("\nJob completed. Check MLflow for both main_metric and job_metric.")
-    else:
-        # Ray-reported errors live in Ray logs, not on the lifecycle.
-        # Check the Ray dashboard or use cortexgrid.get_ray_logs(ray_job_id).
-        lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-        ray_job_id = lifecycle.get_ray_job_id()
-        print(f"\nJob failed. ray_job_id={ray_job_id}")
-        for event in lifecycle.history:
-            if event.error:
-                print(f"Attempt {event.attempt} submission error: {event.error}")
+    print(f"\nJob returned: {result}")
+    print("Check MLflow for both main_metric and job_metric.")
 
 
 if __name__ == "__main__":

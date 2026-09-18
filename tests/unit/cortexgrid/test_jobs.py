@@ -4,6 +4,7 @@ import json
 import shutil
 import tarfile
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,11 +17,16 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.ray_util import JobStatus, get_ray_job_status
 from cortexgrid.jobs import (
+    JobFailed,
+    JobFuture,
     JobLifecycle,
+    JobResult,
+    JobResultUnavailable,
     LifecycleEvent,
     Payload,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
+    wait_for_job_result,
 )
 
 
@@ -138,18 +144,20 @@ class TestRemote(unittest.TestCase):
     def tearDown(self) -> None:
         clear_instance()
 
-    def test_remote_returns_job_id_string(self) -> None:
+    def test_remote_returns_future_carrying_job_identity(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        future = cortexgrid.remote(lambda: None)
 
-        self.assertIsInstance(job_id, str)
-        self.assertTrue(len(job_id) > 0)
+        self.assertIsInstance(future, JobFuture)
+        self.assertEqual(future.experiment_name, EXPERIMENT_NAME)
+        self.assertEqual(future.run_id, RUN_ID)
+        self.assertTrue(len(future.job_id) > 0)
 
     def test_remote_uploads_payload_and_lifecycle(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None).job_id
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue((project_root / "payload.pkl").exists())
@@ -160,7 +168,7 @@ class TestRemote(unittest.TestCase):
     def test_remote_uploads_project_code(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None).job_id
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertTrue(
@@ -181,7 +189,7 @@ class TestRemote(unittest.TestCase):
         # Third-party requirements travel on the lifecycle, not in the tarball.
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None).job_id
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         self.assertFalse((project_root / "requirements.txt").exists())
@@ -189,7 +197,7 @@ class TestRemote(unittest.TestCase):
     def test_initial_lifecycle_is_pending(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None).job_id
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
@@ -200,7 +208,7 @@ class TestRemote(unittest.TestCase):
     def test_lifecycle_includes_retry_flag(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None, retry=True)
+        job_id = cortexgrid.remote(lambda: None, retry=True).job_id
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         lifecycle = JobLifecycle.from_json(raw)
@@ -216,7 +224,7 @@ class TestRemote(unittest.TestCase):
             patch("cortexgrid.jobs.bundle", return_value=desc),
             patch("cortexgrid.jobs.worker_provides", return_value=frozenset({"ray"})),
         ):
-            job_id = cortexgrid.remote(lambda: None)
+            job_id = cortexgrid.remote(lambda: None).job_id
 
         raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
         self.assertEqual(JobLifecycle.from_json(raw).pip_requirements, ["tqdm==4.67.3"])
@@ -230,7 +238,7 @@ class TestRemote(unittest.TestCase):
     def test_payload_round_trips_through_cloudpickle(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None)
+        job_id = cortexgrid.remote(lambda: None).job_id
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
@@ -241,7 +249,7 @@ class TestRemote(unittest.TestCase):
     def test_payload_includes_resource_requests(self) -> None:
         set_instance(_make_experiment())
 
-        job_id = cortexgrid.remote(lambda: None, num_gpus=2, num_cpus=4)
+        job_id = cortexgrid.remote(lambda: None, num_gpus=2, num_cpus=4).job_id
 
         project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
@@ -575,3 +583,287 @@ class TestStopExperimentRunJobs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _payload(job_id: str = "job-1") -> Payload:
+    return Payload(
+        experiment_name=EXPERIMENT_NAME,
+        run_id=RUN_ID,
+        job_id=job_id,
+        fn=lambda: None,
+        args=(),
+        kwargs={},
+        project_code_root="/tmp/does-not-matter",
+    )
+
+
+class _JobError(RuntimeError):
+    """A user-defined exception, to check the original type survives the trip."""
+
+
+class TestJobResult(unittest.TestCase):
+    """The driver records what the job's function produced; the client side
+    turns that back into a value or an exception."""
+
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        patchers = [
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_value_round_trips_through_mlflow(self) -> None:
+        JobResult.from_value(_payload(), {"loss": 0.5}).save_to_mlflow()
+
+        loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+        self.assertEqual(loaded.unwrap(), {"loss": 0.5})
+
+    def test_result_lands_beside_the_payload(self) -> None:
+        JobResult.from_value(_payload(), 1).save_to_mlflow()
+
+        self.assertTrue(
+            (self.fake_mlflow.root / "job" / "job-1" / "result.pkl").exists()
+        )
+
+    def test_none_return_value_round_trips(self) -> None:
+        JobResult.from_value(_payload(), None).save_to_mlflow()
+
+        self.assertIsNone(JobResult.load_from_mlflow(RUN_ID, "job-1").unwrap())
+
+    def test_missing_result_raises_file_not_found(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+    def test_unpicklable_value_still_records_a_finished_job(self) -> None:
+        # A job whose return value cannot be pickled must still finish; only
+        # the value is lost.
+        result = JobResult.from_value(_payload(), (i for i in range(3)))
+
+        self.assertTrue(result.ok)
+        self.assertIsNone(result.value_pickle)
+        self.assertIn("generator", result.value_error or "")
+
+    def test_unpicklable_value_raises_job_result_unavailable(self) -> None:
+        JobResult.from_value(_payload(), (i for i in range(3))).save_to_mlflow()
+
+        loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+        with self.assertRaises(JobResultUnavailable):
+            loaded.unwrap()
+
+    def test_exception_is_re_raised_with_its_original_type(self) -> None:
+        JobResult.from_exception(_payload(), _JobError("bad batch")).save_to_mlflow()
+
+        loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+        with self.assertRaises(_JobError) as caught:
+            loaded.unwrap()
+        self.assertEqual(str(caught.exception), "bad batch")
+
+    def test_re_raised_exception_carries_the_remote_traceback_as_its_cause(self) -> None:
+        try:
+            raise _JobError("bad batch")
+        except _JobError as exc:
+            JobResult.from_exception(_payload(), exc).save_to_mlflow()
+
+        loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+        with self.assertRaises(_JobError) as caught:
+            loaded.unwrap()
+        cause = caught.exception.__cause__
+        self.assertIsInstance(cause, JobFailed)
+        self.assertIn("job job-1 failed", str(cause))
+        self.assertIn("_JobError: bad batch", str(cause))
+
+    def test_unpicklable_exception_falls_back_to_job_failed(self) -> None:
+        JobResult.from_exception(
+            _payload(), _JobError(threading.Lock())
+        ).save_to_mlflow()
+
+        loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
+
+        self.assertIsNone(loaded.exception_pickle)
+        with self.assertRaises(JobFailed) as caught:
+            loaded.unwrap()
+        self.assertIn("_JobError", str(caught.exception))
+
+
+class TestWaitForJobResult(unittest.TestCase):
+    """Waiting polls the lifecycle until Ray reports a terminal state, then
+    hands back whatever the driver recorded."""
+
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        patchers = [
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+            patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[]),
+            patch("cortexgrid.jobs.time.sleep"),
+        ]
+        self.mocks = [p.start() for p in patchers]
+        for p in patchers:
+            self.addCleanup(p.stop)
+        self.sleep = self.mocks[-1]
+
+    def _save_lifecycle(self, retry: bool = False, error: str | None = None) -> None:
+        history = (
+            [
+                LifecycleEvent(
+                    attempt=0,
+                    state="pending",
+                    start="2026-04-15T10:00:00+00:00",
+                    error=error,
+                )
+            ]
+            if error
+            else []
+        )
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="job-1",
+            retry=retry,
+            history=history,
+        ).save_to_mlflow()
+
+    def test_returns_the_functions_value(self) -> None:
+        self._save_lifecycle()
+        JobResult.from_value(_payload(), {"loss": 0.5}).save_to_mlflow()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FINISHED
+        ):
+            self.assertEqual(wait_for_job_result(RUN_ID, "job-1"), {"loss": 0.5})
+
+    def test_raises_what_the_function_raised(self) -> None:
+        self._save_lifecycle()
+        JobResult.from_exception(_payload(), _JobError("bad batch")).save_to_mlflow()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FAILED
+        ):
+            with self.assertRaises(_JobError):
+                wait_for_job_result(RUN_ID, "job-1")
+
+    def test_polls_until_the_job_reaches_a_terminal_state(self) -> None:
+        self._save_lifecycle()
+        JobResult.from_value(_payload(), 7).save_to_mlflow()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status",
+            side_effect=[JobStatus.PENDING, JobStatus.RUNNING, JobStatus.FINISHED],
+        ):
+            self.assertEqual(wait_for_job_result(RUN_ID, "job-1"), 7)
+        self.assertEqual(self.sleep.call_count, 2)
+
+    def test_finished_without_a_recorded_result_is_unavailable(self) -> None:
+        self._save_lifecycle()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FINISHED
+        ):
+            with self.assertRaises(JobResultUnavailable):
+                wait_for_job_result(RUN_ID, "job-1")
+
+    def test_failure_before_the_function_ran_reports_the_submission_error(self) -> None:
+        self._save_lifecycle(error="payload download failed")
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FAILED
+        ):
+            with self.assertRaises(JobFailed) as caught:
+                wait_for_job_result(RUN_ID, "job-1")
+        self.assertIn("payload download failed", str(caught.exception))
+
+    def test_stopped_job_raises_job_failed(self) -> None:
+        self._save_lifecycle()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.STOPPED
+        ):
+            with self.assertRaises(JobFailed) as caught:
+                wait_for_job_result(RUN_ID, "job-1")
+        self.assertIn("stopped", str(caught.exception))
+
+    def test_retry_job_cannot_be_waited_on(self) -> None:
+        # Retries are unbounded by design, so a blocking wait has no end.
+        self._save_lifecycle(retry=True)
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FAILED
+        ):
+            with self.assertRaises(ValueError) as caught:
+                wait_for_job_result(RUN_ID, "job-1")
+        self.assertIn("retry=True", str(caught.exception))
+
+    def test_zero_timeout_gives_up_without_sleeping(self) -> None:
+        self._save_lifecycle()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.RUNNING
+        ):
+            with self.assertRaises(TimeoutError):
+                wait_for_job_result(RUN_ID, "job-1", timeout=0)
+        self.sleep.assert_not_called()
+
+
+class TestJobFuture(unittest.TestCase):
+    """The handle `remote` returns: identity now, status and result on demand."""
+
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        patchers = [
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+            patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[]),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="job-1"
+        ).save_to_mlflow()
+        self.future = JobFuture(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="job-1"
+        )
+
+    def test_status_reports_the_live_ray_state(self) -> None:
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.RUNNING
+        ):
+            self.assertEqual(self.future.status(), JobStatus.RUNNING)
+
+    def test_done_is_false_while_running(self) -> None:
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.RUNNING
+        ):
+            self.assertFalse(self.future.done())
+
+    def test_done_is_true_once_terminal(self) -> None:
+        for status in (JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED):
+            with self.subTest(status=status):
+                with patch(
+                    "cortexgrid.jobs.get_ray_job_status", return_value=status
+                ):
+                    self.assertTrue(self.future.done())
+
+    def test_result_returns_the_functions_value(self) -> None:
+        JobResult.from_value(_payload(), "done").save_to_mlflow()
+
+        with patch(
+            "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FINISHED
+        ):
+            self.assertEqual(self.future.result(), "done")

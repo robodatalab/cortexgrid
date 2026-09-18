@@ -31,7 +31,7 @@ def _schedule_and_wait(
     """Submit fn as a Ray job; wait until it FINISHES. With retry=True, intermediate FAILED is ignored. STOPPED is always terminal."""
     timeout = 600
 
-    job_id = cortexgrid.remote(fn, *args, retry=retry, **kwargs)
+    job_id = cortexgrid.remote(fn, *args, retry=retry, **kwargs).job_id
     run_id = cortexgrid.Experiment.get_instance().run_id
     deadline = time.monotonic() + timeout
     printed: set[str] = set()
