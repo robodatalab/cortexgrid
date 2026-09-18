@@ -89,7 +89,9 @@ from cortexgrid.model_storage import (
     delete_model,
     list_models,
     load_model,
+    model_config,
     model_registry_status,
+    set_model_config,
     set_model_requirements,
 )
 from cortexgrid.model_storage import import_model as _import_model_storage
@@ -149,10 +151,12 @@ def save_model(
     family: str,
     suffix: str,
     requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
 ) -> SavedModel:
     """Persist a weights directory under the current Experiment's run, paired
-    with the serve-app class that will front it at deploy time and the
-    hardware one replica of it needs.
+    with the serve-app class that will front it at deploy time, the hardware
+    one replica of it needs, and any `config` the serve-app reads with
+    `model_config`.
 
     Every run saves a new copy under its own run_name - meant for weights the
     run produced (e.g. a fine-tune). For a model produced elsewhere that should
@@ -166,6 +170,7 @@ def save_model(
         run_id=experiment.run_id,
         run_name=experiment.run_name(),
         requirements=requirements,
+        config=config,
     )
 
 
@@ -175,6 +180,7 @@ def import_model(
     family: str,
     suffix: str,
     requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
 ) -> SavedModel:
     """Register a model produced elsewhere once, reuse it on every later call,
     and record on the current Experiment's run which imported model it used.
@@ -184,7 +190,9 @@ def import_model(
     `imported_model/<family>/<suffix>` holds the version's `created_at`, set
     whether this call uploaded the model or reused it."""
     experiment = Experiment.get_instance()
-    model = _import_model_storage(source, serve_app, family, suffix, requirements)
+    model = _import_model_storage(
+        source, serve_app, family, suffix, requirements, config
+    )
     get_mlflow_client().set_tag(
         experiment.run_id, f"imported_model/{family}/{suffix}", model.created_at
     )
@@ -255,6 +263,8 @@ __all__ = [
     "model_registry_status",
     "ModelRequirements",
     "set_model_requirements",
+    "model_config",
+    "set_model_config",
     "delete_model",
     # Model serving
     "Deployment",

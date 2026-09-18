@@ -31,7 +31,7 @@ No `ray.init` anywhere in cortexgrid.model_serving.
 
 ## The serve-app
 
-A serve-app is an ordinary class fronted by a FastAPI app, marked with `cortexgrid.serve.ingress`. It takes `(family, suffix, run_name)` in `__init__`, downloads its weights from the registry, and defines whatever routes it wants. It declares no resources: what a replica needs is a property of the model, stored in the registry (see [Model requirements](#model-requirements)).
+A serve-app is an ordinary class fronted by a FastAPI app, marked with `cortexgrid.serve.ingress`. It takes `(family, suffix, run_name)` in `__init__`, downloads its weights from the registry, and defines whatever routes it wants. It declares no resources: what a replica needs is a property of the model, stored in the registry (see [Model requirements](#model-requirements)), as is anything else about the model the app has to know (see [Model config](#model-config)).
 
 ```python
 import cortexgrid
@@ -107,6 +107,46 @@ Do them together. The attributes keep working only while the model's bundle pred
 ### Changing them later
 
 `set_model_requirements(family, suffix, run_name, requirements)` replaces the stored values; the dashboard's model card edits them the same way. It takes effect on the next `deploy_model` - a replica already running keeps the placement it started with. `import_model` stores requirements only when it uploads the model or finds none stored, so an edit made since is not overwritten by the next run that imports it.
+
+## Model config
+
+Some models need more than weights and hardware: which model a provider should be asked for, an endpoint, the name of the secret holding a key. That is not the serve-app's code - the same app fronts every model of its kind - and not the weights, which a hosted model does not have. So it lives on the registry entry: a free-form `dict[str, str]` cortexgrid stores and never interprets.
+
+```python
+cortexgrid.import_model(
+    lambda: Path(tempfile.mkdtemp()),   # a hosted model brings no weights
+    AnthropicServeApp,
+    family="anthropic",
+    suffix="opus",
+    config={"model": "claude-opus-5", "api_key_secret": "anthropic-api-key"},
+)
+
+# Corrected later, from code or from the model card in the dashboard:
+cortexgrid.set_model_config(
+    "anthropic", "opus", cortexgrid.IMPORTED, {"model": "claude-sonnet-5"}
+)
+```
+
+The serve-app reads it at construction, from the identifiers it was constructed with - no extra argument, so an app written before this keeps working:
+
+```python
+@serve.ingress(app)
+class AnthropicServeApp:
+    def __init__(self, family: str, suffix: str, run_name: str) -> None:
+        config = cortexgrid.model_config(family, suffix, run_name)
+        self._model = config["model"]
+        self._key = cortexgrid.get_secret(config["api_key_secret"])
+```
+
+Keys and values are strings: they round-trip through a tag and the model card edits them as text, so a number or a flag is spelled as a string and the serve-app parses it back. Anything else raises `ValueError`, as does a blank key.
+
+The whole mapping is stored as one JSON object in the `ModelVersion` tag `config`, so `list_models` and the dashboard read it without touching the weights or importing the serve-app class. One tag rather than one per key: the keys are the serve-app's to choose, free of MLflow's tag-key charset, and removing one needs no tag deletion. MLflow caps a tag value at 8000 characters, which bounds how big a config can get. A model stored without a config carries no tag and reads as `{}`.
+
+A tag is readable by anyone with registry access, so a credential itself does not belong here: put it in `cortexgrid.set_secret` and let the config carry its name, as `api_key_secret` does above.
+
+### Changing it later
+
+`set_model_config(family, suffix, run_name, config)` replaces the whole mapping - a key left out of `config` is gone - and the dashboard's model card edits it the same way. The serve-app reads the config at construction, so a change takes effect on the model's next `deploy_model`; a replica already running keeps the values it started with. `import_model` stores a config only when it uploads the model or finds none stored, so an edit made since is not overwritten by the next run that imports it.
 
 ## Quick start
 
@@ -203,15 +243,17 @@ All exported from `cortexgrid.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `save_model(weights_dir, serve_app, family, suffix, requirements=None) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
-| `import_model(source, serve_app, family, suffix, requirements=None) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Stores `requirements` only on the upload, or when the model has none. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
+| `save_model(weights_dir, serve_app, family, suffix, requirements=None, config=None) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
+| `import_model(source, serve_app, family, suffix, requirements=None, config=None) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Stores `requirements` and `config` only on the upload, or when the model has none. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
 | `set_model_requirements(family, suffix, run_name, requirements)` | Replace the hardware one replica of the model needs. Takes effect on its next `deploy_model`. Raises `ValueError` if the model was never registered. See [Model requirements](#model-requirements). |
+| `model_config(family, suffix, run_name) -> dict[str, str]` | The config stored on the model, `{}` if it has none. Meant for the serve-app to call in `__init__`. Raises `ValueError` if the model was never registered. See [Model config](#model-config). |
+| `set_model_config(family, suffix, run_name, config)` | Replace the model's config - the whole mapping, so a key left out is removed. Takes effect on its next `deploy_model`. Raises `ValueError` if the model was never registered, or if the mapping is not strings. See [Model config](#model-config). |
 | `model_registry_status(family, suffix, run_name) -> SavedModel \| None` | The registry lifecycle of one model, or `None` if never registered. `SavedModel.phase` is `uploading` / `ready` / `upload_failed` / `broken`. |
 | `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. |
 | `list_models() -> list[SavedModel]` | Every `ModelVersion` in the registry (including `uploading` / `upload_failed` / `broken`), mapped to a `SavedModel`. |
 | `delete_model(family, suffix, run_name)` | Drop the `ModelVersion`, the weights blob, and the serve bundle. Does not undeploy a running Serve app. |
 
-`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`, `requirements`. `ModelRequirements`: `num_gpus`, `ram_gb`, `vram_gb`.
+`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`, `requirements`, `config`. `ModelRequirements`: `num_gpus`, `ram_gb`, `vram_gb`.
 
 ### Serving
 
@@ -449,7 +491,7 @@ Replica options travel in `args`: `deploy_model` derives `ray_actor_options` fro
 caller (laptop / arc-runner / training job)
   |
   | cortexgrid.save_model(weights_dir, ServeApp, family, suffix)   [synchronous / blocking]
-  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, lifecycle=uploading, num_gpus, ram_gb, vram_gb})
+  |   1. MLflow create_model_version(name="<family>__<suffix>", source=..., tags={family, suffix, run_name, lifecycle=uploading, num_gpus, ram_gb, vram_gb, config})
   |   2. set tag size_bytes; upload weights_dir as-is to s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/
   |   3. bundle_class(ServeApp) -> zip to s3://<bucket>/serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip
   |   4. set tags {serve_bundle_url, class_import_path, serve_pip_requirements, serve_bundle_fingerprint}; flip lifecycle=ready
@@ -513,6 +555,7 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | Endpoint discovery | static URL composed from `RAY_SERVE_URI` + route prefix | jobs-control-plane lookup, MagicDNS, MLflow tag | URL is fully determined by `(family, suffix, run_name)`; no extra state to keep in sync. |
 | Caller -> cluster transport | Serve REST API (`/api/serve/applications/`) | (a) `ray.init` + `serve.run` in caller; (b) submit a Ray job that calls `serve.run` | (a) makes the caller a Ray driver - works on Ray nodes / jobs only, breaks on arc-runners; (b) decouples application lifetime from a job lifetime, then we'd have to babysit the job. REST keeps cortexgrid.model_serving HTTP-only and parallels how `cortexgrid.remote` talks to Ray Jobs. |
 | Where a replica's hardware needs live | `ModelRequirements` stored as tags on the `ModelVersion` | `num_gpus` / `num_replicas` class attributes on the serve-app | The hardware depends on the weights, not on the code fronting them, and the dashboard has to show and edit it - which the class attributes make impossible without importing the serve-app on the cluster. Tags come back with the registry query the dashboard already makes. The replica count is neither: it is a per-deploy choice, so it is an argument to `deploy_model`. |
+| How a model's non-weight settings reach the serve-app | a `config` string mapping on the `ModelVersion`, read at construction with `model_config` | (a) a fourth `__init__` argument bound by `_serve_entry.build`; (b) one MLflow tag per config key | (a) every serve-app's `__init__` would have to grow a parameter, and a bundle frozen before the change binds only three - the migration `ModelRequirements` needed; a lookup with the identifiers the app already holds needs neither. (b) MLflow constrains tag keys to its own charset and 250 characters, and dropping a key would need a tag deletion; one JSON object is replaced in a single write. |
 | VRAM accounting | a custom `vram_mib` Ray resource each GPU worker advertises from `nvidia-smi` | (a) cortexgrid picks a node itself and pins the replica to it; (b) Ray node labels + label selectors | (a) re-implements the scheduler and pins a replica to a node that may be gone by the next restart, with no reservation, so two deploys can both claim the same GPU. (b) filters but does not reserve, and the label-selector API is newer than the Ray versions cortexgrid supports. A consumable resource both filters and reserves. |
 | User-facing shape | user writes their own `@cortexgrid.serve.ingress` serve-app; cortexgrid only stores + deploys it | abstract `cortexgrid.Model` + generic `/infer` wrapper | A generic wrapper forces one request/response contract (unary JSON, fixed timeout) on every model. Real models need token streaming, multi-minute diffusion calls, and custom request schemas - all traffic concerns the serve-app must own. Letting cortexgrid own the wrapper collapsed those; the BYO serve-app keeps cortexgrid framework-free and imposes no HTTP shape. |
 | Ingress decorator | `cortexgrid.serve.ingress` records the FastAPI app on the class; `_serve_entry.build` applies `ray.serve.ingress` at deploy time, and `_IngressOnReplica` applies it again in each replica | (a) `ray.serve.ingress` at class definition; (b) locate the serve-app through the wrapper's bases (`__mro__`) in `bundle_class` | (a) Ray's wrapper hides the serve-app's module on older Ray, so bundling ships Ray's file instead of the serve-app (see [The serve-app](#the-serve-app)), and importing `ray.serve` needs the `ray[serve]` extras wherever a serve-app is defined. (b) works, but guesses around a Ray implementation detail and still leaves serve-apps importing Ray. Deferring the wrap needs no guessing, works on every Ray version, and serve-apps import only cortexgrid. Its cost: the wrap runs outside the replica, which FastAPI >= 0.137 needs it in, hence the second application (see [On the replica](#on-the-replica)). |

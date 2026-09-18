@@ -5,6 +5,7 @@ import { ModelDashboard } from '../src/components/ModelDashboard'
 import type {
   Deployment,
   Model,
+  ModelConfig,
   ModelRequirements,
 } from '../src/components/ModelsTree'
 
@@ -17,6 +18,7 @@ const NO_REQUIREMENTS: ModelRequirements = {
 function makeModel(
   phase: string,
   requirements: ModelRequirements = NO_REQUIREMENTS,
+  config: ModelConfig = {},
 ): Model {
   return {
     id: 'Qwen2/instruct/boogey-46',
@@ -28,6 +30,7 @@ function makeModel(
     size_bytes: 100,
     phase,
     requirements,
+    config,
   }
 }
 
@@ -49,6 +52,7 @@ function renderCard(
       m: Model,
       requirements: ModelRequirements,
     ) => Promise<void>
+    onSaveConfig: (m: Model, config: ModelConfig) => Promise<void>
   }> = {},
 ) {
   render(
@@ -61,12 +65,24 @@ function renderCard(
       onSaveRequirements={
         handlers.onSaveRequirements ?? vi.fn().mockResolvedValue(undefined)
       }
+      onSaveConfig={
+        handlers.onSaveConfig ?? vi.fn().mockResolvedValue(undefined)
+      }
     />,
   )
 }
 
 function requirementField(label: string): HTMLInputElement {
   return screen.getByLabelText(label) as HTMLInputElement
+}
+
+function configField(which: 'key' | 'value', row: number): HTMLInputElement {
+  const label = which === 'key' ? 'Config key' : 'Config value'
+  return screen.getByLabelText(`${label} ${row}`) as HTMLInputElement
+}
+
+function saveConfigButton(): HTMLButtonElement {
+  return screen.getByRole('button', { name: 'Save config' }) as HTMLButtonElement
 }
 
 describe('ModelDashboard', () => {
@@ -171,6 +187,107 @@ describe('ModelDashboard', () => {
     await userEvent.clear(requirementField('RAM (GiB)'))
     await userEvent.type(requirementField('RAM (GiB)'), '8')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404: No model')
+  })
+
+  it('shows the config stored on the model', () => {
+    renderCard(
+      makeModel('ready', NO_REQUIREMENTS, { model: 'claude-opus-5' }),
+      null,
+    )
+    expect(configField('key', 1).value).toBe('model')
+    expect(configField('value', 1).value).toBe('claude-opus-5')
+  })
+
+  it('saves an added config entry', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined)
+    const model = makeModel('ready', NO_REQUIREMENTS, {
+      model: 'claude-opus-5',
+    })
+    renderCard(model, null, { onSaveConfig })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add config' }))
+    await userEvent.type(configField('key', 2), 'api_key_secret')
+    await userEvent.type(configField('value', 2), 'anthropic-api-key')
+    await userEvent.click(saveConfigButton())
+
+    expect(onSaveConfig).toHaveBeenCalledWith(model, {
+      model: 'claude-opus-5',
+      api_key_secret: 'anthropic-api-key',
+    })
+  })
+
+  it('saves the mapping without a removed entry', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined)
+    const model = makeModel('ready', NO_REQUIREMENTS, {
+      model: 'claude-opus-5',
+      region: 'eu',
+    })
+    renderCard(model, null, { onSaveConfig })
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Remove config region' }),
+    )
+    await userEvent.click(saveConfigButton())
+
+    expect(onSaveConfig).toHaveBeenCalledWith(model, {
+      model: 'claude-opus-5',
+    })
+  })
+
+  it('keeps Save disabled until the config changes', async () => {
+    renderCard(
+      makeModel('ready', NO_REQUIREMENTS, { model: 'claude-opus-5' }),
+      null,
+    )
+    expect(saveConfigButton()).toBeDisabled()
+
+    await userEvent.type(configField('value', 1), '-x')
+
+    expect(saveConfigButton()).not.toBeDisabled()
+  })
+
+  it('refuses a blank config key and explains why', async () => {
+    const onSaveConfig = vi.fn().mockResolvedValue(undefined)
+    renderCard(makeModel('ready'), null, { onSaveConfig })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add config' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Config keys cannot be blank.',
+    )
+    expect(saveConfigButton()).toBeDisabled()
+    expect(onSaveConfig).not.toHaveBeenCalled()
+  })
+
+  it('refuses two config entries with the same key', async () => {
+    renderCard(
+      makeModel('ready', NO_REQUIREMENTS, { model: 'claude-opus-5' }),
+      null,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add config' }))
+    await userEvent.type(configField('key', 2), 'model')
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Config keys must be unique.',
+    )
+    expect(saveConfigButton()).toBeDisabled()
+  })
+
+  it('reports a failed config save', async () => {
+    const onSaveConfig = vi
+      .fn()
+      .mockRejectedValue(new Error('HTTP 404: No model'))
+    renderCard(
+      makeModel('ready', NO_REQUIREMENTS, { model: 'claude-opus-5' }),
+      null,
+      { onSaveConfig },
+    )
+
+    await userEvent.type(configField('value', 1), '-x')
+    await userEvent.click(saveConfigButton())
 
     expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404: No model')
   })

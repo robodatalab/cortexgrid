@@ -9,6 +9,7 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
     run linkage         -> ModelVersion.run_id  (built-in MLflow field; unset
                            for imported models)
     requirements        -> ModelVersion.tags["num_gpus"], ["ram_gb"], ["vram_gb"]
+    config              -> ModelVersion.tags["config"]  (JSON object)
 
 Two ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
@@ -24,8 +25,9 @@ cortexgrid/__init__.py.
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
@@ -58,6 +60,19 @@ _PHASE_READY = "ready"
 _PHASE_UPLOAD_FAILED = "upload_failed"
 _PHASE_BROKEN = "broken"
 
+# MLflow ModelVersion tag holding the model's config: whatever settings its
+# serve-app needs that are not the weights (a provider's model id, an endpoint,
+# the name of a secret to read). cortexgrid never interprets it - it is the
+# serve-app's own vocabulary, stored next to the model so the app reads it at
+# construction instead of being redeployed to change a setting.
+#
+# One JSON object in one tag, not a tag per key: the keys are the serve-app's
+# to choose, free of MLflow's tag-key charset, and the whole mapping is
+# replaced in a single write, so removing a key needs no tag deletion. MLflow
+# caps a tag value at 8000 characters, which bounds how big a config can get.
+_CONFIG_TAG = "config"
+
+
 # An upload still marked "uploading" this long after the version was created is
 # treated as broken: the version is created before the weights are resolved
 # (for `import_model`, before its download), so creation_timestamp is the
@@ -88,6 +103,9 @@ class SavedModel:
     phase: str
     # Hardware one replica needs; defaults for versions stored without it.
     requirements: ModelRequirements
+    # Free-form settings the serve-app reads at construction; empty for
+    # versions stored without any.
+    config: dict[str, str] = field(default_factory=dict)
 
 
 def _phase_for(version: Any) -> str:
@@ -107,6 +125,28 @@ def _phase_for(version: Any) -> str:
     return phase
 
 
+def _config_to_tag(config: dict[str, str]) -> str:
+    """Serialise a config mapping to its MLflow tag value.
+
+    Keys and values are strings: they round-trip through a tag, and the model
+    card edits them as text. A caller with a number or a flag spells it as a
+    string and the serve-app parses it back."""
+    for key, value in config.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError(
+                f"Model config must map strings to strings: {key!r}: {value!r}"
+            )
+        if not key.strip():
+            raise ValueError("Model config keys cannot be blank")
+    return json.dumps(config)
+
+
+def _config_from_tags(tags: dict[str, str]) -> dict[str, str]:
+    """Deserialise a config mapping from a ModelVersion's MLflow tags; a
+    missing tag reads as no config."""
+    return json.loads(tags.get(_CONFIG_TAG, "{}"))
+
+
 def _to_saved_model(version: Any) -> SavedModel:
     return SavedModel(
         family=version.tags["family"],
@@ -119,6 +159,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         size_bytes=int(version.tags.get("size_bytes", "0")),
         phase=_phase_for(version),
         requirements=requirements_from_tags(version.tags),
+        config=_config_from_tags(version.tags),
     )
 
 
@@ -159,6 +200,7 @@ def save_model(
     run_id: str,
     run_name: str,
     requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
 ) -> SavedModel:
     """Upload a weights directory to S3 and register a new MLflow ModelVersion
     paired with the serve-app that fronts it.
@@ -180,9 +222,20 @@ def save_model(
     without the caller holding the class object.
 
     `requirements` is the hardware one replica needs; None stores none, which
-    reads as no requirement. Change it later with `set_model_requirements`."""
+    reads as no requirement. Change it later with `set_model_requirements`.
+
+    `config` is whatever else the serve-app needs to know about this model,
+    as a string mapping it reads with `model_config` at construction; None
+    stores none. Change it later with `set_model_config`."""
     return _upload_model(
-        weights_dir, serve_app, suffix, family, run_id, run_name, requirements
+        weights_dir,
+        serve_app,
+        suffix,
+        family,
+        run_id,
+        run_name,
+        requirements,
+        config,
     )
 
 
@@ -192,6 +245,7 @@ def import_model(
     family: str,
     suffix: str,
     requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
 ) -> SavedModel:
     """Register a model produced elsewhere (e.g. a pretrained base model) under
     the fixed key (family, suffix, IMPORTED), once.
@@ -205,10 +259,10 @@ def import_model(
     If a version is already registered under the key:
       - "ready": returns it without calling `source`. If `serve_app`'s code no
         longer matches the stored bundle, it is re-bundled first and the
-        weights are kept (see `_refresh_bundle`). `requirements` are stored
-        only if the version has none yet, so values changed since with
-        `set_model_requirements` are kept. To replace the weights,
-        `delete_model` it first.
+        weights are kept (see `_refresh_bundle`). `requirements` and `config`
+        are stored only if the version has none yet, so values changed since
+        with `set_model_requirements` / `set_model_config` are kept. To replace
+        the weights, `delete_model` it first.
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
 
@@ -223,6 +277,8 @@ def import_model(
                 existing.requirements = _set_missing_requirements(
                     family, suffix, requirements
                 )
+            if config is not None:
+                existing.config = _set_missing_config(family, suffix, config)
             return existing
         if existing.phase == _PHASE_UPLOADING:
             raise RuntimeError(
@@ -231,7 +287,7 @@ def import_model(
             )
         delete_model(family, suffix, IMPORTED)
     return _upload_model(
-        source, serve_app, suffix, family, None, IMPORTED, requirements
+        source, serve_app, suffix, family, None, IMPORTED, requirements, config
     )
 
 
@@ -273,6 +329,24 @@ def _set_missing_requirements(
     return requirements
 
 
+def _set_missing_config(
+    family: str, suffix: str, config: dict[str, str]
+) -> dict[str, str]:
+    """Store `config` on an imported model whose version has none yet. Returns
+    the config the version holds afterwards."""
+    name = f"{family}__{suffix}"
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    version = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{IMPORTED}'"
+    )[0]
+    if _CONFIG_TAG in version.tags:
+        return _config_from_tags(version.tags)
+    client.set_model_version_tag(
+        name, version.version, _CONFIG_TAG, _config_to_tag(config)
+    )
+    return config
+
+
 def _upload_model(
     weights: str | Path | Callable[[], str | Path],
     serve_app: type,
@@ -281,6 +355,7 @@ def _upload_model(
     run_id: str | None,
     run_name: str,
     requirements: ModelRequirements | None,
+    config: dict[str, str] | None,
 ) -> SavedModel:
     """Register a ModelVersion in "uploading", resolve `weights` to a directory
     (calling it when it is a callable), upload the weights and the serve-app
@@ -296,8 +371,9 @@ def _upload_model(
     # fetched and uploaded, and a concurrent `import_model` sees the import in
     # flight for the whole download instead of starting one of its own. The
     # size is stamped once the directory exists; the bundle tags and the flip
-    # to "ready" happen only after the upload lands. No requirements leaves
-    # their tags unset, so a later `import_model` can still store them.
+    # to "ready" happen only after the upload lands. No requirements and no
+    # config leave their tags unset, so a later `import_model` can still store
+    # them.
     version = client.create_model_version(
         name=name,
         source=source,
@@ -308,6 +384,7 @@ def _upload_model(
             "run_name": run_name,
             _LIFECYCLE_TAG: _PHASE_UPLOADING,
             **(requirements_to_tags(requirements) if requirements is not None else {}),
+            **({_CONFIG_TAG: _config_to_tag(config)} if config is not None else {}),
         },
     )
     try:
@@ -391,6 +468,46 @@ def set_model_requirements(
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
     for key, value in requirements_to_tags(requirements).items():
         client.set_model_version_tag(name, versions[0].version, key, value)
+
+
+def model_config(family: str, suffix: str, run_name: str) -> dict[str, str]:
+    """The config mapping stored on a model, empty if it has none.
+
+    Meant for the serve-app to call in `__init__` with the
+    (family, suffix, run_name) it was constructed with: the settings that are
+    not the weights - a provider's model id, an endpoint, the name of a secret
+    to read - travel with the registry entry instead of the bundled code, so
+    changing one is an edit on the model card rather than a re-save.
+
+    Read at construction, so a replica keeps the values it started with until
+    it is deployed again. Raises ValueError if the model was never
+    registered."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    versions = client.search_model_versions(
+        f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
+    )
+    if not versions:
+        raise ValueError(f"No model {family}/{suffix}/{run_name}")
+    return _config_from_tags(versions[0].tags)
+
+
+def set_model_config(
+    family: str, suffix: str, run_name: str, config: dict[str, str]
+) -> None:
+    """Replace the config mapping stored on a model - the whole mapping, so a
+    key left out of `config` is gone. Takes effect on its next `deploy_model`;
+    a replica already running keeps the values it read at construction.
+    Raises ValueError if the model was never registered."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    name = f"{family}__{suffix}"
+    versions = client.search_model_versions(
+        f"name='{name}' and tags.run_name='{run_name}'"
+    )
+    if not versions:
+        raise ValueError(f"No model {family}/{suffix}/{run_name}")
+    client.set_model_version_tag(
+        name, versions[0].version, _CONFIG_TAG, _config_to_tag(config)
+    )
 
 
 def delete_model(family: str, suffix: str, run_name: str) -> None:

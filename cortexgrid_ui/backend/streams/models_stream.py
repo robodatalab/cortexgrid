@@ -7,7 +7,7 @@ surfaced as SavedModel-shaped payloads. Items are keyed by
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cortexgrid.model_serving import ModelRequirements
 from cortexgrid.model_storage import list_models
@@ -35,6 +35,9 @@ class Model:
     phase: str
     # Hardware one replica needs; the dashboard shows it and can edit it.
     requirements: ModelRequirements
+    # Free-form settings the serve-app reads at construction; the dashboard
+    # shows them and can edit them.
+    config: dict[str, str] = field(default_factory=dict)
 
 
 def model_id(family: str, suffix: str, run_name: str) -> ModelId:
@@ -55,6 +58,7 @@ def poll_models(_: None) -> dict[ModelId, Model]:
             size_bytes=m.size_bytes,
             phase=m.phase,
             requirements=m.requirements,
+            config=m.config,
         )
     return out
 

@@ -223,6 +223,41 @@
     font-size: var(--font-md);
 }
 
+.model-dashboard__config-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.model-dashboard__config-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-dashboard__config-row input {
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font: inherit;
+    font-size: var(--font-md);
+}
+
+.model-dashboard__config-row input:first-child {
+    width: 180px;
+}
+
+.model-dashboard__config-row input:nth-child(2) {
+    flex: 1;
+    min-width: 0;
+}
+
+.model-dashboard__config-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 .model-dashboard__requirement-problem {
     margin-top: 8px;
     font-size: var(--font-sm);

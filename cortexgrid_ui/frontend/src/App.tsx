@@ -18,6 +18,7 @@ import { ModelsTree } from './components/ModelsTree'
 import type {
   Deployment,
   Model,
+  ModelConfig,
   ModelRequirements,
   ModelSelection,
 } from './components/ModelsTree'
@@ -228,6 +229,20 @@ function App() {
     }
   }
 
+  async function handleSaveConfig(model: Model, config: ModelConfig) {
+    const res = await fetch(
+      `/api/models/${encodeURIComponent(model.family)}/${encodeURIComponent(model.suffix)}/${encodeURIComponent(model.run_name)}/config`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config }),
+      },
+    )
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+    }
+  }
+
   async function handleStopDeployment(deployment: Deployment) {
     const res = await fetch(deploymentPath(deployment), { method: 'DELETE' })
     if (!res.ok) {
@@ -308,6 +323,7 @@ function App() {
                       }
                       onDeploy={handleDeploy}
                       onSaveRequirements={handleSaveRequirements}
+                      onSaveConfig={handleSaveConfig}
                     />
                   ) : selectedDeployment ? (
                     <DeploymentDashboard
