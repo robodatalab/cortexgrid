@@ -78,7 +78,7 @@ class TestExperimentListing(UITestCase):
         tree.get_by_text(run_name).click()
         expect(tree.get_by_text("No jobs")).to_be_visible(timeout=10_000)
 
-        job_id = cortexgrid.remote(_noop_job)
+        job_id = cortexgrid.remote(_noop_job).job_id
         expect(tree.get_by_text(job_id)).to_be_visible(timeout=30_000)
         expect(tree.get_by_text("No jobs")).not_to_be_visible()
 

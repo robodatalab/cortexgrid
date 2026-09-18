@@ -2,14 +2,18 @@
 
 import cortexgrid
 
-# Fire-and-forget training on the DGX; returns a job id immediately.
+# Fire-and-forget training on the DGX; returns a handle immediately.
 # The jobs control plane picks up the submission and dispatches it to Ray.
-job_id = cortexgrid.remote(my_train, config, num_gpus=1, retry=True)
-print(f"Submitted: {job_id}")
+training = cortexgrid.remote(my_train, config, num_gpus=1, retry=True)
+print(f"Submitted: {training.job_id} ({training.status().value})")
 
-# Check on it later
-for job in cortexgrid.list_experiment_run_jobs(run_id):
-    status = cortexgrid.get_ray_job_status(job.get_ray_job_id())
+# Or block on the function's return value, as if it had run locally.
+# The job's own exception is what a failed job raises here.
+job = cortexgrid.remote(score, batch, num_gpus=1)
+loss = job.result(timeout=600)
+
+# In another process, the job id is enough
+loss = cortexgrid.get_job_result(job_id)
 
 # Inside the training function — checkpoint after each epoch
 with cortexgrid.checkpoint() as ckpt:
@@ -39,7 +43,12 @@ from cortexgrid.jobs import (
     schedule_remote_job,
     list_experiment_run_jobs,
     stop_experiment_run_jobs,
+    wait_for_job_result,
+    JobFailed,
+    JobFuture,
     JobLifecycle,
+    JobResult,
+    JobResultUnavailable,
     LifecycleEvent,
     Payload,
 )
@@ -104,8 +113,11 @@ def remote(
     num_cpus: int = 1,
     retry: bool = False,
     **kwargs: Any,
-) -> str:
-    """Submit a function to the control plane. Returns a job ID."""
+) -> JobFuture:
+    """Submit a function to the control plane. Returns a handle on the job.
+
+    The call does not block: the returned `JobFuture` carries the job id and
+    offers `status()`, `done()` and `result()`. Only `result()` waits."""
     experiment = Experiment.get_instance()
     return schedule_remote_job(
         experiment.experiment_name,
@@ -117,6 +129,17 @@ def remote(
         retry=retry,
         **kwargs,
     )
+
+
+def get_job_result(job_id: str, timeout: float | None = None) -> Any:
+    """Block until the job finishes, then return what its function returned.
+
+    For a job of the current Experiment's run, known only by its id — the
+    handle `remote` returned may live in another process. Raises whatever the
+    job's function raised, so the call reads like a local one; see
+    `wait_for_job_result` for the other errors and for `timeout`."""
+    experiment = Experiment.get_instance()
+    return wait_for_job_result(experiment.run_id, job_id, timeout)
 
 
 def save_model(
@@ -173,11 +196,17 @@ __all__ = [
     "delete_run",
     # Ray / jobs
     "remote",
+    "get_job_result",
+    "wait_for_job_result",
     "get_ray_job_status",
     "list_experiment_run_jobs",
     "stop_experiment_run_jobs",
     "JobStatus",
+    "JobFailed",
+    "JobFuture",
     "JobLifecycle",
+    "JobResult",
+    "JobResultUnavailable",
     "LifecycleEvent",
     "Payload",
     "get_ray_status",

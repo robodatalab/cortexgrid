@@ -49,7 +49,7 @@ def main():
     # Automatic retry by the control plane is not currently implemented, so
     # this example drives the retry from the client side. The checkpoint is
     # scoped to the experiment run, so the second job sees it on resume.
-    first_job = cortexgrid.remote(crashy_job)
+    first_job = cortexgrid.remote(crashy_job).job_id
     print(f"Submitted first job: {first_job}")
     first_status = _wait_for_terminal(exp.run_id, first_job)
     if first_status != cortexgrid.JobStatus.FAILED:
@@ -60,7 +60,7 @@ def main():
     )
 
     # Attempt 2 — cortexgrid.resume() should return the saved checkpoint.
-    second_job = cortexgrid.remote(crashy_job)
+    second_job = cortexgrid.remote(crashy_job).job_id
     print(f"Submitted second job: {second_job}")
     second_status = _wait_for_terminal(exp.run_id, second_job)
 

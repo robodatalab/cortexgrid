@@ -9,9 +9,21 @@ from pathlib import Path
 
 from cortexgrid.checkpoint import set_cortexgrid_job_id
 from cortexgrid.experiment import Experiment
-from cortexgrid.jobs import Payload
+from cortexgrid.jobs import JobResult, Payload
 
 log = logging.getLogger("ray-job-driver")
+
+
+def record(result: JobResult) -> None:
+    """Persist the job's outcome beside its payload.
+
+    Best effort: a job that ran must not be reported as failed because its
+    result could not be uploaded. A caller waiting on the result gets
+    JobResultUnavailable instead, and the reason is in this log."""
+    try:
+        result.save_to_mlflow()
+    except Exception:
+        log.exception("Failed to record result for job %s", result.job_id)
 
 
 def main(payload_path: str) -> None:
@@ -41,7 +53,12 @@ def main(payload_path: str) -> None:
         payload.args,
         payload.kwargs,
     )
-    payload.fn(*payload.args, **payload.kwargs)
+    try:
+        value = payload.fn(*payload.args, **payload.kwargs)
+    except BaseException as exc:
+        record(JobResult.from_exception(payload, exc))
+        raise
+    record(JobResult.from_value(payload, value))
 
 
 if __name__ == "__main__":

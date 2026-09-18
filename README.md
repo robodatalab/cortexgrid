@@ -22,7 +22,8 @@ Cloud infrastructure, ML compute, and deployment orchestration for RoboLab. Clou
 
 ## Features
 
-- **Async job submission** — `cortexgrid.remote(fn, *args, num_gpus=, num_cpus=, retry=)` ships a Python callable to the cluster and returns a job ID for polling.
+- **Async job submission** — `cortexgrid.remote(fn, *args, num_gpus=, num_cpus=, retry=)` ships a Python callable to the cluster and returns a `JobFuture` immediately.
+- **Blocking results** — `future.result()` (or `cortexgrid.get_job_result(job_id)`) waits for the job and hands back what the function returned, raising what it raised.
 - **Experiment tracking** — `Experiment.init(name)` creates an MLflow experiment+run; `log_metric`, `log_params`, `log_artifact` log against it.
 - **Checkpoint / resume** — `cortexgrid.checkpoint() / resume()` persists training state to MLflow artifacts so retries pick up where the previous attempt left off.
 - **Retries** — `retry=True` on `remote()` re-submits failed jobs with the same checkpoint context.
@@ -75,21 +76,16 @@ def job_fn(tracking_uri: str, run_id: str): ...
 
 | Platform | Submit | Returns |
 |---|---|---|
-| Cortexgrid | `cortexgrid.remote(job_fn)` | string job ID |
+| Cortexgrid | `cortexgrid.remote(job_fn)` | `JobFuture` |
 | Modal | `job_fn.spawn(run_id)` | `FunctionCall` |
 | Anyscale | `job_fn.remote(uri, run_id)` | `ObjectRef` |
 | ClearML | `task.execute_remotely(queue_name="dgx")` | (enqueues, then exits the local process) |
 
-**3. Waiting for completion.** Cortexgrid polls Ray via the MLflow lifecycle. Modal and Anyscale block on the handle. ClearML is implicit — the agent runs to completion after the local process has already exited.
+**3. Waiting for completion.** Cortexgrid, Modal and Anyscale all block on the handle; under the hood cortexgrid polls Ray via the MLflow lifecycle, then reads the return value the driver recorded. ClearML is implicit — the agent runs to completion after the local process has already exited.
 
 ```python
-# Cortexgrid — poll
-while True:
-    lifecycle = cortexgrid.JobLifecycle.load_from_mlflow(exp.run_id, job_id)
-    status = cortexgrid.get_ray_job_status(lifecycle.get_ray_job_id())
-    if status in (cortexgrid.JobStatus.FINISHED, cortexgrid.JobStatus.FAILED):
-        break
-    time.sleep(5)
+# Cortexgrid — block on the handle
+result = job.result()             # or: cortexgrid.get_job_result(job_id)
 
 # Modal
 call.get(timeout=600)
