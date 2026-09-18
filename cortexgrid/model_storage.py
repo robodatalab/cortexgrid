@@ -6,17 +6,21 @@ Mapping cortexgrid taxonomy <-> MLflow Registry:
     family, suffix      -> ModelVersion.tags["family"], ["suffix"]   (denormalized)
     weights blob path   -> ModelVersion.source =
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
+                           (NO_WEIGHTS for a model registered without any)
     run linkage         -> ModelVersion.run_id  (built-in MLflow field; unset
                            for imported models)
     requirements        -> ModelVersion.tags["num_gpus"], ["ram_gb"], ["vram_gb"]
     config              -> ModelVersion.tags["config"]  (JSON object)
 
-Two ways in: `save_model` registers a fresh copy under the calling run's
+Three ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
 model produced elsewhere once, under the fixed run_name IMPORTED, and after
-that only re-bundles the serve-app when its code changed. Both write the same
-layout, so every
-(family, suffix, run_name) consumer - load_model, deploy_model - handles both.
+that only re-bundles the serve-app when its code changed; `register_model`
+registers a model that stages no weights at all - a serve-app that forwards to
+a hosted API holds none - under that same fixed key. All three write the same
+layout, so every (family, suffix, run_name) consumer - deploy_model, the
+dashboard - handles them alike; only `load_model` parts them, having nothing to
+hand back for a model registered without weights.
 
 storage.py is pure: it takes run_id/run_name as explicit args and never reads
 the active Experiment singleton. The facade that fills those in lives in
@@ -86,6 +90,13 @@ _UPLOAD_DEADLINE = timedelta(hours=3)
 # them. Run names are haikunator "word-word-NN", so no run can take this name.
 IMPORTED = "imported"
 
+# ModelVersion.source of a model registered with no weights of its own: nothing
+# was staged, so there is no blob to point at. Spelled as a URI rather than left
+# blank because MLflow rejects a source that is empty or a local path, and
+# because every reader - `load_model`, the dashboard's storage field - then sees
+# why there is no path instead of an empty one.
+NO_WEIGHTS = "cortexgrid://no-weights"
+
 
 @dataclass
 class SavedModel:
@@ -93,7 +104,9 @@ class SavedModel:
     suffix: str
     run_name: str
     created_at: str
+    # Where the weights live, or NO_WEIGHTS for a model registered without any.
     data_blob_path: str
+    # Size of the weights; 0 for a model registered without any.
     size_bytes: int
     # Registry lifecycle phase: "uploading" while save_model streams the weights
     # and serve bundle to storage, "ready" once that finishes, "upload_failed"
@@ -106,6 +119,13 @@ class SavedModel:
     # Free-form settings the serve-app reads at construction; empty for
     # versions stored without any.
     config: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def has_weights(self) -> bool:
+        """Whether this model staged weights of its own. False for one
+        registered with `register_model`, whose serve-app holds no bytes to
+        store; `load_model` on it raises."""
+        return self.data_blob_path != NO_WEIGHTS
 
 
 def _phase_for(version: Any) -> str:
@@ -269,6 +289,52 @@ def import_model(
     The version is linked to no MLflow run, so deleting a run leaves it in
     place. Deploy it like any saved model:
     `deploy_model(family, suffix, IMPORTED)`."""
+    return _register_imported(
+        source, serve_app, family, suffix, requirements, config
+    )
+
+
+def register_model(
+    serve_app: type,
+    family: str,
+    suffix: str,
+    requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
+) -> SavedModel:
+    """Register a model that stages no weights under the fixed key
+    (family, suffix, IMPORTED), once.
+
+    For a model whose bytes are not ours to hold: a serve-app that forwards
+    requests to a hosted API, or one that reaches for the weights itself at
+    startup. There is nothing to upload, so only `serve_app`'s bundle is
+    stored and the version's source reads NO_WEIGHTS - `load_model` on such a
+    model raises, and `SavedModel.has_weights` is False. What it needs instead
+    of weights - which model a provider should be asked for, the name of the
+    secret holding the key - belongs in `config`, which the serve-app reads
+    with `model_config` at construction.
+
+    Registration is otherwise `import_model`'s, down to the phase an already
+    registered version leaves it in ("ready" is reused and its bundle
+    refreshed, "uploading" raises, "upload_failed"/"broken" is replaced), so
+    the entry is indistinguishable from an imported one to `deploy_model`,
+    `list_models` and the dashboard."""
+    return _register_imported(
+        None, serve_app, family, suffix, requirements, config
+    )
+
+
+def _register_imported(
+    weights: str | Path | Callable[[], str | Path] | None,
+    serve_app: type,
+    family: str,
+    suffix: str,
+    requirements: ModelRequirements | None,
+    config: dict[str, str] | None,
+) -> SavedModel:
+    """Register `weights` under (family, suffix, IMPORTED) unless a version is
+    already there - the once-only registration `import_model` and
+    `register_model` share; `weights` is None for the model that stages
+    none."""
     existing = model_registry_status(family, suffix, IMPORTED)
     if existing is not None:
         if existing.phase == _PHASE_READY:
@@ -287,7 +353,7 @@ def import_model(
             )
         delete_model(family, suffix, IMPORTED)
     return _upload_model(
-        source, serve_app, suffix, family, None, IMPORTED, requirements, config
+        weights, serve_app, suffix, family, None, IMPORTED, requirements, config
     )
 
 
@@ -348,7 +414,7 @@ def _set_missing_config(
 
 
 def _upload_model(
-    weights: str | Path | Callable[[], str | Path],
+    weights: str | Path | Callable[[], str | Path] | None,
     serve_app: type,
     suffix: str,
     family: str,
@@ -359,10 +425,17 @@ def _upload_model(
 ) -> SavedModel:
     """Register a ModelVersion in "uploading", resolve `weights` to a directory
     (calling it when it is a callable), upload the weights and the serve-app
-    bundle, and flip it to "ready" (or "upload_failed")."""
-    bucket = get_s3_bucket()
+    bundle, and flip it to "ready" (or "upload_failed").
+
+    `weights` is None for a model that stages none: its source reads
+    NO_WEIGHTS and the bundle is the only thing uploaded. The phases are the
+    same either way, so one registration path covers both."""
     prefix = f"models/{run_name}/{family}/{suffix}"
-    source = f"s3://{bucket}/{prefix}/weights/"
+    source = (
+        NO_WEIGHTS
+        if weights is None
+        else f"s3://{get_s3_bucket()}/{prefix}/weights/"
+    )
     name = f"{family}__{suffix}"
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     _ensure_registered_model(client, name)
@@ -371,7 +444,9 @@ def _upload_model(
     # fetched and uploaded, and a concurrent `import_model` sees the import in
     # flight for the whole download instead of starting one of its own. The
     # size is stamped once the directory exists; the bundle tags and the flip
-    # to "ready" happen only after the upload lands. No requirements and no
+    # to "ready" happen only after the upload lands. A weights-less
+    # registration has only its bundle to upload, and passes through the same
+    # phases. No requirements and no
     # config leave their tags unset, so a later `import_model` can still store
     # them.
     version = client.create_model_version(
@@ -388,11 +463,12 @@ def _upload_model(
         },
     )
     try:
-        weights_dir = weights() if callable(weights) else weights
-        client.set_model_version_tag(
-            name, version.version, "size_bytes", str(_dir_size_bytes(weights_dir))
-        )
-        s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
+        if weights is not None:
+            weights_dir = weights() if callable(weights) else weights
+            client.set_model_version_tag(
+                name, version.version, "size_bytes", str(_dir_size_bytes(weights_dir))
+            )
+            s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
         bundle_meta = bundle_class(serve_app, family, suffix, run_name)
         for key, value in metadata_to_tags(bundle_meta).items():
             client.set_model_version_tag(name, version.version, key, value)
@@ -414,7 +490,10 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
     contents; the serve-app reconstructs the model from it however it likes
     (`from_pretrained`, `torch.load`, ...). The returned directory persists
     after this call - the caller (typically a serve-app loading weights at
-    startup) owns its lifetime."""
+    startup) owns its lifetime.
+
+    Raises ValueError for a model registered with `register_model`: it stages
+    no weights, so there is none to hand back."""
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     name = f"{family}__{suffix}"
     versions = client.search_model_versions(
@@ -422,6 +501,11 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
     )
     if not versions or not versions[0].source:
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
+    if versions[0].source == NO_WEIGHTS:
+        raise ValueError(
+            f"Model {family}/{suffix}/{run_name} was registered without "
+            "weights; there is nothing to load"
+        )
     return _download_s3_uri(versions[0].source, None)
 
 

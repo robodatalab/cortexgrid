@@ -18,6 +18,7 @@ from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import BundleMetadata, ModelRequirements, ServeBundle
 from cortexgrid.model_storage import (
     IMPORTED,
+    NO_WEIGHTS,
     delete_model,
     delete_models_for_run,
     import_model,
@@ -25,6 +26,7 @@ from cortexgrid.model_storage import (
     load_model,
     model_config,
     model_registry_status,
+    register_model,
     save_model,
     set_model_config,
     set_model_requirements,
@@ -683,9 +685,139 @@ class TestImportModel(unittest.TestCase):
         )
 
 
+class TestRegisterModel(unittest.TestCase):
+    """Registering a model that stages no weights - the serve-app forwards to a
+    hosted API, so there is nothing to upload but its bundle."""
+
+    def setUp(self) -> None:
+        self.mlflow = FakeMLflow()
+        self.s3 = FakeS3()
+        for p in _patches(self.mlflow, self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_registers_under_imported_run_name_without_weights(self) -> None:
+        result = register_model(_FakeServeApp, "anthropic", "opus")
+
+        self.assertEqual(result.run_name, IMPORTED)
+        self.assertEqual(result.phase, "ready")
+        self.assertIsNone(self.mlflow.versions[0].run_id)
+        self.assertEqual(result.data_blob_path, NO_WEIGHTS)
+        self.assertEqual(result.size_bytes, 0)
+        self.assertFalse(result.has_weights)
+        self.assertEqual(self.s3.objects, {})
+
+    def test_stores_the_serve_bundle(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus")
+
+        tags = self.mlflow.versions[0].tags
+        self.assertEqual(tags["serve_bundle_url"], _FAKE_BUNDLE.bundle_url)
+        self.assertEqual(tags["class_import_path"], "fake.module:FakeClass")
+
+    def test_second_registration_is_a_noop(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus")
+
+        result = register_model(_FakeServeApp, "anthropic", "opus")
+
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(len(self.mlflow.versions), 1)
+
+    def test_re_registration_with_changed_code_rebundles(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus")
+        changed = BundleMetadata(
+            bundle_url="s3://b/serve-bundles/y.zip",
+            class_import_path="fake.module:FakeClass",
+            fingerprint="code-v2",
+        )
+
+        with (
+            patch(
+                "cortexgrid.model_storage.build_bundle",
+                return_value=_serve_bundle("code-v2"),
+            ),
+            patch(
+                "cortexgrid.model_storage.upload_bundle", return_value=changed
+            ) as upload_bundle,
+        ):
+            register_model(_FakeServeApp, "anthropic", "opus")
+
+        upload_bundle.assert_called_once_with(
+            _serve_bundle("code-v2"), "anthropic", "opus", IMPORTED
+        )
+        self.assertEqual(len(self.mlflow.versions), 1)
+
+    def test_first_registration_stores_requirements_and_config(self) -> None:
+        result = register_model(
+            _FakeServeApp, "anthropic", "opus", _GPU_REQUIREMENTS, _CONFIG
+        )
+
+        self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
+        self.assertEqual(result.config, _CONFIG)
+        self.assertEqual(
+            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
+        )
+
+    def test_re_registration_keeps_an_edited_config(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus", config=_CONFIG)
+        edited = {"model": "claude-sonnet-5"}
+        set_model_config("anthropic", "opus", IMPORTED, edited)
+
+        result = register_model(
+            _FakeServeApp, "anthropic", "opus", config=_CONFIG
+        )
+
+        self.assertEqual(result.config, edited)
+
+    def test_raises_while_another_registration_is_in_flight(self) -> None:
+        v = _seed_version(self.mlflow, "anthropic", "opus", "", IMPORTED)
+        v.tags["lifecycle"] = "uploading"
+        v.creation_timestamp = _recent_ms()
+
+        with self.assertRaises(RuntimeError):
+            register_model(_FakeServeApp, "anthropic", "opus")
+
+    def test_registers_again_after_a_failed_attempt(self) -> None:
+        v = _seed_version(self.mlflow, "anthropic", "opus", "", IMPORTED)
+        v.tags["lifecycle"] = "upload_failed"
+
+        result = register_model(_FakeServeApp, "anthropic", "opus")
+
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(len(self.mlflow.versions), 1)
+
+    def test_marks_version_failed_when_bundling_raises(self) -> None:
+        with patch(
+            "cortexgrid.model_storage.bundle_class",
+            side_effect=RuntimeError("bundling died"),
+        ):
+            with self.assertRaises(RuntimeError):
+                register_model(_FakeServeApp, "anthropic", "opus")
+
+        self.assertEqual(
+            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
+        )
+
+    def test_listed_like_any_other_model(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus", config=_CONFIG)
+
+        listed = list_models()
+
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0].config, _CONFIG)
+        self.assertFalse(listed[0].has_weights)
+
+    def test_delete_model_drops_the_registration(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus")
+
+        delete_model("anthropic", "opus", IMPORTED)
+
+        self.assertEqual(self.mlflow.versions, [])
+        self.assertIsNone(model_registry_status("anthropic", "opus", IMPORTED))
+
+
 class TestImportModelRecordsRun(unittest.TestCase):
-    """The `cortexgrid.import_model` facade tags the calling run with the
-    imported model it used."""
+    """The `cortexgrid.import_model` and `cortexgrid.register_model` facades tag
+    the calling run with the model it used."""
 
     def setUp(self) -> None:
         self.mlflow = FakeMLflow()
@@ -718,6 +850,15 @@ class TestImportModelRecordsRun(unittest.TestCase):
                 call("r1", "imported_model/Qwen2/base", model.created_at),
                 call("r2", "imported_model/Qwen2/base", model.created_at),
             ],
+        )
+
+    def test_tags_the_run_that_registers_a_weightless_model(self) -> None:
+        self._use_run("r1")
+
+        model = cortexgrid.register_model(_FakeServeApp, "anthropic", "opus")
+
+        self.run_client.set_tag.assert_called_once_with(
+            "r1", "imported_model/anthropic/opus", model.created_at
         )
 
     def test_does_not_tag_the_run_when_the_import_fails(self) -> None:
@@ -767,6 +908,12 @@ class TestLoadModel(unittest.TestCase):
     def test_raises_when_no_matching_version(self) -> None:
         with self.assertRaises(ValueError):
             load_model("Qwen2", "instruct", "missing")
+
+    def test_raises_for_a_model_registered_without_weights(self) -> None:
+        register_model(_FakeServeApp, "anthropic", "opus")
+
+        with self.assertRaises(ValueError):
+            load_model("anthropic", "opus", IMPORTED)
 
     def test_raises_when_version_has_no_source(self) -> None:
         v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")

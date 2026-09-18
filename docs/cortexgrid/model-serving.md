@@ -5,7 +5,7 @@ cortexgrid has two model-related surfaces, and they own strictly different thing
 - **Model registry** ([cortexgrid.model_storage](../../cortexgrid/model_storage.py)) - persists a trained model's *weights* to S3 + MLflow Model Registry as an opaque directory, addressable as `(family, suffix, run_name)`. At save time it also bundles the *serve-app* class (its code and every dependency, as source) that will front those weights, so the cluster can deploy it later without the caller holding the class.
 - **Model serving** ([cortexgrid.model_serving](../../cortexgrid/model_serving.py)) - schedules the serve-app as a Ray Serve application and returns its URL. cortexgrid imposes no request/response contract; the serve-app owns its own routes, request schemas, streaming, and timeouts.
 
-Both speak the same `(family, suffix, run_name)` triple.
+Both speak the same `(family, suffix, run_name)` triple. A model with no weights of ours - one behind a provider's API - goes through the same two surfaces, registering its serve-app alone; see [Serving a hosted-API model](#serving-a-hosted-api-model).
 
 ## Responsibility split
 
@@ -113,8 +113,7 @@ Do them together. The attributes keep working only while the model's bundle pred
 Some models need more than weights and hardware: which model a provider should be asked for, an endpoint, the name of the secret holding a key. That is not the serve-app's code - the same app fronts every model of its kind - and not the weights, which a hosted model does not have. So it lives on the registry entry: a free-form `dict[str, str]` cortexgrid stores and never interprets.
 
 ```python
-cortexgrid.import_model(
-    lambda: Path(tempfile.mkdtemp()),   # a hosted model brings no weights
+cortexgrid.register_model(              # a hosted model brings no weights
     AnthropicServeApp,
     family="anthropic",
     suffix="opus",
@@ -142,7 +141,7 @@ Keys and values are strings: they round-trip through a tag and the model card ed
 
 The whole mapping is stored as one JSON object in the `ModelVersion` tag `config`, so `list_models` and the dashboard read it without touching the weights or importing the serve-app class. One tag rather than one per key: the keys are the serve-app's to choose, free of MLflow's tag-key charset, and removing one needs no tag deletion. MLflow caps a tag value at 8000 characters, which bounds how big a config can get. A model stored without a config carries no tag and reads as `{}`.
 
-A tag is readable by anyone with registry access, so a credential itself does not belong here: put it in `cortexgrid.set_secret` and let the config carry its name, as `api_key_secret` does above.
+A tag is readable by anyone with registry access, so a credential itself does not belong here: put it in `cortexgrid.set_secret` and let the config carry its name, as `api_key_secret` does above. See [Serving a hosted-API model](#serving-a-hosted-api-model) for that whole sequence - serve-app, key, registration, deploy - in one piece.
 
 ### Changing it later
 
@@ -188,6 +187,71 @@ cortexgrid.undeploy_model("qwen", "instruct", "<run_name>")
 `deploy_model` returns a `Deployment` (URL + identifiers + status), not an inference proxy. Building the client - streaming reader, long timeout, custom request schema - is the caller's job.
 
 No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_URI` (already in the head secrets store, already used by `cortexgrid.remote`); the cluster handles the rest.
+
+## Serving a hosted-API model
+
+A model behind a provider's API - Gemini, OpenAI, Anthropic - is served exactly like one with weights, minus the weights. The serve-app forwards requests instead of running a model, the API key lives in the secrets store, and which model to ask for travels on the registry entry as [config](#model-config). End to end, for Gemini:
+
+```python
+import cortexgrid
+import requests
+from cortexgrid import serve
+from fastapi import FastAPI
+from google import genai
+
+app = FastAPI()
+
+
+# 1. The serve-app. Nothing to load: it reads its settings from the registry
+#    entry it was constructed with, and the key from the secrets store. Its
+#    routes are its own - cortexgrid imposes no request/response shape.
+@serve.ingress(app)
+class GeminiServeApp:
+    def __init__(self, family: str, suffix: str, run_name: str) -> None:
+        config = cortexgrid.model_config(family, suffix, run_name)
+        self._model = config["model"]
+        self._client = genai.Client(
+            api_key=cortexgrid.get_secret(config["api_key_secret"])
+        )
+
+    @app.post("/complete")
+    async def complete(self, body: dict) -> dict:
+        response = await self._client.aio.models.generate_content(
+            model=self._model, contents=body["prompt"]
+        )
+        return {"text": response.text}
+
+
+cortexgrid.Experiment.init("my-experiment")
+
+# 2. The key, stored once for the cluster. Never in the config: a registry tag
+#    is readable by anyone who can see the model, a secret is not.
+cortexgrid.set_secret("gemini-api-key", "AIza...")
+
+# 3. Register. There are no weights to upload - only GeminiServeApp's code is
+#    bundled and stored.
+m = cortexgrid.register_model(
+    GeminiServeApp,
+    family="gemini",
+    suffix="flash",
+    config={"model": "gemini-2.5-flash", "api_key_secret": "gemini-api-key"},
+)
+
+# 4. Deploy and call it like any other model. m.run_name is cortexgrid.IMPORTED.
+deployed = cortexgrid.deploy_model(m.family, m.suffix, m.run_name, wait=True)
+requests.post(f"{deployed.url}/complete", json={"prompt": "hello"}, timeout=60)
+```
+
+Run that again and nothing is re-registered: the entry is written once under `(gemini, flash, cortexgrid.IMPORTED)` and later calls only re-bundle `GeminiServeApp` if its code changed, so the snippet can sit at the top of a script or a job. See [Registering a model with no weights](#registering-a-model-with-no-weights) for what happens when an attempt is already in flight or failed.
+
+Four things follow from there being no weights:
+
+- **No hardware is asked for.** A replica that only forwards HTTP needs no GPU, so `requirements` is left out and Ray places it on any node, CPU-only included. Pass `ModelRequirements(...)` only if the app itself needs something.
+- **`load_model` raises** on this model, and `SavedModel.has_weights` is `False`. The serve-app must not call it.
+- **The rest of the registry does not care.** `deploy_model`, `model_registry_status`, `list_models`, `undeploy_model`, `delete_model` and the dashboard treat the entry like any other, and the URL has the usual shape (`.../r/gemini/flash/imported`), so a client cannot tell a hosted model from a local one.
+- **Settings change without a re-register.** `cortexgrid.set_model_config("gemini", "flash", cortexgrid.IMPORTED, {...})` - or the model card in the dashboard - points the entry at another provider model or another secret; the serve-app reads config at construction, so it takes effect on the next `deploy_model`.
+
+Another provider is another serve-app class and another entry: same `register_model` call, same key shape, a different `config`. Rotating a key is `set_secret` under the same name, and takes effect when the replica is next constructed.
 
 ## Code delivery: bundle at save time
 
@@ -245,15 +309,16 @@ All exported from `cortexgrid.*`.
 |----------|---------|
 | `save_model(weights_dir, serve_app, family, suffix, requirements=None, config=None) -> SavedModel` | Synchronous. Register a new MLflow `ModelVersion` (`uploading`), upload the weights directory + the bundled `serve_app` class/pip deps, flip to `ready`, and return. Uses the current Experiment's `run_id`/`run_name`, so every run saves a new copy - meant for weights the run produced. See [Model registry lifecycle](#model-registry-lifecycle). |
 | `import_model(source, serve_app, family, suffix, requirements=None, config=None) -> SavedModel` | Register a model produced elsewhere under `(family, suffix, IMPORTED)`, once; returns the existing model when it is already `ready`, re-bundling `serve_app` if its code changed. `source` is the weights directory or a callable returning it. Stores `requirements` and `config` only on the upload, or when the model has none. Tags the current Experiment's run with the model it used. See [Importing a model](#importing-a-model). |
+| `register_model(serve_app, family, suffix, requirements=None, config=None) -> SavedModel` | `import_model` for a model that stages no weights - a serve-app forwarding to a hosted API has nothing to upload but its bundle. Same key, same once-only registration and re-bundling, same run tag; `data_blob_path` reads `NO_WEIGHTS`, `has_weights` is `False`. See [Registering a model with no weights](#registering-a-model-with-no-weights). |
 | `set_model_requirements(family, suffix, run_name, requirements)` | Replace the hardware one replica of the model needs. Takes effect on its next `deploy_model`. Raises `ValueError` if the model was never registered. See [Model requirements](#model-requirements). |
 | `model_config(family, suffix, run_name) -> dict[str, str]` | The config stored on the model, `{}` if it has none. Meant for the serve-app to call in `__init__`. Raises `ValueError` if the model was never registered. See [Model config](#model-config). |
 | `set_model_config(family, suffix, run_name, config)` | Replace the model's config - the whole mapping, so a key left out is removed. Takes effect on its next `deploy_model`. Raises `ValueError` if the model was never registered, or if the mapping is not strings. See [Model config](#model-config). |
 | `model_registry_status(family, suffix, run_name) -> SavedModel \| None` | The registry lifecycle of one model, or `None` if never registered. `SavedModel.phase` is `uploading` / `ready` / `upload_failed` / `broken`. |
-| `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. |
+| `load_model(family, suffix, run_name) -> Path` | Download the weights blob to a local directory and return its `Path`. The directory persists after the call; the caller (typically the serve-app) owns its lifetime. cortexgrid does not reconstruct the model. Raises `ValueError` for a model registered with `register_model`, which has no weights to hand back. |
 | `list_models() -> list[SavedModel]` | Every `ModelVersion` in the registry (including `uploading` / `upload_failed` / `broken`), mapped to a `SavedModel`. |
 | `delete_model(family, suffix, run_name)` | Drop the `ModelVersion`, the weights blob, and the serve bundle. Does not undeploy a running Serve app. |
 
-`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`, `requirements`, `config`. `ModelRequirements`: `num_gpus`, `ram_gb`, `vram_gb`.
+`SavedModel`: `family`, `suffix`, `run_name`, `created_at`, `data_blob_path`, `size_bytes`, `phase`, `requirements`, `config`, `has_weights`. `ModelRequirements`: `num_gpus`, `ram_gb`, `vram_gb`.
 
 ### Serving
 
@@ -325,6 +390,26 @@ An imported model belongs to no run, so the run records the link instead: every 
 Weights are imported once, but the serve-app code can change with the library that provides it. On a `ready` model, `import_model` builds the bundle locally and compares its fingerprint with the version's `serve_bundle_fingerprint`; when they differ (or the tag is absent), it uploads the new bundle next to the old one and points the version's bundle tags at it, leaving the weights untouched. The next `deploy_model` runs the new code; an app that is already running keeps the code it started with until it is deployed again, and the old bundle stays in storage so that app can still restart. Every call pays for the local build (walking the serve-app's imports and hashing its files). Callers with different installed dependency versions produce different fingerprints, so each re-bundles when it imports.
 
 To replace an imported model's weights, `undeploy_model` and `delete_model(family, suffix, cortexgrid.IMPORTED)`, then import again. The weights and bundle land under the same layout as a saved model (`models/imported/...`, `serve-bundles/imported/...`), so `load_model`, `deploy_model` and the rest work unchanged. The version is linked to no MLflow run, so `delete_run` / `delete_experiment` leave it in place.
+
+### Registering a model with no weights
+
+Not every model is bytes we hold. A serve-app that forwards to a hosted API stages nothing, and neither does one that reaches for its weights itself at startup. `register_model` files such a model under the same fixed key as an import, with the same once-only semantics, and uploads its bundle and nothing else ([Serving a hosted-API model](#serving-a-hosted-api-model) walks one through end to end):
+
+```python
+m = cortexgrid.register_model(
+    AnthropicServeApp,
+    family="anthropic",
+    suffix="opus",
+    config={"model": "claude-opus-5", "api_key_secret": "anthropic-api-key"},
+)
+cortexgrid.deploy_model(m.family, m.suffix, m.run_name, wait=True)
+```
+
+What the deployment needs in place of weights goes in `config`, which the serve-app reads at construction - see [Model config](#model-config). A replica that holds no weights and does no compute of its own asks for nothing and is placed on any node, CPU-only included; pass `requirements` if that is not true.
+
+The entry is an ordinary one: `deploy_model`, `model_registry_status`, `list_models`, the dashboard and `delete_model` treat it like any other model, a version already registered under the key is reused, re-bundled or replaced exactly as [Importing a model](#importing-a-model) describes, and the calling run is tagged `imported_model/<family>/<suffix>` the same way.
+
+The difference is the weights that are not there. The `ModelVersion`'s source reads `cortexgrid.NO_WEIGHTS` (`"cortexgrid://no-weights"`) rather than an S3 path - MLflow rejects a source that is empty or a local path, so the absence is spelled out instead of left blank, and the dashboard's storage field says why there is no path. `size_bytes` is 0, `SavedModel.has_weights` is `False`, and `load_model` raises `ValueError`: there is nothing to hand back.
 
 ### Getting upload / model status
 
