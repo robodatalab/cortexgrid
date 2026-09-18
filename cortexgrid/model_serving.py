@@ -485,6 +485,25 @@ def _clear_failed_application(
         time.sleep(_SERVING_POLL_INTERVAL_S)
 
 
+def _spec_already_deployed(spec: dict[str, Any]) -> bool:
+    """True when this exact spec is already the app's target, so PUTting it
+    again would only disturb the controller.
+
+    Re-PUTting is not a no-op. While an app's build task is in flight its target
+    code version is unset, so Ray cancels that build and starts a new one no
+    matter what the config says - and since every PUT re-sends the whole
+    applications list, it restarts the in-flight builds of the other apps too.
+    Our build task downloads the model bundle and may create a pip virtualenv,
+    so a caller redeploying faster than that could keep it from ever finishing.
+
+    A DEPLOY_FAILED or DELETING app never reaches here: `_clear_failed_application`
+    has already removed it, and an identical PUT over a failed app is exactly the
+    no-op that leaves it failed.
+    """
+    app = get_serve_details().get("applications", {}).get(spec["name"])
+    return app is not None and app.get("deployed_app_config") == spec
+
+
 def deploy_model(
     family: str,
     suffix: str,
@@ -507,6 +526,11 @@ def deploy_model(
     or an app still DELETING, is waited out before the new spec is PUT, so the
     deploy starts afresh instead of Ray reusing the failed deployment.
 
+    Re-deploying a model that is already live with exactly this spec skips the
+    PUT rather than restating it: see `_spec_already_deployed` for what a
+    redundant PUT costs. The call still reports the app's phase, and with
+    `wait=True` still blocks until it is RUNNING.
+
     With `wait=True`, blocks as `wait_for_model_serving` does until the Serve
     controller reports the app RUNNING. `timeout` (default 300) caps the whole
     call, clearing a failed app included; exceeding it raises TimeoutError, and
@@ -520,11 +544,14 @@ def deploy_model(
         family, suffix, run_name, meta, requirements, num_replicas
     )
     _clear_failed_application(family, suffix, run_name, timeout, deadline)
-    existing = [a for a in _current_application_specs() if a["name"] != spec["name"]]
-    # The controller registers the app, sets it DEPLOYING and stamps
-    # last_deployed_time_s before the PUT returns, so the wait below neither
-    # misses the app nor reads a status left by an earlier deploy.
-    put_serve_applications([*existing, spec])
+    if not _spec_already_deployed(spec):
+        existing = [
+            a for a in _current_application_specs() if a["name"] != spec["name"]
+        ]
+        # The controller registers the app, sets it DEPLOYING and stamps
+        # last_deployed_time_s before the PUT returns, so the wait below neither
+        # misses the app nor reads a status left by an earlier deploy.
+        put_serve_applications([*existing, spec])
     if wait:
         _wait_for_application_running(spec["name"], timeout, deadline)
     app = get_serve_details().get("applications", {}).get(spec["name"], {})

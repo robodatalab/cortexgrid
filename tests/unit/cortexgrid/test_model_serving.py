@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -11,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from fastapi import FastAPI
 from ray import serve as ray_serve
 from ray._private.runtime_env.packaging import unzip_package
+from ray.serve.schema import ServeApplicationSchema, ServeDeploySchema
 
 from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
@@ -244,7 +246,9 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(self.state.apps, {name: {"name": name}})
 
-    def test_redeploying_a_deploying_app_puts_it_without_removing_it(self) -> None:
+    def test_redeploying_a_deploying_app_with_a_changed_spec_puts_it_without_removing_it(
+        self,
+    ) -> None:
         name = "Qwen2__instruct__boogey-46"
         self.state.apps[name] = {"name": name}
         self.state.status = "DEPLOYING"
@@ -260,6 +264,52 @@ class TestModelServing(unittest.TestCase):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(puts, [[name]])
+
+    def test_redeploying_an_unchanged_spec_skips_the_put(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        puts: list[list[str]] = []
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications",
+            side_effect=lambda apps: puts.append([a["name"] for a in apps]),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [])
+
+    def test_redeploying_an_unchanged_spec_mid_build_leaves_the_build_alone(
+        self,
+    ) -> None:
+        # A PUT arriving while Ray is building the app cancels that build and
+        # restarts it, whatever the spec says, so an unchanged spec must not
+        # be restated.
+        self.state.status = "DEPLOYING"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        puts: list[list[str]] = []
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications",
+            side_effect=lambda apps: puts.append([a["name"] for a in apps]),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [])
+
+    def test_redeploying_a_changed_spec_puts_it_again(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.apps[name]["runtime_env"] = {"working_dir": "s3://bundles/old.zip"}
+        puts: list[list[str]] = []
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+
+        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [[name]])
+
 
 
 class TestWaitForModelServing(unittest.TestCase):
@@ -708,6 +758,45 @@ class TestServeDependencies(unittest.TestCase):
         tags = {"serve_bundle_url": "s3://b/x.zip", "class_import_path": "stub:Stub"}
 
         self.assertEqual(self._load_with_tags(tags)[0].fingerprint, "")
+
+
+class TestSpecRoundTripsThroughRay(unittest.TestCase):
+    """`deploy_model` skips a redundant PUT by comparing the spec it just built
+    against the `deployed_app_config` Ray reports back, so the two have to stay
+    identical. Should a Ray upgrade fill in a default or rename a field, the
+    comparison would silently stop matching and every deploy would PUT again -
+    losing the guard without failing anything. These tests fail instead.
+    """
+
+    def _round_trip(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Replay what Ray does to a PUT spec before handing it back under
+        `deployed_app_config`: validate the deploy request, checkpoint the app
+        config, re-validate it out of the checkpoint, serialize it into the
+        details response. The details dump is taken on the app config alone;
+        the enclosing `ServeInstanceDetails` only strips internal fields under
+        `deployments`, which our specs never set."""
+        deploy = ServeDeploySchema.model_validate({"applications": [spec]})
+        checkpointed = deploy.applications[0].model_dump(exclude_unset=True)
+        restored = ServeApplicationSchema.model_validate(checkpointed)
+        return json.loads(json.dumps(restored.model_dump(exclude_unset=True)))
+
+    def test_gpu_spec_survives_the_round_trip_unchanged(self) -> None:
+        spec = _build_application_spec(
+            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2
+        )
+
+        self.assertEqual(self._round_trip(spec), spec)
+
+    def test_spec_with_pip_requirements_survives_the_round_trip_unchanged(self) -> None:
+        meta = BundleMetadata(
+            bundle_url="s3://b/x.zip",
+            class_import_path="stub:Stub",
+            pip_requirements=["tqdm==4.67.3"],
+        )
+
+        spec = _build_application_spec("fam", "suf", "run", meta, ModelRequirements(), 1)
+
+        self.assertEqual(self._round_trip(spec), spec)
 
 
 class TestModelRequirements(unittest.TestCase):
