@@ -56,9 +56,12 @@ jobs:
               - 'jobs_control_plane/**'
               - 'k8s/docker/jobs_control_plane/**'
               - 'tests/unit/jobs_control_plane/**'
+            # Everything tests/unit/k8s covers: the seed scripts and the chart
+            # templates they render (e.g. the ray-worker startup script).
             k8s_seed:
               - 'k8s/seed/**'
-              - 'tests/unit/k8s/seed/**'
+              - 'k8s/charts/**'
+              - 'tests/unit/k8s/**'
             mlflow:
               - 'k8s/docker/mlflow/**'
             ray:
@@ -177,7 +180,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11.13"
-      - run: uv run python -m unittest discover -s tests/unit/k8s/seed -v
+      - run: uv run python -m unittest discover -s tests/unit/k8s -t . -v
 
   build_arc_runner:
     needs: detect

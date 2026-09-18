@@ -87,6 +87,8 @@ A model saved before requirements existed carries none of these tags and reads a
 
 MiB, not GiB, because `nvidia-smi` reports MiB and a card's memory is not a whole number of GiB: a "24GB" card has 24564 MiB, and a worker rounding that down to 23 GiB would look too small for a model that fits it.
 
+A GPU with **unified memory** (e.g. the DGX Spark's GB10) has no memory of its own - it shares the host's - and `nvidia-smi` reports `[N/A]` for it. Such a worker advertises the host's `MemTotal` as `vram_mib` instead, since that is what the GPU can use; a node that cannot report a size must still be placeable, or a model that fits it has nowhere to run. On those nodes `ram_gb` and `vram_gb` describe the same pool, so a replica asking for both reserves twice - size requirements for a unified-memory node accordingly.
+
 Two cluster-side limits shape what can actually be asked for:
 
 - Ray sizes a worker's `memory` from the pod's cgroup limit, so the worker pods carry no memory limit and Ray sees the host's own RAM. Ray keeps roughly 30% of it for its object store; the rest is what replicas can reserve.
