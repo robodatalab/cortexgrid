@@ -224,6 +224,7 @@ The requirements are part of the model, not of the serve-app class: GPUs, RAM an
 | `cortexgrid.get_job_result(job_id, timeout=None)` | Block on a job of the current run by id; returns its value or raises its exception |
 | `cortexgrid.list_experiment_run_jobs(run_id)` | List `JobLifecycle` records for every cortexgrid job in a run |
 | `cortexgrid.stop_experiment_run_jobs(run_id)` | Request every job in a run to stop (flips the `stop_requested` latch) |
+| `cortexgrid.get_ray_job_id_for_cortexgrid_job(run_id, job_id)` | Ray submission id of a cortexgrid job's latest attempt, or `None` |
 | `cortexgrid.get_ray_job_status(ray_job_id)` | Live Ray status for a submission id |
 | `cortexgrid.get_ray_logs(ray_job_id)` | Tail the stdout/stderr of a Ray submission |
 | `cortexgrid.upload(path, bucket, key)` | Upload a file to S3/MinIO |
