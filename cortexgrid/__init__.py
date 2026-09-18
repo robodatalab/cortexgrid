@@ -4,16 +4,16 @@ import cortexgrid
 
 # Fire-and-forget training on the DGX; returns a handle immediately.
 # The jobs control plane picks up the submission and dispatches it to Ray.
-job = cortexgrid.remote(my_train, config, num_gpus=1, retry=True)
-print(f"Submitted: {job.job_id}")
+training = cortexgrid.remote(my_train, config, num_gpus=1, retry=True)
+print(f"Submitted: {training.job_id} ({training.status().value})")
 
 # Or block on the function's return value, as if it had run locally.
 # The job's own exception is what a failed job raises here.
-loss = cortexgrid.remote(score, batch, num_gpus=1).result()
+job = cortexgrid.remote(score, batch, num_gpus=1)
+loss = job.result(timeout=600)
 
-# Check on it later, from anywhere
-status = job.status()
-result = cortexgrid.get_job_result(job.job_id)  # blocks; by id, in any process
+# In another process, the job id is enough
+loss = cortexgrid.get_job_result(job_id)
 
 # Inside the training function — checkpoint after each epoch
 with cortexgrid.checkpoint() as ckpt:
