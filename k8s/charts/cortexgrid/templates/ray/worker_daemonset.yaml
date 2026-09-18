@@ -65,15 +65,30 @@ spec:
           # "vram_mib" resource. A replica requests its model's vram_gb of it
           # (see cortexgrid.model_serving), so Ray places it only on a node
           # whose GPUs have that much memory left.
+          #
+          # A GPU with unified memory (e.g. the DGX Spark's GB10) has none of
+          # its own - it shares the host's - and nvidia-smi reports "[N/A]" for
+          # it. There the host's RAM is what the GPU can use, so it is
+          # advertised instead: a node that cannot report a size must still be
+          # placeable, or the model has nowhere to run.
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -e
+              gpu_mibs=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits) || gpu_mibs=""
+              [ -n "$gpu_mibs" ] || { echo "nvidia-smi reported no GPU" >&2; exit 1; }
               vram_mib=0
-              for gpu_mib in $(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits); do
-                vram_mib=$((vram_mib + gpu_mib))
+              for gpu_mib in $gpu_mibs; do
+                case "$gpu_mib" in
+                  ''|*[!0-9]*) vram_mib=0; break ;;
+                  *) vram_mib=$((vram_mib + gpu_mib)) ;;
+                esac
               done
-              [ "$vram_mib" -gt 0 ] || { echo "nvidia-smi reported no GPU" >&2; exit 1; }
+              if [ "$vram_mib" -le 0 ]; then
+                vram_mib=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+                echo "nvidia-smi reports no dedicated GPU memory ($gpu_mibs); advertising the ${vram_mib} MiB the GPU shares with the host" >&2
+              fi
+              [ "$vram_mib" -gt 0 ] || { echo "could not determine GPU memory" >&2; exit 1; }
               exec ray start \
                 --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }} \
                 --num-gpus=1 \

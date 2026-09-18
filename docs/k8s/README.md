@@ -98,6 +98,8 @@ Ray is split into a CPU-only control plane on the head and worker DaemonSets on 
 | `ray-worker` | `worker=true`, `gpu=true` | 1 (`nvidia.com/gpu: 1`, `--num-gpus=1`, `runtimeClassName: nvidia`) | 1 per GPU worker node (DaemonSet) |
 | `ray-worker-cpu` | `worker=true`, no `gpu` label | none (`--num-gpus=0`) | 1 per CPU-only worker node (DaemonSet) |
 
+Each GPU worker also advertises its GPU memory as the custom Ray resource `vram_mib`, read from `nvidia-smi` at startup, so a model's `vram_gb` requirement can place it (see [model-serving](../cortexgrid/model-serving.md#how-ray-places-a-replica)). A GPU with unified memory (the DGX Spark's GB10) reports no size of its own, so that worker advertises the host's RAM instead.
+
 Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexgrid submission site.
 
 **To run ray on AWS:** join GPU EC2 instances via `worker-setup`. ray-head stays on the AWS EC2 head; ray-worker DaemonSet lights up one Pod per GPU EC2.
