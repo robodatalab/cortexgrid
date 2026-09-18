@@ -244,7 +244,9 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(self.state.apps, {name: {"name": name}})
 
-    def test_redeploying_a_deploying_app_puts_it_without_removing_it(self) -> None:
+    def test_redeploying_a_deploying_app_with_a_changed_spec_puts_it_without_removing_it(
+        self,
+    ) -> None:
         name = "Qwen2__instruct__boogey-46"
         self.state.apps[name] = {"name": name}
         self.state.status = "DEPLOYING"
@@ -260,6 +262,52 @@ class TestModelServing(unittest.TestCase):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(puts, [[name]])
+
+    def test_redeploying_an_unchanged_spec_skips_the_put(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        puts: list[list[str]] = []
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications",
+            side_effect=lambda apps: puts.append([a["name"] for a in apps]),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [])
+
+    def test_redeploying_an_unchanged_spec_mid_build_leaves_the_build_alone(
+        self,
+    ) -> None:
+        # A PUT arriving while Ray is building the app cancels that build and
+        # restarts it, whatever the spec says, so an unchanged spec must not
+        # be restated.
+        self.state.status = "DEPLOYING"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        puts: list[list[str]] = []
+
+        with patch(
+            "cortexgrid.model_serving.put_serve_applications",
+            side_effect=lambda apps: puts.append([a["name"] for a in apps]),
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [])
+
+    def test_redeploying_a_changed_spec_puts_it_again(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.apps[name]["runtime_env"] = {"working_dir": "s3://bundles/old.zip"}
+        puts: list[list[str]] = []
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+
+        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [[name]])
+
 
 
 class TestWaitForModelServing(unittest.TestCase):
