@@ -373,8 +373,9 @@ All exported from `cortexgrid.*`.
 | `undeploy_model(family, suffix, run_name)` | Re-PUT the applications list with this app removed. |
 | `model_serving_status(family, suffix, run_name) -> ServingStatus` | The serving lifecycle of one model from the Ray Serve controller; `not_deployed` when no app exists (never raises for a missing app). See [Model serving lifecycle](#model-serving-lifecycle). |
 | `list_deployed_models() -> list[Deployment]` | GET `/api/serve/applications/` and return records whose name matches `<family>__<suffix>__<run_name>`, each carrying its serving `phase`. |
+| `model_replica_placements(family, suffix, run_name) -> list[ReplicaPlacement]` | Which worker each live replica landed on - what the requirements and the size-class preferences resolved to. Empty when no app exists; fills in as replicas are placed. See [Seeing where a replica actually landed](#seeing-where-a-replica-actually-landed). |
 
-`Deployment`: `family`, `suffix`, `run_name`, `url`, `phase`. `ServingStatus`: `family`, `suffix`, `run_name`, `phase`, `message`, `url`. `ModelDeployFailed` subclasses `RuntimeError`. cortexgrid returns these handles and no more; the caller builds whatever HTTP client the serve-app's routes need.
+`Deployment`: `family`, `suffix`, `run_name`, `url`, `phase`. `ServingStatus`: `family`, `suffix`, `run_name`, `phase`, `message`, `url`. `ReplicaPlacement`: `replica_id`, `state`, `node_id`, `node_ip`. `ModelDeployFailed` subclasses `RuntimeError`. cortexgrid returns these handles and no more; the caller builds whatever HTTP client the serve-app's routes need.
 
 The Ray Serve app name is `<family>__<suffix>__<run_name>`; the route prefix is `/r/<family>/<suffix>/<run_name>`. The serve-app's own routes hang off that prefix (e.g. `{url}/complete`, `{url}/generate`). `family`, `suffix`, `run_name` must not contain `/` or `__`.
 
@@ -600,7 +601,12 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
     "ray_actor_options": {
       "num_gpus": 1,
       "memory": 8589934592,
-      "resources": {"vram_mib": 16384}
+      "resources": {"vram_mib": 16384},
+      "label_selector": {"vram_mib": "24564"},
+      "fallback_strategy": [
+        {"label_selector": {"vram_mib": "131072"}},
+        {"label_selector": {"vram_mib": "!in(12282)"}}
+      ]
     }
   },
   "runtime_env": {
@@ -611,6 +617,8 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
 ```
 
 Replica options travel in `args`: `deploy_model` derives `ray_actor_options` from the model's [requirements](#model-requirements) (`memory` in bytes, `vram_mib` in MiB) and `_serve_entry.build` applies them, with `num_replicas`, via `.options(...)` on the serve-app deployment. `memory` and `resources` are left out when the requirement is 0, so nothing is reserved. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
+
+`label_selector` and `fallback_strategy` are the size-class preferences from [Which GPU it picks](#which-gpu-it-picks-when-several-fit), built from the cluster's GPU tiers at deploy time - above, a 16 GiB model on a cluster of 12282 / 24564 / 131072 MiB cards. They are absent for a model with no `vram_gb`, and for a cluster reporting no tiers. Because they are part of the spec, a GPU joining or leaving changes it, which is what makes the next `deploy_model` re-PUT rather than skip as already-deployed.
 
 `deploy_model` reconstructs the full applications list (GET, replace this entry, PUT) because `/api/serve/applications/` is declarative: the PUT body is the desired complete set.
 
