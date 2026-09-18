@@ -85,6 +85,7 @@ from cortexgrid.ray_util import (
 from cortexgrid.s3_util import delete_prefix, download, get_s3_client, upload, upload_dir
 from cortexgrid.model_storage import (
     IMPORTED,
+    NO_WEIGHTS,
     SavedModel,
     delete_model,
     list_models,
@@ -95,6 +96,7 @@ from cortexgrid.model_storage import (
     set_model_requirements,
 )
 from cortexgrid.model_storage import import_model as _import_model_storage
+from cortexgrid.model_storage import register_model as _register_model_storage
 from cortexgrid.model_storage import save_model as _save_model_storage
 from cortexgrid.model_serving import (
     Deployment,
@@ -199,6 +201,32 @@ def import_model(
     return model
 
 
+def register_model(
+    serve_app: type,
+    family: str,
+    suffix: str,
+    requirements: ModelRequirements | None = None,
+    config: dict[str, str] | None = None,
+) -> SavedModel:
+    """Register a model with no weights of its own once - a serve-app that
+    forwards to a hosted API stages nothing - reuse it on every later call, and
+    record on the current Experiment's run which one it used.
+
+    `import_model` without the import: everything it needs beyond its code goes
+    in `config`, which the serve-app reads with `model_config` at construction
+    (see `cortexgrid.model_storage.register_model`). The model belongs to no
+    run, so the run keeps the link the same way, under the same tag
+    `imported_model/<family>/<suffix>`."""
+    experiment = Experiment.get_instance()
+    model = _register_model_storage(
+        serve_app, family, suffix, requirements, config
+    )
+    get_mlflow_client().set_tag(
+        experiment.run_id, f"imported_model/{family}/{suffix}", model.created_at
+    )
+    return model
+
+
 __all__ = [
     "Experiment",
     "delete_experiment",
@@ -255,9 +283,11 @@ __all__ = [
     "delete_secret",
     # Model registry
     "IMPORTED",
+    "NO_WEIGHTS",
     "SavedModel",
     "save_model",
     "import_model",
+    "register_model",
     "load_model",
     "list_models",
     "model_registry_status",
