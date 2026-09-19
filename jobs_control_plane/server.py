@@ -206,8 +206,18 @@ def poll_once(
                 stop_ray_job(rjob)
             continue
 
-        status = get_ray_job_status(rjob)
-        if status == JobStatus.PENDING:
+        rjob_status = get_ray_job_status(rjob)
+        ray_reported_events = [e for e in cjob.history if e.ray_job_id]
+        if rjob is None and ray_reported_events:
+            # Ray's store did not survive a head restart, so the last state it
+            # reported stands; one still in flight died with the store.
+            last = JobStatus(ray_reported_events[-1].state)
+            in_flight_when_lost = last in (JobStatus.PENDING, JobStatus.RUNNING)
+            cjob_status = JobStatus.FAILED if in_flight_when_lost else last
+        else:
+            cjob_status = rjob_status
+        
+        if cjob_status == JobStatus.PENDING:
             log.info(
                 "Poll once(pair_idx=%d) - starting job: cjob=%s rjob=%s",
                 pair_idx,
@@ -220,7 +230,7 @@ def poll_once(
                 cjob.job_id,
                 executor.submit(_submit_job_worker, cjob.run_id, cjob.job_id, 0),
             )
-        elif status == JobStatus.FAILED and cjob.retry:
+        elif cjob_status == JobStatus.FAILED and cjob.retry:
             log.info(
                 "Poll once(pair_idx=%d) - restarting job: cjob=%s rjob=%s",
                 pair_idx,
