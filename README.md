@@ -4,7 +4,7 @@
 
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
-| cortexgrid integration | - | <!--s:build_cortexgrid_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_integration-->🟢 passing<!--/s--> |
+| cortexgrid integration | - | <!--s:build_cortexgrid_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_integration-->🔴 failing<!--/s--> |
 | ui integration | - | <!--s:build_cortexgrid_ui_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_ui_integration-->🔴 failing<!--/s--> |
 | cortexgrid | <!--s:test_cortexgrid-->🔴 failing<!--/s--> | - | - |
 | jobs control plane | <!--s:test_jobs_control_plane-->🔴 failing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
