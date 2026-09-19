@@ -24,10 +24,15 @@ from cortexgrid.jobs import (
     JobResultUnavailable,
     LifecycleEvent,
     Payload,
+    delete_job,
     list_experiment_run_jobs,
+    purge_abandoned_job,
+    purge_ray_job,
     stop_experiment_run_jobs,
     wait_for_job_result,
 )
+
+from tests.fakes import FakeRay
 
 
 EXPERIMENT_NAME = "exp"
@@ -83,6 +88,11 @@ class FakeMLflow:
             SimpleNamespace(path=f"{path}/{d.name}", is_dir=d.is_dir())
             for d in target.iterdir()
         ]
+
+    def get_run(self, run_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            info=SimpleNamespace(run_id=run_id, artifact_uri=f"fake://{run_id}")
+        )
 
 
 class FakeS3:
@@ -579,6 +589,214 @@ class TestStopExperimentRunJobs(unittest.TestCase):
         self.assertTrue(self._loaded("pending").stop_requested)
         self.assertTrue(self._loaded("running").stop_requested)
         self.assertTrue(self._loaded("requested").stop_requested)
+
+
+class FakeArtifactRepo:
+    """Stand-in for mlflow's artifact repository, over FakeMLflow's tree."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def delete_artifacts(self, artifact_path: str = "") -> None:
+        shutil.rmtree(self.root / artifact_path, ignore_errors=True)
+
+
+class FakeS3Packages:
+    """Stand-in for the s3_util module: records what was wiped."""
+
+    def __init__(self) -> None:
+        self.deleted_prefixes: list[str] = []
+
+    def delete_prefix(self, prefix: str) -> None:
+        self.deleted_prefixes.append(prefix)
+
+
+class LatchWatchingRay(FakeRay):
+    """Records the job's stop_requested latch as each attempt is stopped."""
+
+    def __init__(self, jobs: dict[str, str], job_id: str) -> None:
+        super().__init__(jobs)
+        self.job_id = job_id
+        self.latch_at_stop: list[bool] = []
+
+    def stop_job(self, submission_id: str) -> None:
+        self.latch_at_stop.append(
+            JobLifecycle.load_from_mlflow(RUN_ID, self.job_id).stop_requested
+        )
+        super().stop_job(submission_id)
+
+
+class StubbornRay(FakeRay):
+    """A ray whose jobs keep running for `settles_after` status reads."""
+
+    def __init__(self, jobs: dict[str, str], settles_after: int) -> None:
+        super().__init__(jobs)
+        self.settles_after = settles_after
+        self.status_reads = 0
+
+    def get_job_status(self, submission_id: str) -> Any:
+        self.status_reads += 1
+        if self.status_reads <= self.settles_after:
+            return SimpleNamespace(value="RUNNING")
+        return super().get_job_status(submission_id)
+
+
+class _JobTeardownTest(unittest.TestCase):
+    """Shared rig: a temp-dir MLflow, a fake Ray and a recording s3_util."""
+
+    ray: FakeRay
+
+    def _patch_infra(self, ray: FakeRay) -> None:
+        self.fake_mlflow = FakeMLflow()
+        self.fake_s3 = FakeS3Packages()
+        self.ray = ray
+        patchers = [
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+            patch("cortexgrid.jobs.s3_util", self.fake_s3),
+            patch(
+                "cortexgrid.jobs.get_artifact_repository",
+                side_effect=lambda *a, **k: FakeArtifactRepo(self.fake_mlflow.root),
+            ),
+            patch(
+                "cortexgrid.ray_util.get_ray_job_submission_client",
+                return_value=ray,
+            ),
+            patch("cortexgrid.jobs.time.sleep", return_value=None),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _save_job(self, job_id: str, stop_requested: bool = False) -> None:
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id=job_id,
+            stop_requested=stop_requested,
+        ).save_to_mlflow()
+
+
+class TestDeleteJob(_JobTeardownTest):
+    """delete_job leaves nothing behind that could resurrect the job."""
+
+    def test_deleted_job_is_no_longer_listed_for_the_run(self) -> None:
+        self._patch_infra(FakeRay())
+        self._save_job("j1")
+        self._save_job("j2")
+
+        delete_job(RUN_ID, "j1")
+
+        self.assertEqual(
+            [j.job_id for j in list_experiment_run_jobs(RUN_ID)], ["j2"]
+        )
+
+    def test_every_ray_attempt_of_the_job_is_purged(self) -> None:
+        self._patch_infra(
+            FakeRay({"run-1-j1-0": "FAILED", "run-1-j1-1": "RUNNING"})
+        )
+        self._save_job("j1")
+
+        delete_job(RUN_ID, "j1")
+
+        self.assertEqual(list(self.ray.jobs), [])
+
+    def test_ray_attempts_of_other_jobs_are_untouched(self) -> None:
+        self._patch_infra(
+            FakeRay({"run-1-j1-0": "RUNNING", "run-1-j2-0": "RUNNING"})
+        )
+        self._save_job("j1")
+        self._save_job("j2")
+
+        delete_job(RUN_ID, "j1")
+
+        self.assertEqual(list(self.ray.jobs), ["run-1-j2-0"])
+
+    def test_job_package_is_wiped_from_s3(self) -> None:
+        self._patch_infra(FakeRay())
+        self._save_job("j1")
+
+        delete_job(RUN_ID, "j1")
+
+        self.assertEqual(self.fake_s3.deleted_prefixes, ["job/j1/"])
+
+    def test_stop_is_requested_before_any_ray_attempt_is_touched(self) -> None:
+        """A retry job must not be re-submitted while it is being torn down."""
+        ray = LatchWatchingRay({"run-1-j1-0": "RUNNING"}, "j1")
+        self._patch_infra(ray)
+        self._save_job("j1")
+
+        delete_job(RUN_ID, "j1")
+
+        self.assertEqual(ray.latch_at_stop, [True])
+
+    def test_deleting_a_job_that_is_not_there_is_an_error(self) -> None:
+        self._patch_infra(FakeRay())
+
+        with self.assertRaises(FileNotFoundError):
+            delete_job(RUN_ID, "never-existed")
+
+
+class TestPurgeAbandonedJob(_JobTeardownTest):
+    """A job whose lifecycle is gone is only its Ray attempts."""
+
+    def test_every_attempt_of_the_job_is_purged(self) -> None:
+        self._patch_infra(
+            FakeRay({"run-1-j1-0": "FAILED", "run-1-j1-1": "RUNNING"})
+        )
+
+        purge_abandoned_job(RUN_ID, "j1")
+
+        self.assertEqual(list(self.ray.jobs), [])
+
+    def test_attempts_of_other_jobs_are_untouched(self) -> None:
+        self._patch_infra(
+            FakeRay({"run-1-j1-0": "RUNNING", "run-1-j2-0": "RUNNING"})
+        )
+
+        purge_abandoned_job(RUN_ID, "j1")
+
+        self.assertEqual(list(self.ray.jobs), ["run-1-j2-0"])
+
+    def test_nothing_to_purge_is_not_an_error(self) -> None:
+        self._patch_infra(FakeRay())
+
+        purge_abandoned_job(RUN_ID, "j1")
+
+        self.assertEqual(list(self.ray.jobs), [])
+
+
+class TestPurgeRayJob(_JobTeardownTest):
+    """purge_ray_job is for submissions no cortexgrid job claims any more."""
+
+    def test_stopped_job_is_deleted_from_rays_store(self) -> None:
+        self._patch_infra(FakeRay({"orphan-0": "RUNNING"}))
+
+        purge_ray_job("orphan-0")
+
+        self.assertEqual(list(self.ray.jobs), [])
+
+    def test_waits_for_the_job_to_settle_before_deleting_it(self) -> None:
+        ray = StubbornRay({"orphan-0": "RUNNING"}, settles_after=2)
+        self._patch_infra(ray)
+
+        purge_ray_job("orphan-0")
+
+        self.assertGreater(ray.status_reads, 2)
+        self.assertEqual(list(ray.jobs), [])
+
+    def test_job_that_never_settles_is_reported_and_left_alone(self) -> None:
+        ray = StubbornRay({"orphan-0": "RUNNING"}, settles_after=10**6)
+        self._patch_infra(ray)
+
+        with patch("cortexgrid.jobs._RAY_PURGE_TIMEOUT_S", 0):
+            with self.assertRaises(TimeoutError):
+                purge_ray_job("orphan-0")
+
+        self.assertEqual(list(ray.jobs), ["orphan-0"])
 
 
 if __name__ == "__main__":
