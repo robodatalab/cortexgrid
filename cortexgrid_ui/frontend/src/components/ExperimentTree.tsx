@@ -1,5 +1,7 @@
 import { Fragment } from "react";
 import { FlaskConical, Play, Cog, Trash2 } from "lucide-react";
+import { jobStatusClass } from "../jobStatus";
+import "../jobStatus.css";
 import "./ExperimentTree.css";
 
 export type ExperimentRun = {
@@ -200,7 +202,7 @@ export function ExperimentTree({
                                                                         }
                                                                     </span>
                                                                     <span
-                                                                        className={`experiment-tree__job-status experiment-tree__job-status--${job.status}`}
+                                                                        className={`experiment-tree__job-status ${jobStatusClass(job.status)}`}
                                                                     >
                                                                         {
                                                                             job.status

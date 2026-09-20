@@ -1,0 +1,19 @@
+/* The one place a job status is coloured. See jobStatus.ts. */
+.job-status {
+    font-size: var(--font-xs);
+}
+
+.job-status--pending { color: #666; }
+.job-status--running { color: #0066cc; }
+.job-status--finished { color: #228b22; }
+.job-status--failed { color: #cc0000; }
+.job-status--stopped { color: #a15c00; }
+.job-status--deleting { color: #a15c00; font-style: italic; }
+
+/* Ray could not say: louder than a failure, which at least is an answer. */
+.job-status--broken {
+    color: #fff;
+    background: #cc0000;
+    font-weight: 500;
+    padding: 1px 4px;
+}

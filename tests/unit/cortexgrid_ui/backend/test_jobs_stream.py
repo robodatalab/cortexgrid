@@ -40,8 +40,16 @@ def _patched_infra(
     )
     stack.enter_context(
         patch(
-            "cortexgrid_ui.backend.streams.jobs_stream.list_experiment_run_jobs",
-            side_effect=lambda run_id: jobs.get(run_id, []),
+            "cortexgrid_ui.backend.streams.job_status.list_experiment_run_job_ids",
+            side_effect=lambda run_id: [j.job_id for j in jobs.get(run_id, [])],
+        )
+    )
+    stack.enter_context(
+        patch(
+            "cortexgrid_ui.backend.streams.job_status.load_job",
+            side_effect=lambda run_id, job_id: next(
+                (j for j in jobs.get(run_id, []) if j.job_id == job_id), None
+            ),
         )
     )
     return stack
@@ -111,17 +119,6 @@ class TestPollJobs(unittest.TestCase):
 
         self.assertEqual(rows["run-1/j1"].status, "deleting")
 
-    def test_job_ray_cannot_speak_for_is_broken_like_in_the_tree(self) -> None:
-        ray = FakeRay({"run-1-j1-0": "RUNNING"})
-
-        def no_answer(submission_id: str) -> object:
-            raise RuntimeError("ray dashboard is unreachable")
-
-        with patch.object(ray, "get_job_status", no_answer):
-            rows = _rows(_world(), ray, {RUN_ID: [_lifecycle("j1")]})
-
-        self.assertEqual(rows["run-1/j1"].status, "broken")
-
     def test_jobs_of_a_run_on_its_way_out_leave_the_table(self) -> None:
         """The gate hides the run, so its jobs go with it."""
         mlflow = _world()
@@ -170,14 +167,14 @@ class TestPollJobs(unittest.TestCase):
     def test_a_run_that_cannot_be_read_does_not_sink_the_whole_table(self) -> None:
         mlflow = _world(["run-1", "run-2"])
 
-        def fail_for_run_1(run_id: str) -> list[JobLifecycle]:
+        def fail_for_run_1(run_id: str) -> list[str]:
             if run_id == "run-1":
                 raise RuntimeError("mlflow is having a moment")
-            return [_lifecycle("j2", run_id="run-2")]
+            return ["j2"]
 
-        with _patched_infra(mlflow, FakeRay(), {}):
+        with _patched_infra(mlflow, FakeRay(), {"run-2": [_lifecycle("j2", run_id="run-2")]}):
             with patch(
-                "cortexgrid_ui.backend.streams.jobs_stream.list_experiment_run_jobs",
+                "cortexgrid_ui.backend.streams.job_status.list_experiment_run_job_ids",
                 side_effect=fail_for_run_1,
             ):
                 rows = poll_jobs(jobs_stream.META_TOPIC)

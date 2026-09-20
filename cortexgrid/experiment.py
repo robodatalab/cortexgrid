@@ -127,6 +127,16 @@ def _try_create_experiment_and_run(
         experiment = name_gen.haikunate(token_length=2, token_chars="0123456789")
 
     client = MlflowClient(tracking_uri=mlflow_tracking_uri)
+    # An experiment that asked to be deleted is invisible to the lookup
+    # below, so a new one would quietly take its name while the control
+    # plane is still tearing the old one down — and any run created here
+    # would be torn down with it. Refuse instead.
+    pending = get_experiment_by_name(experiment, include_deleting=True)
+    if pending is not None and _pending_deletion(pending.tags):
+        raise RuntimeError(
+            f"Experiment {experiment!r} is being deleted; wait for the "
+            "control plane to finish before creating it again"
+        )
     # get_experiment_by_name also returns deleted experiments. A deleted one
     # cannot take new runs, so a fresh experiment is created under its name.
     experiment_obj = get_experiment_by_name(experiment)

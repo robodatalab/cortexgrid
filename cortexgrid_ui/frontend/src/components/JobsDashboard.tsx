@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
+import { JOB_STATUSES, jobStatusClass, jobStatusRank } from "../jobStatus";
+import "../jobStatus.css";
 import "./JobsDashboard.css";
 
 export type JobRow = {
@@ -16,25 +18,6 @@ export type JobRow = {
 type SortKey = "job" | "status" | "experiment" | "run";
 type SortDir = "asc" | "desc";
 
-// Status order for the Status column: what needs attention first, what is
-// done last. Alphabetical would scatter running jobs among finished ones.
-// `broken` is what the backend reports when Ray cannot say, the same word
-// the experiments tree uses for it.
-const STATUS_ORDER = [
-    "deleting",
-    "running",
-    "pending",
-    "failed",
-    "broken",
-    "stopped",
-    "finished",
-];
-
-function statusRank(status: string): number {
-    const rank = STATUS_ORDER.indexOf(status);
-    return rank === -1 ? STATUS_ORDER.length : rank;
-}
-
 function experimentOf(row: JobRow): string {
     return row.experiment_name ?? "";
 }
@@ -48,7 +31,7 @@ function compare(a: JobRow, b: JobRow, key: SortKey): number {
         case "job":
             return a.job_id.localeCompare(b.job_id);
         case "status":
-            return statusRank(a.status) - statusRank(b.status);
+            return jobStatusRank(a.status) - jobStatusRank(b.status);
         case "experiment":
             return experimentOf(a).localeCompare(experimentOf(b));
         case "run":
@@ -89,11 +72,11 @@ export function JobsDashboard({ jobs: rows, onOpenJob, onDeleteJob }: Props) {
         () =>
             Array.from(
                 new Set([
-                    ...STATUS_ORDER,
+                    ...JOB_STATUSES,
                     ...countsByStatus.keys(),
                     ...hiddenStatuses,
                 ]),
-            ).sort((a, b) => statusRank(a) - statusRank(b)),
+            ).sort((a, b) => jobStatusRank(a) - jobStatusRank(b)),
         [countsByStatus, hiddenStatuses],
     );
 
@@ -145,9 +128,7 @@ export function JobsDashboard({ jobs: rows, onOpenJob, onDeleteJob }: Props) {
                             onClick={() => toggleStatus(status)}
                             aria-pressed={!hidden}
                         >
-                            <span
-                                className={`jobs-dashboard__status jobs-dashboard__status--${status}`}
-                            >
+                            <span className={jobStatusClass(status)}>
                                 {status}
                             </span>
                             <span className="jobs-dashboard__filter-count">
@@ -205,9 +186,7 @@ export function JobsDashboard({ jobs: rows, onOpenJob, onDeleteJob }: Props) {
                                         {row.job_id}
                                     </td>
                                     <td>
-                                        <span
-                                            className={`jobs-dashboard__status jobs-dashboard__status--${row.status}`}
-                                        >
+                                        <span className={jobStatusClass(row.status)}>
                                             {row.status}
                                         </span>
                                     </td>
