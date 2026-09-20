@@ -1,9 +1,14 @@
-import { FlaskConical, Box, KeyRound } from "lucide-react";
+import { FlaskConical, ListChecks, Box, KeyRound } from "lucide-react";
 import { BrandIcon } from "./BrandIcon";
 import { InfraStatusIndicator } from "./InfraStatusIndicator";
 import "./IconRail.css";
 
-export type RailView = "experiments" | "models" | "secrets" | "infra";
+export type RailView =
+    | "experiments"
+    | "jobs"
+    | "models"
+    | "secrets"
+    | "infra";
 
 type Dashboard = {
     id: string;
@@ -28,6 +33,7 @@ const VIEW_BUTTONS: RailButton[] = [
         label: "Experiments",
         icon: <FlaskConical size={20} />,
     },
+    { view: "jobs", label: "Jobs", icon: <ListChecks size={20} /> },
     { view: "models", label: "Models", icon: <Box size={20} /> },
     { view: "secrets", label: "Secrets", icon: <KeyRound size={20} /> },
 ];

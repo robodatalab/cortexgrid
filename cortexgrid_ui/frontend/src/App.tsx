@@ -10,6 +10,8 @@ import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
 import type { Job } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
+import { JobsDashboard } from './components/JobsDashboard'
+import type { JobRow } from './components/JobsDashboard'
 import { InfraDashboard } from './components/InfraDashboard'
 import { SecretsDashboard } from './components/SecretsDashboard'
 import { IconRail } from './components/IconRail'
@@ -156,6 +158,13 @@ function App() {
   )
   const activeRunJobs = activeRunId ? Object.values(activeRunJobsMap) : null
 
+  // The cluster-wide jobs stream is polled only while its tab is open.
+  const jobRowsById = useStreamList<JobRow>(
+    view === 'jobs' ? '/api/jobs/stream' : null,
+    (j) => j.id,
+  )
+  const jobRows = useMemo(() => Object.values(jobRowsById), [jobRowsById])
+
   const deployments = useMemo(
     () => Object.values(deploymentsById),
     [deploymentsById],
@@ -195,6 +204,16 @@ function App() {
   function navigateToModel(modelId: string) {
     setModelsSelection({ kind: 'model', id: modelId })
     setView('models')
+  }
+
+  function navigateToJob(row: JobRow) {
+    setSelection({
+      kind: 'job',
+      experiment_name: row.experiment_name,
+      run_id: row.run_id,
+      job_id: row.job_id,
+    })
+    setView('experiments')
   }
 
   function deploymentPath(t: {
@@ -271,6 +290,8 @@ function App() {
         <div className="layout__main">
           {view === 'infra' ? (
             <InfraDashboard />
+          ) : view === 'jobs' ? (
+            <JobsDashboard jobs={jobRows} onOpenJob={navigateToJob} />
           ) : view === 'secrets' ? (
             <SecretsDashboard />
           ) : view === 'models' ? (
