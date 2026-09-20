@@ -57,6 +57,7 @@ from cortexgrid_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
     job_details_stream,
+    jobs_stream,
     models_stream,
     run_dashboard_stream,
     run_jobs_stream,
@@ -131,6 +132,7 @@ async def _start_refreshers() -> None:
         run_jobs_stream.refresher,
         run_dashboard_stream.refresher,
         job_details_stream.refresher,
+        jobs_stream.refresher,
         run_notes_stream.refresher,
         experiment_notes_stream.refresher,
         models_stream.models_refresher,
@@ -330,6 +332,11 @@ async def runs_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
     await serve_websocket(
         experiments_stream.runs_refresher, ws, experiment_name
     )
+
+
+@app.websocket("/api/jobs/stream")
+async def ws_jobs(ws: WebSocket) -> None:
+    await serve_websocket(jobs_stream.refresher, ws, jobs_stream.JOBS_TOPIC)
 
 
 @app.websocket("/api/runs/{run_id}/jobs/stream")

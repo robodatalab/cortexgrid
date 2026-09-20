@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import App from '../src/App'
 
@@ -26,17 +27,27 @@ describe('App', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders the primary nav rail with Experiments, Models, and Secrets', () => {
+  it('renders the primary nav rail with Experiments, Jobs, Models, and Secrets', () => {
     render(<App />)
     expect(
       screen.getByRole('button', { name: /experiments/i }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /jobs/i })).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /models/i }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /secrets/i }),
     ).toBeInTheDocument()
+  })
+
+  it('opens the jobs table from the nav rail', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /jobs/i }))
+
+    expect(screen.getByRole('heading', { name: 'Jobs' })).toBeInTheDocument()
   })
 
   it('renders a link per dashboard pointing at its url', async () => {
