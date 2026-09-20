@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from cortexgrid.experiment import list_experiments, set_instance
+from cortexgrid.experiment import (
+    DELETE_REQUESTED_TAG,
+    list_experiments,
+    set_instance,
+)
 from cortexgrid_ui.backend.main import app
 from cortexgrid_ui.backend.streams import experiments_stream
 from cortexgrid_ui.backend.streams.experiments_stream import Run
@@ -140,7 +144,7 @@ class TestDeleteRunEndpoint(unittest.TestCase):
             ]
         )
 
-    def test_deleted_run_is_gone_from_listings_cache_s3_and_ray(self) -> None:
+    def test_deleted_run_leaves_the_listings_and_the_stream_at_once(self) -> None:
         s3, mlflow, ray, db = self._build_world()
         self._seed_full_cache()
 
@@ -153,10 +157,17 @@ class TestDeleteRunEndpoint(unittest.TestCase):
         self.assertNotIn(
             "alpha-run", experiments_stream.runs_cache.get("alpha")
         )
-        self.assertEqual(
-            [k for k in s3.objects if k.startswith("job/j1/")], []
-        )
-        self.assertEqual(ray.jobs["run-1-j1-0"].status, "STOPPED")
+
+    def test_deleting_a_run_stops_and_wipes_nothing_itself(self) -> None:
+        """Ray and the job packages are the control plane's to clear."""
+        s3, mlflow, ray, db = self._build_world()
+        self._seed_full_cache()
+
+        with _patched_infra(s3, mlflow, ray, db):
+            self.client.delete("/api/runs/run-1")
+
+        self.assertIn("job/j1/project_code_root.tar.gz", s3.objects)
+        self.assertEqual(ray.jobs["run-1-j1-0"].status, "RUNNING")
 
     def test_deleting_run_purges_its_notes_from_the_database(self) -> None:
         s3, mlflow, ray, db = self._build_world()
@@ -192,8 +203,6 @@ class TestDeleteRunEndpoint(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertNotIn("run-1", [e.run_id for e in list_experiments()])
 
-        self.assertEqual([k for k in s3.objects if k.startswith("job/j1/")], [])
-        self.assertEqual(ray.jobs["run-1-j1-0"].status, "STOPPED")
         self.assertEqual([r["run_id"] for r in db.run_notes], ["run-2"])
 
 
@@ -260,7 +269,9 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
             ]
         )
 
-    def test_deleted_experiment_is_gone_from_listings_cache_s3_and_ray(self) -> None:
+    def test_deleted_experiment_leaves_the_listings_and_the_stream_at_once(
+        self,
+    ) -> None:
         s3, mlflow, ray, db = self._build_world()
         self._seed_full_cache()
 
@@ -277,10 +288,17 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
             set(experiments_stream.runs_cache.get("beta").keys()), {"beta-1"}
         )
 
-        self.assertEqual([k for k in s3.objects if k.startswith("job/j1/")], [])
-        self.assertEqual([k for k in s3.objects if k.startswith("job/j2/")], [])
-        self.assertEqual(ray.jobs["run-1-j1-0"].status, "STOPPED")
-        self.assertEqual(ray.jobs["run-2-j2-0"].status, "STOPPED")
+    def test_deleting_an_experiment_stops_and_wipes_nothing_itself(self) -> None:
+        s3, mlflow, ray, db = self._build_world()
+        self._seed_full_cache()
+
+        with _patched_infra(s3, mlflow, ray, db):
+            self.client.delete("/api/experiments/alpha")
+
+        self.assertIn("job/j1/project_code_root.tar.gz", s3.objects)
+        self.assertIn("job/j2/project_code_root.tar.gz", s3.objects)
+        self.assertEqual(ray.jobs["run-1-j1-0"].status, "RUNNING")
+        self.assertEqual(ray.jobs["run-2-j2-0"].status, "RUNNING")
 
     def test_deleting_experiment_purges_its_experiment_notes(self) -> None:
         s3, mlflow, ray, db = self._build_world()
@@ -329,10 +347,6 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
                 [e.experiment_name for e in list_experiments()], ["beta"]
             )
 
-        self.assertEqual([k for k in s3.objects if k.startswith("job/j1/")], [])
-        self.assertEqual([k for k in s3.objects if k.startswith("job/j2/")], [])
-        self.assertEqual(ray.jobs["run-1-j1-0"].status, "STOPPED")
-        self.assertEqual(ray.jobs["run-2-j2-0"].status, "STOPPED")
         self.assertEqual([r["run_id"] for r in db.run_notes], ["run-3"])
         self.assertEqual(
             [r["experiment_name"] for r in db.experiment_notes], ["beta"]
@@ -359,9 +373,8 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
 
         self.assertEqual([r["run_id"] for r in db.run_notes], ["run-3"])
         self.assertEqual(
-            [k for k in s3.objects if k.startswith("job/j2/")], []
+            mlflow.get_run("run-2").tags.get(DELETE_REQUESTED_TAG), "true"
         )
-        self.assertEqual(ray.jobs["run-2-j2-0"].status, "STOPPED")
 
 
 if __name__ == "__main__":

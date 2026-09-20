@@ -81,6 +81,7 @@ class JobLifecycle:
     run_id: str
     job_id: str
     stop_requested: bool = False  # latch: False -> True, never cleared
+    delete_requested: bool = False  # latch: False -> True, never cleared
     retry: bool = False  # static flag set at job creation
     num_gpus: int = 0
     num_cpus: int = 1
@@ -529,4 +530,31 @@ def stop_experiment_run_jobs(run_id: str) -> None:
         if job.stop_requested:
             continue
         job.stop_requested = True
+        job.save_to_mlflow()
+
+
+def request_job_deletion(run_id: str, job_id: str) -> None:
+    """Ask for one job to be deleted by flipping the delete_requested latch.
+
+    This function never touches Ray, S3 or the job's artifacts: it
+    records the intent on the job's own record and returns. The control
+    plane observes the latch on its next poll and is the only thing that
+    tears the job down, so a job created and deleted between two polls
+    is simply never submitted.
+
+    Idempotent: an already-requested job is left alone.
+    """
+    lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+    if lifecycle.delete_requested:
+        return
+    lifecycle.delete_requested = True
+    lifecycle.save_to_mlflow()
+
+
+def request_run_jobs_deletion(run_id: str) -> None:
+    """Ask for every job in the run to be deleted. See `request_job_deletion`."""
+    for job in list_experiment_run_jobs(run_id):
+        if job.delete_requested:
+            continue
+        job.delete_requested = True
         job.save_to_mlflow()

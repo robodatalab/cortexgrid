@@ -25,6 +25,8 @@ from cortexgrid.jobs import (
     LifecycleEvent,
     Payload,
     list_experiment_run_jobs,
+    request_job_deletion,
+    request_run_jobs_deletion,
     stop_experiment_run_jobs,
     wait_for_job_result,
 )
@@ -579,6 +581,97 @@ class TestStopExperimentRunJobs(unittest.TestCase):
         self.assertTrue(self._loaded("pending").stop_requested)
         self.assertTrue(self._loaded("running").stop_requested)
         self.assertTrue(self._loaded("requested").stop_requested)
+
+
+class TestRequestJobDeletion(unittest.TestCase):
+    """Deletion is requested the way stopping is: a latch, and nothing else.
+
+    Ray is deliberately left unpatched — any call to it from this path
+    would fail the test rather than pass silently.
+    """
+
+    def setUp(self) -> None:
+        self.fake_mlflow = FakeMLflow()
+        patchers = [
+            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
+            patch(
+                "cortexgrid.jobs.get_mlflow_tracking_uri",
+                return_value="http://test:5000",
+            ),
+        ]
+        for p in patchers:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _save_job(self, job_id: str, delete_requested: bool = False) -> None:
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id=job_id,
+            delete_requested=delete_requested,
+        ).save_to_mlflow()
+
+    def _loaded(self, job_id: str) -> JobLifecycle:
+        return JobLifecycle.load_from_mlflow(RUN_ID, job_id)
+
+    def _stored(self, job_id: str) -> str:
+        return (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
+
+    def test_flips_the_latch_on_the_job(self) -> None:
+        self._save_job("j1")
+
+        request_job_deletion(RUN_ID, "j1")
+
+        self.assertTrue(self._loaded("j1").delete_requested)
+
+    def test_leaves_the_job_in_place_for_the_control_plane_to_tear_down(self) -> None:
+        """The record stays: the poller needs it to know what to delete."""
+        self._save_job("j1")
+
+        request_job_deletion(RUN_ID, "j1")
+
+        self.assertEqual([j.job_id for j in list_experiment_run_jobs(RUN_ID)], ["j1"])
+
+    def test_does_not_touch_other_jobs(self) -> None:
+        self._save_job("j1")
+        self._save_job("j2")
+
+        request_job_deletion(RUN_ID, "j1")
+
+        self.assertFalse(self._loaded("j2").delete_requested)
+
+    def test_does_not_rewrite_an_already_requested_job(self) -> None:
+        self._save_job("j1", delete_requested=True)
+        original = self._stored("j1")
+
+        request_job_deletion(RUN_ID, "j1")
+
+        self.assertEqual(self._stored("j1"), original)
+
+    def test_unknown_job_is_an_error(self) -> None:
+        with self.assertRaises(FileNotFoundError):
+            request_job_deletion(RUN_ID, "never-existed")
+
+    def test_run_wide_request_flips_every_job_in_the_run(self) -> None:
+        self._save_job("j1")
+        self._save_job("j2", delete_requested=True)
+        self._save_job("j3")
+
+        request_run_jobs_deletion(RUN_ID)
+
+        self.assertTrue(self._loaded("j1").delete_requested)
+        self.assertTrue(self._loaded("j2").delete_requested)
+        self.assertTrue(self._loaded("j3").delete_requested)
+
+    def test_a_latch_written_by_an_older_client_still_loads(self) -> None:
+        """Old records have no delete_requested key; they read as not requested."""
+        self._save_job("j1")
+        path = self.fake_mlflow.root / "job" / "j1" / "lifecycle.json"
+        data = json.loads(path.read_text())
+        del data["delete_requested"]
+        path.write_text(json.dumps(data))
+
+        self.assertFalse(self._loaded("j1").delete_requested)
 
 
 if __name__ == "__main__":

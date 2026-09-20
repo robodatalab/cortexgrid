@@ -10,6 +10,8 @@ import { ExperimentDashboard } from './components/ExperimentDashboard'
 import { RunDashboard } from './components/RunDashboard'
 import type { Job } from './components/RunDashboard'
 import { JobDashboard } from './components/JobDashboard'
+import { JobsDashboard } from './components/JobsDashboard'
+import type { JobRow } from './components/JobsDashboard'
 import { InfraDashboard } from './components/InfraDashboard'
 import { SecretsDashboard } from './components/SecretsDashboard'
 import { IconRail } from './components/IconRail'
@@ -42,6 +44,7 @@ type ExperimentMeta = {
 type PendingDelete =
   | { kind: 'experiment'; experiment_name: string }
   | { kind: 'run'; run_id: string; run_name: string }
+  | { kind: 'job'; row: JobRow }
   | { kind: 'model'; model: Model }
   | { kind: 'model-family'; family: string }
 
@@ -53,6 +56,7 @@ function App() {
   >(null)
   const [view, setView] = useState<RailView>('experiments')
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
+  const [deletingJobIds, setDeletingJobIds] = useState<string[]>([])
 
   const experimentsByName = useStreamList<ExperimentMeta>(
     '/api/experiments/meta/stream',
@@ -81,6 +85,12 @@ function App() {
         return `/api/experiments/${encodeURIComponent(target.experiment_name)}`
       case 'run':
         return `/api/runs/${encodeURIComponent(target.run_id)}`
+      case 'job':
+        // An abandoned job has no run left to delete it from: all that
+        // remains of it is its Ray attempts, so those get purged.
+        return target.row.abandoned
+          ? `/api/jobs/abandoned/${encodeURIComponent(target.row.run_id ?? '')}/${encodeURIComponent(target.row.job_id)}`
+          : `/api/runs/${encodeURIComponent(target.row.run_id ?? '')}/jobs/${encodeURIComponent(target.row.job_id)}`
       case 'model':
         return `/api/models/${encodeURIComponent(target.model.family)}/${encodeURIComponent(target.model.suffix)}/${encodeURIComponent(target.model.run_name)}`
       case 'model-family':
@@ -92,7 +102,17 @@ function App() {
     if (pendingDelete === null) return
     const target = pendingDelete
     setPendingDelete(null)
-    const res = await fetch(deleteUrl(target), { method: 'DELETE' })
+    if (target.kind === 'job') {
+      setDeletingJobIds((prev) => [...prev, target.row.id])
+    }
+    let res: Response
+    try {
+      res = await fetch(deleteUrl(target), { method: 'DELETE' })
+    } finally {
+      if (target.kind === 'job') {
+        setDeletingJobIds((prev) => prev.filter((id) => id !== target.row.id))
+      }
+    }
     if (!res.ok) {
       alert(`Delete failed: HTTP ${res.status}\n${await res.text()}`)
       return
@@ -103,6 +123,13 @@ function App() {
       target.kind === 'run' &&
       (selection?.kind === 'run' || selection?.kind === 'job') &&
       selection.run_id === target.run_id
+    ) {
+      setSelection(null)
+    } else if (
+      target.kind === 'job' &&
+      selection?.kind === 'job' &&
+      selection.run_id === target.row.run_id &&
+      selection.job_id === target.row.job_id
     ) {
       setSelection(null)
     } else if (
@@ -126,6 +153,10 @@ function App() {
         return `Delete experiment "${target.experiment_name}" and all of its runs? This cannot be undone.`
       case 'run':
         return `Delete run "${target.run_name}"? This cannot be undone.`
+      case 'job':
+        return target.row.abandoned
+          ? `Delete abandoned job "${target.row.job_id}"? Its Ray submission is stopped and purged. This cannot be undone.`
+          : `Delete job "${target.row.job_id}" from run "${target.row.run_name}"? Its Ray attempts, code package and history go with it. This cannot be undone.`
       case 'model':
         return `Delete model "${target.model.family}/${target.model.suffix}" from run "${target.model.run_name}"? This cannot be undone.`
       case 'model-family':
@@ -155,6 +186,13 @@ function App() {
     (j) => j.job_id,
   )
   const activeRunJobs = activeRunId ? Object.values(activeRunJobsMap) : null
+
+  // The cluster-wide jobs stream is polled only while its tab is open.
+  const jobRowsById = useStreamList<JobRow>(
+    view === 'jobs' ? '/api/jobs/stream' : null,
+    (j) => j.id,
+  )
+  const jobRows = useMemo(() => Object.values(jobRowsById), [jobRowsById])
 
   const deployments = useMemo(
     () => Object.values(deploymentsById),
@@ -195,6 +233,17 @@ function App() {
   function navigateToModel(modelId: string) {
     setModelsSelection({ kind: 'model', id: modelId })
     setView('models')
+  }
+
+  function navigateToJob(row: JobRow) {
+    if (row.experiment_name === null || row.run_id === null) return
+    setSelection({
+      kind: 'job',
+      experiment_name: row.experiment_name,
+      run_id: row.run_id,
+      job_id: row.job_id,
+    })
+    setView('experiments')
   }
 
   function deploymentPath(t: {
@@ -271,6 +320,13 @@ function App() {
         <div className="layout__main">
           {view === 'infra' ? (
             <InfraDashboard />
+          ) : view === 'jobs' ? (
+            <JobsDashboard
+              jobs={jobRows}
+              deletingIds={deletingJobIds}
+              onOpenJob={navigateToJob}
+              onDeleteJob={(row) => setPendingDelete({ kind: 'job', row })}
+            />
           ) : view === 'secrets' ? (
             <SecretsDashboard />
           ) : view === 'models' ? (

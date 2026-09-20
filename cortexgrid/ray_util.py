@@ -101,6 +101,15 @@ def stop_ray_job(ray_job_id: str) -> None:
     client.stop_job(ray_job_id)
 
 
+def delete_ray_job(ray_job_id: str) -> None:
+    """Drop a ray job and its data from Ray's job store.
+
+    Ray rejects the call for a job that has not settled, so callers stop
+    the job and let it reach a terminal state first."""
+    client = get_ray_job_submission_client()
+    client.delete_job(ray_job_id)
+
+
 def list_ray_jobs_with_submission_id() -> list[str]:
     """List all ray jobs, the ones that received submission id."""
     client = get_ray_job_submission_client()

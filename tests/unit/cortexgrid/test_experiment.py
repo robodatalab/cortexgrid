@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from mlflow.tracking import MlflowClient
 
 from cortexgrid.experiment import (
+    DELETE_REQUESTED_TAG,
     Experiment,
     delete_experiment,
     get_experiment_by_run_name,
@@ -79,10 +80,24 @@ class TestExperiment(unittest.TestCase):
         self.fake_mlflow.search_runs.assert_called_once_with(
             experiment_ids=["e1", "e2"],
             filter_string="attributes.run_name = 'boogey-46'",
-            max_results=1,
         )
         self.fake_mlflow.get_experiment.assert_called_once_with("e2")
         self.assertEqual(result, Experiment("trainers", "r-7"))
+
+    def test_get_experiment_by_run_name_skips_a_run_on_its_way_out(self) -> None:
+        """A deleted run must not answer to its name while it is torn down."""
+        self.fake_mlflow.search_experiments.return_value = [
+            MagicMock(experiment_id="e1")
+        ]
+        self.fake_mlflow.search_runs.return_value = [
+            MagicMock(
+                info=MagicMock(experiment_id="e1", run_id="r-7"),
+                data=MagicMock(tags={DELETE_REQUESTED_TAG: "true"}),
+            ),
+        ]
+
+        with self.assertRaises(ValueError):
+            get_experiment_by_run_name("boogey-46")
 
     def test_get_experiment_by_run_name_raises_when_no_runs_match(self) -> None:
         self.fake_mlflow.search_experiments.return_value = [
@@ -176,14 +191,16 @@ class TestDeletedExperimentNames(unittest.TestCase):
         self.assertEqual(old.name, f"replaced__deleted__{old_id}")
 
     def test_delete_experiment_releases_the_name(self) -> None:
+        """The name is free on return; the record waits for the control plane."""
         old_id = self.client.create_experiment("released")
 
         delete_experiment("released")
 
         self.assertIsNone(self.client.get_experiment_by_name("released"))
         old = self.client.get_experiment(old_id)
-        self.assertEqual(old.lifecycle_stage, "deleted")
         self.assertEqual(old.name, f"released__deleted__{old_id}")
+        self.assertEqual(old.lifecycle_stage, "active")
+        self.assertEqual(old.tags.get(DELETE_REQUESTED_TAG), "true")
 
     def test_init_after_delete_experiment_creates_a_new_experiment(self) -> None:
         old_id = self.client.create_experiment("cycled")
