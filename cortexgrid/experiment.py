@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cortexgrid.infra import get_mlflow_tracking_uri
-from cortexgrid.jobs import list_experiment_run_jobs, request_run_jobs_deletion
+from cortexgrid.jobs import request_run_jobs_deletion
 from cortexgrid.model_storage import delete_models_for_run
 from haikunator import Haikunator  # type: ignore
 from mlflow.entities import Experiment as MlflowExperiment

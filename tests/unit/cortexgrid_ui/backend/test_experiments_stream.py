@@ -12,7 +12,6 @@ from cortexgrid_ui.backend.streams.experiments_stream import (
 )
 
 from tests.fakes import (
-    FakeArtifact,
     FakeMlflowClient,
     FakeMlflowExperiment,
     FakeMlflowRun,
