@@ -37,6 +37,7 @@ def _make_lifecycle(
     stop_requested: bool = False,
     retry: bool = False,
     pip_requirements: list[str] | None = None,
+    delete_requested: bool = False,
 ) -> JobLifecycle:
     return JobLifecycle(
         experiment_name=EXPERIMENT_NAME,
@@ -45,6 +46,7 @@ def _make_lifecycle(
         stop_requested=stop_requested,
         retry=retry,
         pip_requirements=pip_requirements or [],
+        delete_requested=delete_requested,
     )
 
 
@@ -247,6 +249,10 @@ class TestPollOnce(unittest.TestCase):
         self._ray_state: dict[str, JobStatus] = {}
         self._submitted: list[tuple[str, str, int]] = []
         self._stopped: list[str] = []
+        self._ray_deleted: list[str] = []
+        self._s3_deleted: list[str] = []
+        self._artifacts_deleted: list[tuple[str, str]] = []
+        self._recorded: list[JobLifecycle] = []
         self.in_flight: dict[str, tuple[str, str, Future]] = {}
 
         self.executor = MagicMock()
@@ -290,6 +296,28 @@ class TestPollOnce(unittest.TestCase):
             patch(
                 "jobs_control_plane.server.stop_ray_job",
                 side_effect=self._stopped.append,
+            ),
+            patch(
+                "jobs_control_plane.server.delete_ray_job",
+                side_effect=self._ray_deleted.append,
+            ),
+            patch(
+                "jobs_control_plane.server.delete_prefix",
+                side_effect=self._s3_deleted.append,
+            ),
+            patch(
+                "jobs_control_plane.server.delete_run_artifacts",
+                side_effect=lambda run_id, path: self._artifacts_deleted.append(
+                    (run_id, path)
+                ),
+            ),
+            # A spy that still calls through: recording must keep working.
+            patch(
+                "jobs_control_plane.server._record_state",
+                side_effect=lambda cjob, rjob: (
+                    self._recorded.append(cjob),
+                    _record_state(cjob, rjob),
+                )[1],
             ),
             patch("cortexgrid.jobs.JobLifecycle.save_to_mlflow"),
         ]
@@ -376,6 +404,106 @@ class TestPollOnce(unittest.TestCase):
             self.assertEqual(self._stopped, [])
         else:
             self.fail(f"unknown expected_action {expected_action!r}")
+
+    def _erased(self) -> tuple[list[str], list[tuple[str, str]]]:
+        return self._s3_deleted, self._artifacts_deleted
+
+    def test_marked_job_with_a_live_attempt_is_only_stopped(self) -> None:
+        """Ray will not release a job that is still running, so teardown waits."""
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.RUNNING)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._stopped, [ray_submission_id(RUN_ID, JOB_ID, 0)])
+        self.assertEqual(self._ray_deleted, [])
+        self.assertEqual(self._erased(), ([], []))
+
+    def test_marked_job_is_erased_once_its_attempts_have_settled(self) -> None:
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FINISHED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._stopped, [])
+        self.assertEqual(self._ray_deleted, [ray_submission_id(RUN_ID, JOB_ID, 0)])
+        self.assertEqual(self._s3_deleted, [f"job/{JOB_ID}/"])
+        self.assertEqual(self._artifacts_deleted, [(RUN_ID, f"job/{JOB_ID}")])
+
+    def test_stopped_attempt_is_erased_on_the_following_cycle(self) -> None:
+        """Cycle one stops it, cycle two finds it settled and finishes the job."""
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.RUNNING)
+
+        poll_once(self.executor, self.in_flight)
+        self._ray_state[ray_submission_id(RUN_ID, JOB_ID, 0)] = JobStatus.STOPPED
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._ray_deleted, [ray_submission_id(RUN_ID, JOB_ID, 0)])
+        self.assertEqual(self._erased(), ([f"job/{JOB_ID}/"], [(RUN_ID, f"job/{JOB_ID}")]))
+
+    def test_job_created_and_marked_before_it_ever_ran_is_simply_erased(self) -> None:
+        """The create/delete pair collapses: nothing is submitted, ever."""
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [])
+        self.assertEqual(self._stopped, [])
+        self.assertEqual(self._ray_deleted, [])
+        self.assertEqual(self._erased(), ([f"job/{JOB_ID}/"], [(RUN_ID, f"job/{JOB_ID}")]))
+
+    def test_marked_job_is_not_retried_even_when_it_failed(self) -> None:
+        self._cjobs.append(_make_lifecycle(retry=True, delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [])
+
+    def test_marked_job_records_no_further_history(self) -> None:
+        """A job on its way out gets no new lifecycle events."""
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FINISHED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._recorded, [])
+
+    def test_every_attempt_is_erased_not_only_the_latest(self) -> None:
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 1, JobStatus.FINISHED)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(
+            sorted(self._ray_deleted),
+            [
+                ray_submission_id(RUN_ID, JOB_ID, 0),
+                ray_submission_id(RUN_ID, JOB_ID, 1),
+            ],
+        )
+
+    def test_attempts_of_other_jobs_are_left_alone(self) -> None:
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._cjobs.append(_make_lifecycle(job_id="job-2"))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FINISHED)
+        self._seed_ray_attempt(RUN_ID, "job-2", 0, JobStatus.RUNNING)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._ray_deleted, [ray_submission_id(RUN_ID, JOB_ID, 0)])
+        self.assertEqual(self._s3_deleted, [f"job/{JOB_ID}/"])
+
+    def test_a_job_being_torn_down_does_not_hold_up_the_others(self) -> None:
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.RUNNING)
+        self._cjobs.append(_make_lifecycle(job_id="job-2"))
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._submitted, [(RUN_ID, "job-2", 0)])
 
     def test_retry_uses_next_attempt_number_after_several_failures(self) -> None:
         """A retry chain must increment the attempt beyond the highest Ray knows."""
@@ -543,9 +671,12 @@ class TestSubmitJobWorker(unittest.TestCase):
         stop_requested: bool = False,
         with_payload: bool = True,
         pip_requirements: list[str] | None = None,
+        delete_requested: bool = False,
     ) -> None:
         lifecycle = _make_lifecycle(
-            stop_requested=stop_requested, pip_requirements=pip_requirements
+            stop_requested=stop_requested,
+            pip_requirements=pip_requirements,
+            delete_requested=delete_requested,
         )
         payload = None
         if with_payload:
@@ -600,6 +731,14 @@ class TestSubmitJobWorker(unittest.TestCase):
 
     def test_stop_requested_short_circuits_before_submitting(self) -> None:
         self._seed(stop_requested=True)
+
+        _submit_job_worker(RUN_ID, JOB_ID, 0)
+
+        self.assertEqual(self.submitted, [])
+
+    def test_delete_requested_short_circuits_before_submitting(self) -> None:
+        """A job marked while its submission was already dispatched."""
+        self._seed(delete_requested=True)
 
         _submit_job_worker(RUN_ID, JOB_ID, 0)
 

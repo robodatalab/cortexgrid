@@ -21,16 +21,10 @@ from cortexgrid._bundle import bundle, stage, worker_provides
 from cortexgrid.infra import get_mlflow_tracking_uri
 from cortexgrid.ray_util import (
     JobStatus,
-    delete_ray_job,
-    get_ray_job_attempt,
     get_ray_job_id_for_cortexgrid_job,
     get_ray_job_status,
-    list_ray_jobs_with_submission_id,
-    ray_submission_id,
-    stop_ray_job,
 )
 from haikunator import Haikunator  # type: ignore
-from mlflow.store.artifact.artifact_repository_registry import get_artifact_repository
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
@@ -38,8 +32,6 @@ log = logging.getLogger(__name__)
 
 _JOB_POLL_INTERVAL_S = 5.0
 _TERMINAL_JOB_STATES = (JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED)
-_RAY_PURGE_POLL_INTERVAL_S = 1.0
-_RAY_PURGE_TIMEOUT_S = 30.0
 
 
 class JobFailed(RuntimeError):
@@ -89,6 +81,7 @@ class JobLifecycle:
     run_id: str
     job_id: str
     stop_requested: bool = False  # latch: False -> True, never cleared
+    delete_requested: bool = False  # latch: False -> True, never cleared
     retry: bool = False  # static flag set at job creation
     num_gpus: int = 0
     num_cpus: int = 1
@@ -540,81 +533,28 @@ def stop_experiment_run_jobs(run_id: str) -> None:
         job.save_to_mlflow()
 
 
-def ray_attempts_for_job(
-    run_id: str, job_id: str, all_ray_submission_ids: list[str] | None = None
-) -> list[str]:
-    """Every Ray submission id this job has produced, newest attempt last."""
-    if all_ray_submission_ids is None:
-        all_ray_submission_ids = list_ray_jobs_with_submission_id()
-    prefix = ray_submission_id(run_id, job_id, None) + "-"
-    return sorted(
-        (sid for sid in all_ray_submission_ids if sid.startswith(prefix)),
-        key=get_ray_job_attempt,
-    )
+def request_job_deletion(run_id: str, job_id: str) -> None:
+    """Ask for one job to be deleted by flipping the delete_requested latch.
 
+    This function never touches Ray, S3 or the job's artifacts: it
+    records the intent on the job's own record and returns. The control
+    plane observes the latch on its next poll and is the only thing that
+    tears the job down, so a job created and deleted between two polls
+    is simply never submitted.
 
-def purge_ray_job(ray_job_id: str) -> None:
-    """Stop a Ray submission and drop it from Ray's job store.
-
-    Ray only deletes a job that has settled, so the stop is followed by
-    a bounded wait for the terminal state it produces; a job that never
-    settles raises rather than being left half-deleted.
+    Idempotent: an already-requested job is left alone.
     """
-    log.info("purge_ray_job(%s): stopping", ray_job_id)
-    stop_ray_job(ray_job_id)
-    deadline = time.monotonic() + _RAY_PURGE_TIMEOUT_S
-    while get_ray_job_status(ray_job_id) not in _TERMINAL_JOB_STATES:
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Ray job {ray_job_id} did not stop within "
-                f"{_RAY_PURGE_TIMEOUT_S:.0f}s; not deleted"
-            )
-        time.sleep(_RAY_PURGE_POLL_INTERVAL_S)
-    delete_ray_job(ray_job_id)
-    log.info("purge_ray_job(%s): deleted", ray_job_id)
-
-
-def purge_abandoned_job(run_id: str, job_id: str) -> None:
-    """Purge every Ray attempt of a job no lifecycle owns any more.
-
-    What is left of such a job is its submissions in Ray's job store;
-    there is no latch to flip, no package and no artifact to remove.
-    """
-    attempts = ray_attempts_for_job(run_id, job_id)
-    log.info(
-        "purge_abandoned_job(%s, %s): %d ray attempt(s)",
-        run_id,
-        job_id,
-        len(attempts),
-    )
-    for sid in attempts:
-        purge_ray_job(sid)
-
-
-def delete_job(run_id: str, job_id: str) -> None:
-    """Erase a single job so that nothing can bring it back.
-
-    Order matters. The stop_requested latch goes first so the control
-    plane stops spawning fresh attempts for a retry=True job while the
-    teardown runs. Ray's own record of each attempt goes next, or the
-    job would survive as an abandoned submission with no owner. The
-    lifecycle artifact — the control plane's source of truth for the
-    job's existence — is removed last.
-    """
-    log.info("delete_job(%s, %s): start", run_id, job_id)
     lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
-    if not lifecycle.stop_requested:
-        lifecycle.stop_requested = True
-        lifecycle.save_to_mlflow()
-    attempts = ray_attempts_for_job(run_id, job_id)
-    log.info("delete_job(%s, %s): %d ray attempt(s)", run_id, job_id, len(attempts))
-    for sid in attempts:
-        purge_ray_job(sid)
-    s3_util.delete_prefix(f"job/{job_id}/")
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    repo = get_artifact_repository(
-        client.get_run(run_id).info.artifact_uri,
-        tracking_uri=get_mlflow_tracking_uri(),
-    )
-    repo.delete_artifacts(f"job/{job_id}")
-    log.info("delete_job(%s, %s): done", run_id, job_id)
+    if lifecycle.delete_requested:
+        return
+    lifecycle.delete_requested = True
+    lifecycle.save_to_mlflow()
+
+
+def request_run_jobs_deletion(run_id: str) -> None:
+    """Ask for every job in the run to be deleted. See `request_job_deletion`."""
+    for job in list_experiment_run_jobs(run_id):
+        if job.delete_requested:
+            continue
+        job.delete_requested = True
+        job.save_to_mlflow()

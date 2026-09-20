@@ -18,7 +18,16 @@ type SortDir = "asc" | "desc";
 
 // Status order for the Status column: what needs attention first, what is
 // done last. Alphabetical would scatter running jobs among finished ones.
-const STATUS_ORDER = ["running", "pending", "failed", "stopped", "finished"];
+// `broken` is what the backend reports when Ray cannot say, the same word
+// the experiments tree uses for it.
+const STATUS_ORDER = [
+    "running",
+    "pending",
+    "failed",
+    "broken",
+    "stopped",
+    "finished",
+];
 
 function statusRank(status: string): number {
     const rank = STATUS_ORDER.indexOf(status);

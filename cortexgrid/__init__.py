@@ -42,6 +42,8 @@ from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import (
     schedule_remote_job,
     list_experiment_run_jobs,
+    request_job_deletion,
+    request_run_jobs_deletion,
     stop_experiment_run_jobs,
     wait_for_job_result,
     JobFailed,
@@ -67,12 +69,14 @@ from cortexgrid.mlflow_util import (
     list_run_metrics,
     get_metric_history,
     list_run_params,
+    delete_run_artifacts,
     list_run_artifacts,
 )
 from cortexgrid.ray_util import (
     get_ray_status,
     get_ray_logs,
     get_ray_job_url,
+    delete_ray_job,
     stop_ray_job,
     submit_ray_job,
     list_ray_jobs_with_submission_id,
@@ -238,6 +242,8 @@ __all__ = [
     "get_ray_job_status",
     "get_ray_job_id_for_cortexgrid_job",
     "list_experiment_run_jobs",
+    "request_job_deletion",
+    "request_run_jobs_deletion",
     "stop_experiment_run_jobs",
     "JobStatus",
     "JobFailed",
@@ -250,6 +256,7 @@ __all__ = [
     "get_ray_status",
     "get_ray_logs",
     "get_ray_job_url",
+    "delete_ray_job",
     "stop_ray_job",
     "submit_ray_job",
     "get_ray_job_server_uri",
@@ -265,6 +272,7 @@ __all__ = [
     "list_run_metrics",
     "get_metric_history",
     "list_run_params",
+    "delete_run_artifacts",
     "list_run_artifacts",
     "list_experiments",
     # Checkpointing

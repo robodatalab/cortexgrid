@@ -102,10 +102,10 @@ def stop_ray_job(ray_job_id: str) -> None:
 
 
 def delete_ray_job(ray_job_id: str) -> None:
-    """Drop a terminal ray job and its data from Ray's job store.
+    """Drop a ray job and its data from Ray's job store.
 
-    Ray rejects the call for a job that is still in flight, so callers
-    stop the job and wait for it to settle first."""
+    Ray rejects the call for a job that has not settled, so callers stop
+    the job and let it reach a terminal state first."""
     client = get_ray_job_submission_client()
     client.delete_job(ray_job_id)
 

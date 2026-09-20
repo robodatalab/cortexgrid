@@ -195,6 +195,17 @@ describe('JobsDashboard', () => {
     ).toBeDisabled()
   })
 
+  it('shows and can filter a job Ray could not speak for', async () => {
+    const user = userEvent.setup()
+    renderTable([job({ job_id: 'no-answer', status: 'broken' })])
+
+    expect(screen.getAllByText('broken').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: /broken/i }))
+
+    expect(jobColumn()).toEqual([])
+  })
+
   it('says so when there are no jobs at all', () => {
     renderTable([])
     expect(screen.getByText('No jobs')).toBeInTheDocument()

@@ -283,13 +283,6 @@ class FakeRay:
     def get_job_status(self, submission_id: str) -> Any:
         return SimpleNamespace(value=self.jobs[submission_id].status)
 
-    def delete_job(self, submission_id: str) -> None:
-        """Ray only lets go of a job that has settled; mirror that."""
-        job = self.jobs[submission_id]
-        if job.status not in ("SUCCEEDED", "FAILED", "STOPPED"):
-            raise RuntimeError(f"Job {submission_id} is not in a terminal state")
-        del self.jobs[submission_id]
-
 
 @dataclass
 class _NotesRow:

@@ -150,6 +150,13 @@
 .jobs-dashboard__status--failed { color: #cc0000; }
 .jobs-dashboard__status--stopped { color: #a15c00; }
 
+.jobs-dashboard__status--broken {
+    color: #fff;
+    background: #cc0000;
+    font-weight: 500;
+    padding: 1px 4px;
+}
+
 .jobs-dashboard__actions {
     width: 1%;
     text-align: right;

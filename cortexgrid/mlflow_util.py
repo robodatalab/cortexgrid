@@ -14,6 +14,7 @@ import requests
 from cortexgrid.experiment import Experiment
 from cortexgrid.infra import get_mlflow_tracking_uri
 from mlflow.entities import Metric
+from mlflow.store.artifact.artifact_repository_registry import get_artifact_repository
 from mlflow.tracking import MlflowClient
 
 
@@ -108,3 +109,16 @@ def list_run_artifacts(run_id: str, path: str = "") -> list[str]:
     """Return artifact paths for a run."""
     client = get_mlflow_client()
     return [a.path for a in client.list_artifacts(run_id, path=path)]
+
+
+def delete_run_artifacts(run_id: str, path: str) -> None:
+    """Delete everything a run stores under `path`, directory and all.
+
+    MlflowClient has no delete: it goes through the run's artifact
+    repository, which the tracking server proxies to object storage."""
+    client = get_mlflow_client()
+    repo = get_artifact_repository(
+        client.get_run(run_id).info.artifact_uri,
+        tracking_uri=get_mlflow_tracking_uri(),
+    )
+    repo.delete_artifacts(path)

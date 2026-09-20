@@ -2,8 +2,13 @@
 
 Architecture:
 
-- ``JobLifecycle`` is pure static identity plus the ``stop_requested`` and
-  ``retry`` latches. Execution status is never persisted.
+- ``JobLifecycle`` is pure static identity plus the ``stop_requested``,
+  ``delete_requested`` and ``retry`` latches. Execution status is never
+  persisted.
+- Callers never act on a job themselves: they write intent onto the
+  job's own record and this loop is the only thing that submits, stops
+  or deletes. A job created and deleted between two cycles is therefore
+  seen once, as a record asking to be torn down, and is never submitted.
 - Ray is the source of truth for execution state. Each poll cycle reconciles
   cortexgrid jobs (from MLflow) against the set of Ray submissions returned
   by ``list_ray_jobs_with_submission_id``.
@@ -28,6 +33,9 @@ from typing import Any
 from cortexgrid import (
     JobLifecycle,
     LifecycleEvent,
+    delete_prefix,
+    delete_ray_job,
+    delete_run_artifacts,
     get_ray_job_status,
     list_experiment_run_jobs,
     list_experiments,
@@ -45,6 +53,7 @@ log = logging.getLogger("jobs-control-plane")
 POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXGRID_POLL_INTERVAL", "5"))
 STARTER_WORKERS = int(os.environ.get("CORTEXGRID_STARTER_WORKERS", "4"))
 HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
+TERMINAL_STATES = (JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED)
 
 
 def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
@@ -61,11 +70,12 @@ def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
         lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
         log.info("Submitting a job (%s/%s) - lifecycle loaded", run_id, job_id)
 
-        if lifecycle.stop_requested:
+        if lifecycle.stop_requested or lifecycle.delete_requested:
             log.info(
-                "Submitting a job (%s/%s) - Worker skipping job: stop_requested is set",
+                "Submitting a job (%s/%s) - Worker skipping job: %s is set",
                 run_id,
                 job_id,
+                "delete_requested" if lifecycle.delete_requested else "stop_requested",
             )
             return
 
@@ -181,6 +191,38 @@ def _get_jobs_for_processing(
     return not_in_flight_cortexgrid_to_ray_jobs
 
 
+def _attempts_of(cjob: JobLifecycle, all_ray_submission_ids: list[str]) -> list[str]:
+    """Every Ray submission this job has produced, across all attempts."""
+    prefix = ray_submission_id(cjob.run_id, cjob.job_id, None) + "-"
+    return [sid for sid in all_ray_submission_ids if sid.startswith(prefix)]
+
+
+def _tear_down(cjob: JobLifecycle, all_ray_submission_ids: list[str]) -> None:
+    """Advance a job that asked to be deleted by one cycle's worth of work.
+
+    An attempt still in flight is stopped and the rest waits for the next
+    cycle: Ray only releases a job that has settled, and a poll cycle must
+    never block on one. Once every attempt is terminal the job's traces go
+    in one pass — Ray's records, then the code package in S3, then the
+    MLflow artifacts, whose lifecycle.json is the last thing that says this
+    job ever existed.
+    """
+    attempts = _attempts_of(cjob, all_ray_submission_ids)
+    live = [
+        sid for sid in attempts if get_ray_job_status(sid) not in TERMINAL_STATES
+    ]
+    for sid in live:
+        log.info("Tearing down %s/%s - stopping %s", cjob.run_id, cjob.job_id, sid)
+        stop_ray_job(sid)
+    if live:
+        return
+    for sid in attempts:
+        delete_ray_job(sid)
+    delete_prefix(f"job/{cjob.job_id}/")
+    delete_run_artifacts(cjob.run_id, f"job/{cjob.job_id}")
+    log.info("Tearing down %s/%s - done", cjob.run_id, cjob.job_id)
+
+
 def poll_once(
     executor: ProcessPoolExecutor,
     in_flight: dict[str, tuple[str, str, Future]],
@@ -192,7 +234,23 @@ def poll_once(
     cortexgrid_to_ray_jobs = _get_jobs_for_processing(in_flight)
     log.info("Poll once - discovered %d cjob/rjob pairs", len(cortexgrid_to_ray_jobs))
 
+    # Listed once per cycle, and only when something is being deleted:
+    # teardown needs every attempt of a job, not just its latest.
+    all_ray_submission_ids: list[str] | None = None
+
     for pair_idx, (cjob, rjob) in enumerate(cortexgrid_to_ray_jobs):
+        if cjob.delete_requested:
+            log.info(
+                "Poll once(pair_idx=%d) - deleting job: cjob=%s rjob=%s",
+                pair_idx,
+                cjob,
+                rjob,
+            )
+            if all_ray_submission_ids is None:
+                all_ray_submission_ids = list_ray_jobs_with_submission_id()
+            _tear_down(cjob, all_ray_submission_ids)
+            continue
+
         _record_state(cjob, rjob)
 
         if cjob.stop_requested:
