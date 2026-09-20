@@ -1,7 +1,7 @@
 """Cluster-wide jobs stream.
 
-One topic, subscriber-driven: swept only while the Jobs tab is open and
-dropped from the sweep again on unsubscribe.
+One topic, pinned at startup: swept whether or not anyone is watching, so
+the Jobs tab opens on a warm cache instead of waiting out a full sweep.
 
 A row exists here exactly when a job's lifecycle record does. The rows
 come from ``list_experiments()`` for the (experiment, run) pairs and

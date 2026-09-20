@@ -142,6 +142,7 @@ async def _start_refreshers() -> None:
     experiments_stream.experiments_meta_refresher.pin(experiments_stream.META_TOPIC)
     models_stream.models_refresher.pin(models_stream.META_TOPIC)
     deployments_stream.deployments_refresher.pin(deployments_stream.META_TOPIC)
+    jobs_stream.refresher.pin(jobs_stream.JOBS_TOPIC)
 
 
 @app.get("/health")
