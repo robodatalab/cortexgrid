@@ -36,7 +36,12 @@ from cortexgrid.experiment import (
     Experiment,
     delete_experiment,
     delete_run,
+    experiment_has_active_runs,
+    experiments_pending_deletion,
+    finish_experiment_deletion,
+    finish_run_deletion,
     list_experiments,
+    runs_pending_deletion,
 )
 from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import (
@@ -235,6 +240,11 @@ __all__ = [
     "Experiment",
     "delete_experiment",
     "delete_run",
+    "experiment_has_active_runs",
+    "experiments_pending_deletion",
+    "finish_experiment_deletion",
+    "finish_run_deletion",
+    "runs_pending_deletion",
     # Ray / jobs
     "remote",
     "get_job_result",

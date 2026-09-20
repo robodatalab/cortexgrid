@@ -14,6 +14,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from cortexgrid.experiment import (
+    get_experiment_by_name,
+    search_experiments,
+    search_runs,
+)
 from cortexgrid.infra import get_mlflow_tracking_uri
 from cortexgrid.ray_util import (
     get_ray_job_id_for_cortexgrid_job,
@@ -85,21 +90,22 @@ def _build_run(
 
 
 def poll_experiments_meta(_: None) -> dict[ExperimentName, ExperimentMeta]:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    """Through cortexgrid's gate, not the client: a record that asked to be
+    deleted must not come back into the tree on the next poll."""
     return {
         e.name: ExperimentMeta(name=e.name, created_at_ms=e.creation_time)
-        for e in client.search_experiments()
+        for e in search_experiments()
     }
 
 
 def poll_runs(experiment_name: ExperimentName) -> dict[RunName, Run]:
     client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    exp = client.get_experiment_by_name(experiment_name)
+    exp = get_experiment_by_name(experiment_name)
     if exp is None:
         return {}
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     runs: dict[RunName, Run] = {}
-    for mlflow_run in client.search_runs(experiment_ids=[exp.experiment_id]):
+    for mlflow_run in search_runs([exp.experiment_id]):
         run_id = mlflow_run.info.run_id
         try:
             job_ids = [

@@ -36,9 +36,14 @@ from cortexgrid import (
     delete_prefix,
     delete_ray_job,
     delete_run_artifacts,
+    experiment_has_active_runs,
+    experiments_pending_deletion,
+    finish_experiment_deletion,
+    finish_run_deletion,
     get_ray_job_status,
     list_experiment_run_jobs,
     list_experiments,
+    runs_pending_deletion,
     stop_ray_job,
     submit_ray_job,
     list_ray_jobs_with_submission_id,
@@ -173,7 +178,9 @@ def _process_jobs_in_flight(
 def _get_jobs_for_processing(
     in_flight: dict[str, tuple[str, str, Future]],
 ) -> list[tuple[JobLifecycle, str | None]]:
-    experiments = list_experiments()
+    # Records on their way out are hidden from everyone else; this loop is
+    # what makes them go away, so it asks for them explicitly.
+    experiments = list_experiments(include_deleting=True)
     cortexgrid_jobs = [
         job
         for experiment in experiments
@@ -221,6 +228,22 @@ def _tear_down(cjob: JobLifecycle, all_ray_submission_ids: list[str]) -> None:
     delete_prefix(f"job/{cjob.job_id}/")
     delete_run_artifacts(cjob.run_id, f"job/{cjob.job_id}")
     log.info("Tearing down %s/%s - done", cjob.run_id, cjob.job_id)
+
+
+def _reap_records() -> None:
+    """Remove the records whose contents have finished being torn down.
+
+    Bottom-up, one level per cycle at most: a run goes once no job of it
+    is left, and the experiment that held it goes once no run is left.
+    """
+    for run_id in runs_pending_deletion():
+        if list_experiment_run_jobs(run_id):
+            continue
+        finish_run_deletion(run_id)
+    for experiment_id in experiments_pending_deletion():
+        if experiment_has_active_runs(experiment_id):
+            continue
+        finish_experiment_deletion(experiment_id)
 
 
 def poll_once(
@@ -304,6 +327,8 @@ def poll_once(
                     _submit_job_worker, cjob.run_id, cjob.job_id, attempt + 1
                 ),
             )
+
+    _reap_records()
 
     log.info("Poll once - ends")
     return in_flight

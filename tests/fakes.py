@@ -67,6 +67,8 @@ class FakeMlflowExperiment:
     experiment_id: str
     name: str
     lifecycle_stage: str = "active"
+    tags: dict[str, str] = field(default_factory=dict)
+    creation_time: int | None = None
 
 
 @dataclass
@@ -75,6 +77,9 @@ class FakeMlflowRun:
     run_name: str
     experiment_id: str
     lifecycle_stage: str = "active"
+    tags: dict[str, str] = field(default_factory=dict)
+    start_time: int | None = None
+    end_time: int | None = None
 
     @property
     def info(self) -> SimpleNamespace:
@@ -83,7 +88,13 @@ class FakeMlflowRun:
             run_name=self.run_name,
             experiment_id=self.experiment_id,
             lifecycle_stage=self.lifecycle_stage,
+            start_time=self.start_time,
+            end_time=self.end_time,
         )
+
+    @property
+    def data(self) -> SimpleNamespace:
+        return SimpleNamespace(tags=dict(self.tags))
 
 
 @dataclass
@@ -119,6 +130,8 @@ class FakeMlflowClient:
         self.model_versions = []
         self.registered_models = set()
         self._next_version = 1
+        # Ids for records created through the client, well clear of seeded ones.
+        self._next_created = 100
 
     def seed(
         self,
@@ -153,6 +166,24 @@ class FakeMlflowClient:
             result = [r for r in result if r.run_name == wanted]
         return result
 
+    def create_experiment(self, name: str) -> str:
+        self._next_created += 1
+        experiment = FakeMlflowExperiment(
+            experiment_id=f"e{self._next_created}", name=name
+        )
+        self.experiments.append(experiment)
+        return experiment.experiment_id
+
+    def create_run(self, experiment_id: str, run_name: str) -> FakeMlflowRun:
+        self._next_created += 1
+        run = FakeMlflowRun(
+            run_id=f"run-{self._next_created}",
+            run_name=run_name,
+            experiment_id=experiment_id,
+        )
+        self.runs.append(run)
+        return run
+
     def get_experiment(self, experiment_id: str) -> FakeMlflowExperiment:
         for e in self.experiments:
             if e.experiment_id == experiment_id:
@@ -186,6 +217,16 @@ class FakeMlflowClient:
 
     def restore_experiment(self, experiment_id: str) -> None:
         self.get_experiment(experiment_id).lifecycle_stage = "active"
+
+    def set_tag(self, run_id: str, key: str, value: str) -> None:
+        for r in self.runs:
+            if r.run_id == run_id:
+                r.tags[key] = value
+                return
+        raise KeyError(run_id)
+
+    def set_experiment_tag(self, experiment_id: str, key: str, value: str) -> None:
+        self.get_experiment(experiment_id).tags[key] = value
 
     def delete_run(self, run_id: str) -> None:
         for r in self.runs:

@@ -253,6 +253,12 @@ class TestPollOnce(unittest.TestCase):
         self._s3_deleted: list[str] = []
         self._artifacts_deleted: list[tuple[str, str]] = []
         self._recorded: list[JobLifecycle] = []
+        # Records the control plane is meant to finish removing.
+        self._runs_deleting: list[str] = []
+        self._experiments_deleting: list[str] = []
+        self._experiments_with_runs: set[str] = set()
+        self._runs_finished: list[str] = []
+        self._experiments_finished: list[str] = []
         self.in_flight: dict[str, tuple[str, str, Future]] = {}
 
         self.executor = MagicMock()
@@ -276,10 +282,30 @@ class TestPollOnce(unittest.TestCase):
         patchers = [
             patch(
                 "jobs_control_plane.server.list_experiments",
-                side_effect=lambda: [
+                side_effect=lambda include_deleting=False: [
                     Experiment(experiment_name=EXPERIMENT_NAME, run_id=r)
                     for r in sorted({j.run_id for j in self._cjobs})
                 ],
+            ),
+            patch(
+                "jobs_control_plane.server.runs_pending_deletion",
+                side_effect=lambda: list(self._runs_deleting),
+            ),
+            patch(
+                "jobs_control_plane.server.experiments_pending_deletion",
+                side_effect=lambda: list(self._experiments_deleting),
+            ),
+            patch(
+                "jobs_control_plane.server.experiment_has_active_runs",
+                side_effect=lambda eid: eid in self._experiments_with_runs,
+            ),
+            patch(
+                "jobs_control_plane.server.finish_run_deletion",
+                side_effect=self._runs_finished.append,
+            ),
+            patch(
+                "jobs_control_plane.server.finish_experiment_deletion",
+                side_effect=self._experiments_finished.append,
             ),
             patch(
                 "jobs_control_plane.server.list_experiment_run_jobs",
@@ -504,6 +530,51 @@ class TestPollOnce(unittest.TestCase):
         poll_once(self.executor, self.in_flight)
 
         self.assertEqual(self._submitted, [(RUN_ID, "job-2", 0)])
+
+    def test_run_is_removed_once_no_job_of_it_is_left(self) -> None:
+        self._runs_deleting.append(RUN_ID)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._runs_finished, [RUN_ID])
+
+    def test_run_stays_while_a_job_of_it_is_still_being_torn_down(self) -> None:
+        self._cjobs.append(_make_lifecycle(delete_requested=True))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.RUNNING)
+        self._runs_deleting.append(RUN_ID)
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._runs_finished, [])
+
+    def test_experiment_is_removed_once_no_run_of_it_is_left(self) -> None:
+        self._experiments_deleting.append("exp-1")
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._experiments_finished, ["exp-1"])
+
+    def test_experiment_stays_while_a_run_of_it_is_still_there(self) -> None:
+        self._experiments_deleting.append("exp-1")
+        self._experiments_with_runs.add("exp-1")
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._experiments_finished, [])
+
+    def test_a_run_and_the_experiment_over_it_go_bottom_up(self) -> None:
+        """The run first; the experiment follows once nothing is under it."""
+        self._runs_deleting.append(RUN_ID)
+        self._experiments_deleting.append("exp-1")
+        self._experiments_with_runs.add("exp-1")
+
+        poll_once(self.executor, self.in_flight)
+        self.assertEqual((self._runs_finished, self._experiments_finished), ([RUN_ID], []))
+
+        self._experiments_with_runs.discard("exp-1")
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self._experiments_finished, ["exp-1"])
 
     def test_retry_uses_next_attempt_number_after_several_failures(self) -> None:
         """A retry chain must increment the attempt beyond the highest Ray knows."""
