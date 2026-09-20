@@ -32,12 +32,10 @@ function renderTable(
     onOpenJob: (row: JobRow) => void
     onDeleteJob: (row: JobRow) => void
   }> = {},
-  deletingIds: string[] = [],
 ) {
   render(
     <JobsDashboard
       jobs={jobs}
-      deletingIds={deletingIds}
       onOpenJob={handlers.onOpenJob ?? vi.fn()}
       onDeleteJob={handlers.onDeleteJob ?? vi.fn()}
     />,
@@ -186,12 +184,28 @@ describe('JobsDashboard', () => {
     expect(onOpenJob).not.toHaveBeenCalled()
   })
 
-  it('disables the delete button of a job that is already being deleted', () => {
-    const row = job({ job_id: 'going-away' })
-    renderTable([row], {}, [row.id])
+  it('disables the delete button of a job already on its way out', () => {
+    renderTable([job({ job_id: 'going-away', status: 'deleting' })])
 
     expect(
       screen.getByRole('button', { name: /delete job going-away/i }),
+    ).toBeDisabled()
+  })
+
+  it('shows a job on its way out as deleting, above the live ones', () => {
+    renderTable([
+      job({ job_id: 'still-here', status: 'running' }),
+      job({ job_id: 'going-away', status: 'deleting' }),
+    ])
+
+    expect(jobColumn()).toEqual(['going-away', 'still-here'])
+  })
+
+  it('offers no delete for an abandoned job: nothing owns its record', () => {
+    renderTable([abandoned])
+
+    expect(
+      screen.getByRole('button', { name: /delete job lost-fox-77/i }),
     ).toBeDisabled()
   })
 

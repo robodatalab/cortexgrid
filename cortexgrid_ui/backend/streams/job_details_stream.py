@@ -16,8 +16,10 @@ from cortexgrid import s3_util
 from cortexgrid.experiment import get_mlflow_tracking_uri
 from cortexgrid.jobs import JobLifecycle
 from cortexgrid.mlflow_util import list_run_artifacts
-from cortexgrid.ray_util import get_ray_job_status, get_ray_job_url
+from cortexgrid.ray_util import get_ray_job_url
+
 from cortexgrid_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.streams.job_status import job_status
 from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 from mlflow.tracking import MlflowClient
 
@@ -90,7 +92,7 @@ def poll_job(key: JobStreamKey) -> dict[JobId, JobDetail]:
         lifecycle.job_id: JobDetail(
             job_id=lifecycle.job_id,
             readiness=readiness,
-            status=get_ray_job_status(ray_job_id).value,
+            status=job_status(lifecycle, ray_job_id),
             retry=lifecycle.retry,
             stop_requested=lifecycle.stop_requested,
             history=history,

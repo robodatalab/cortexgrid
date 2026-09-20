@@ -19,15 +19,18 @@ from cortexgrid.experiment import (
     search_experiments,
     search_runs,
 )
-from cortexgrid.infra import get_mlflow_tracking_uri
+from cortexgrid.jobs import JobLifecycle
 from cortexgrid.ray_util import (
     get_ray_job_id_for_cortexgrid_job,
-    get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
-from mlflow.tracking import MlflowClient
 
 from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.streams.job_status import (
+    BROKEN,
+    job_status,
+    jobs_of_runs,
+)
 from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 log = logging.getLogger(__name__)
@@ -65,20 +68,20 @@ class Run:
 def _build_run(
     run_id: RunId,
     experiment_name: ExperimentName,
-    job_ids: list[JobId],
+    run_jobs: list[JobLifecycle],
     all_ray_submission_ids: list[str],
     info,
 ) -> Run:
     jobs = []
-    for job_id in job_ids:
+    for job in run_jobs:
         try:
             ray_job_id = get_ray_job_id_for_cortexgrid_job(
-                run_id, job_id, all_ray_submission_ids
+                run_id, job.job_id, all_ray_submission_ids
             )
-            status = get_ray_job_status(ray_job_id).value
+            status = job_status(job, ray_job_id)
         except Exception:
-            status = "broken"
-        jobs.append(JobStatus(job_id=job_id, status=status))
+            status = BROKEN
+        jobs.append(JobStatus(job_id=job.job_id, status=status))
     return Run(
         experiment_name=experiment_name,
         run_id=run_id,
@@ -99,24 +102,20 @@ def poll_experiments_meta(_: None) -> dict[ExperimentName, ExperimentMeta]:
 
 
 def poll_runs(experiment_name: ExperimentName) -> dict[RunName, Run]:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     exp = get_experiment_by_name(experiment_name)
     if exp is None:
         return {}
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
+    mlflow_runs = search_runs([exp.experiment_id])
+    jobs_by_run = jobs_of_runs(r.info.run_id for r in mlflow_runs)
     runs: dict[RunName, Run] = {}
-    for mlflow_run in search_runs([exp.experiment_id]):
+    for mlflow_run in mlflow_runs:
         run_id = mlflow_run.info.run_id
         try:
-            job_ids = [
-                f.path.split("/")[-1]
-                for f in client.list_artifacts(run_id, path="job")
-                if f.is_dir
-            ]
             run = _build_run(
                 run_id,
                 experiment_name,
-                job_ids,
+                jobs_by_run[run_id],
                 all_ray_submission_ids,
                 mlflow_run.info,
             )

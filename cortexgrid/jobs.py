@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import cloudpickle  # type: ignore
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 import inspect
 import io
 import json
@@ -67,6 +67,16 @@ class LifecycleEvent:
     error: str | None = None
 
 
+def _known_fields_only(cls: type, data: dict[str, Any]) -> dict[str, Any]:
+    """`data` minus the keys `cls` has no field for.
+
+    Records outlive the code that wrote them and the code that reads them:
+    a control plane one release ahead writes fields an older client has
+    never seen, and that client has to keep reading its own jobs."""
+    known = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in known}
+
+
 @dataclass
 class JobLifecycle:
     """Static identity and latches for a job.
@@ -91,13 +101,30 @@ class JobLifecycle:
     history: list[LifecycleEvent] = field(default_factory=list)
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self))
+        """The record as it goes to MLflow.
+
+        A latch that is still False is left out. Every reader of this file
+        pins the fields it knows — a released client parses it with an
+        exact constructor call — so a latch a reader has never heard of
+        must not appear until something actually set it.
+        """
+        data = asdict(self)
+        if not self.delete_requested:
+            data.pop("delete_requested")
+        return json.dumps(data)
 
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
-        data = json.loads(text)
-        data.pop("error", None)
-        data["history"] = [LifecycleEvent(**e) for e in data.get("history", [])]
+        """Parse a record, including one a newer writer produced.
+
+        Fields this version does not know are dropped rather than raising,
+        so a client keeps working while the cluster runs ahead of it.
+        """
+        data = _known_fields_only(cls, json.loads(text))
+        data["history"] = [
+            LifecycleEvent(**_known_fields_only(LifecycleEvent, e))
+            for e in data.get("history", [])
+        ]
         return cls(**data)
 
     def get_ray_job_id(
@@ -148,17 +175,23 @@ class JobLifecycle:
 
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "JobLifecycle":
+        """Read a job's record.
+
+        One round trip: the fetch is the existence check. Listing the
+        directory first doubled the cost of every read, and a sweep over a
+        cluster's jobs pays it per job against a tracking server that
+        answers these one at a time.
+        """
         client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         lifecycle_rel = f"job/{job_id}/lifecycle.json"
-        if not any(
-            a.path == lifecycle_rel
-            for a in client.list_artifacts(run_id, f"job/{job_id}")
-        ):
+        try:
+            local_path = client.download_artifacts(run_id, lifecycle_rel)
+            text = Path(local_path).read_text()
+        except Exception as err:
             raise FileNotFoundError(
                 f"artifact {lifecycle_rel} not found in run {run_id}"
-            )
-        local_path = client.download_artifacts(run_id, lifecycle_rel)
-        return cls.from_json(Path(local_path).read_text())
+            ) from err
+        return cls.from_json(text)
 
 
 class Payload(BaseModel):
@@ -497,22 +530,37 @@ def schedule_remote_job(
     return JobFuture(experiment_name=experiment_name, run_id=run_id, job_id=job_id)
 
 
+def list_experiment_run_job_ids(run_id: str) -> list[str]:
+    """The ids of every job of this run — one listing, no records read.
+
+    Reading a job's record costs a download each; a caller that wants many
+    of them can take this list and fetch them as it pleases."""
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    return [
+        Path(entry.path).name
+        for entry in client.list_artifacts(run_id, path="job")
+        if entry.is_dir
+    ]
+
+
+def load_job(run_id: str, job_id: str) -> JobLifecycle | None:
+    """The job's record, or None when it has not landed yet.
+
+    A job whose lifecycle is still being written is a normal state, not an
+    error: the caller lists it again on the next poll."""
+    try:
+        return JobLifecycle.load_from_mlflow(run_id, job_id)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Skipping job %s: missing lifecycle", job_id
+        )
+        return None
+
+
 def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    entries = client.list_artifacts(run_id, path="job")
-    result: list[JobLifecycle] = []
-    for entry in entries:
-        if not entry.is_dir:
-            continue
-        job_id = Path(entry.path).name
-        try:
-            result.append(JobLifecycle.load_from_mlflow(run_id, job_id))
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "Skipping job %s: missing lifecycle", job_id
-            )
-    return result
+    jobs = (load_job(run_id, job_id) for job_id in list_experiment_run_job_ids(run_id))
+    return [job for job in jobs if job is not None]
 
 
 def stop_experiment_run_jobs(run_id: str) -> None:

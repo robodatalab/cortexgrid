@@ -441,6 +441,17 @@ class TestDeletedRecordsAreHiddenFromEveryReader(unittest.TestCase):
             )
             self.assertEqual(experiments_pending_deletion(), ["e1"])
 
+    def test_creating_into_an_experiment_being_deleted_is_refused(self) -> None:
+        """Its runs would be torn down with it, so this must not go quietly."""
+        mlflow, exp, _run = self._world()
+
+        with _patched_infra(FakeS3(), mlflow, FakeRay()):
+            delete_experiment("alpha")
+            # Only reachable through the name it was moved to; by its own
+            # name a fresh experiment is created instead.
+            with self.assertRaises(RuntimeError):
+                Experiment.init(f"alpha__deleted__{exp.experiment_id}")
+
     def test_a_new_experiment_takes_the_name_of_the_one_being_deleted(self) -> None:
         """delete_experiment(name) then init(name) is always a fresh experiment."""
         mlflow, exp, _run = self._world()

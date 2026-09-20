@@ -71,10 +71,10 @@ class TestRunJobsRefresherServe(unittest.IsolatedAsyncioTestCase):
         self._patches = [
             patch(
                 "cortexgrid_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
-                return_value=[],
+                return_value=["run-x-j1-0"],
             ),
             patch(
-                "cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status",
+                "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
                 return_value=JobStatus.RUNNING,
             ),
             patch(

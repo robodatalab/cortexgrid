@@ -5,13 +5,13 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 from cortexgrid.experiment import DELETE_REQUESTED_TAG
+from cortexgrid.jobs import JobLifecycle
 from cortexgrid_ui.backend.streams.experiments_stream import (
     poll_experiments_meta,
     poll_runs,
 )
 
 from tests.fakes import (
-    FakeArtifact,
     FakeMlflowClient,
     FakeMlflowExperiment,
     FakeMlflowRun,
@@ -19,7 +19,14 @@ from tests.fakes import (
 )
 
 
-def _patched_infra(mlflow: FakeMlflowClient, ray: FakeRay) -> ExitStack:
+_HELPER = "cortexgrid_ui.backend.streams.job_status"
+
+
+def _patched_infra(
+    mlflow: FakeMlflowClient,
+    ray: FakeRay,
+    jobs: dict[str, list[JobLifecycle]] | None = None,
+) -> ExitStack:
     stack = ExitStack()
     stack.enter_context(
         patch("cortexgrid.experiment.MlflowClient", return_value=mlflow)
@@ -27,16 +34,19 @@ def _patched_infra(mlflow: FakeMlflowClient, ray: FakeRay) -> ExitStack:
     stack.enter_context(
         patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
     )
+    jobs = jobs or {}
     stack.enter_context(
         patch(
-            "cortexgrid_ui.backend.streams.experiments_stream.MlflowClient",
-            return_value=mlflow,
+            f"{_HELPER}.list_experiment_run_job_ids",
+            side_effect=lambda run_id: [j.job_id for j in jobs.get(run_id, [])],
         )
     )
     stack.enter_context(
         patch(
-            "cortexgrid_ui.backend.streams.experiments_stream.get_mlflow_tracking_uri",
-            return_value="",
+            f"{_HELPER}.load_job",
+            side_effect=lambda run_id, job_id: next(
+                (j for j in jobs.get(run_id, []) if j.job_id == job_id), None
+            ),
         )
     )
     stack.enter_context(
@@ -98,16 +108,38 @@ class TestExperimentsStreamRespectsDeletion(unittest.TestCase):
     def test_run_carries_its_jobs_and_times(self) -> None:
         exp = FakeMlflowExperiment(experiment_id="e1", name="alpha")
         run = FakeMlflowRun(run_id="run-1", run_name="alpha-1", experiment_id="e1")
-        mlflow = FakeMlflowClient().seed(
-            [exp], [run], {"run-1": [FakeArtifact(path="job/j1", is_dir=True)]}
-        )
+        mlflow = FakeMlflowClient().seed([exp], [run], {"run-1": []})
+        job = JobLifecycle(experiment_name="alpha", run_id="run-1", job_id="j1")
 
-        with _patched_infra(mlflow, FakeRay({"run-1-j1-0": "RUNNING"})):
+        with _patched_infra(
+            mlflow, FakeRay({"run-1-j1-0": "RUNNING"}), {"run-1": [job]}
+        ):
             reported = poll_runs("alpha")
 
         self.assertEqual(
             [(j.job_id, j.status) for j in reported["alpha-1"].jobs],
             [("j1", "running")],
+        )
+
+    def test_the_tree_shows_a_job_on_its_way_out_as_deleting(self) -> None:
+        """The same word the jobs table uses: one status, every view."""
+        exp = FakeMlflowExperiment(experiment_id="e1", name="alpha")
+        run = FakeMlflowRun(run_id="run-1", run_name="alpha-1", experiment_id="e1")
+        mlflow = FakeMlflowClient().seed([exp], [run], {"run-1": []})
+        job = JobLifecycle(
+            experiment_name="alpha",
+            run_id="run-1",
+            job_id="j1",
+            delete_requested=True,
+        )
+
+        with _patched_infra(
+            mlflow, FakeRay({"run-1-j1-0": "RUNNING"}), {"run-1": [job]}
+        ):
+            reported = poll_runs("alpha")
+
+        self.assertEqual(
+            [j.status for j in reported["alpha-1"].jobs], ["deleting"]
         )
 
 

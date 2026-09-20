@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
+import { JOB_STATUSES, jobStatusClass, jobStatusRank } from "../jobStatus";
+import "../jobStatus.css";
 import "./JobsDashboard.css";
 
 export type JobRow = {
@@ -16,24 +18,6 @@ export type JobRow = {
 type SortKey = "job" | "status" | "experiment" | "run";
 type SortDir = "asc" | "desc";
 
-// Status order for the Status column: what needs attention first, what is
-// done last. Alphabetical would scatter running jobs among finished ones.
-// `broken` is what the backend reports when Ray cannot say, the same word
-// the experiments tree uses for it.
-const STATUS_ORDER = [
-    "running",
-    "pending",
-    "failed",
-    "broken",
-    "stopped",
-    "finished",
-];
-
-function statusRank(status: string): number {
-    const rank = STATUS_ORDER.indexOf(status);
-    return rank === -1 ? STATUS_ORDER.length : rank;
-}
-
 function experimentOf(row: JobRow): string {
     return row.experiment_name ?? "";
 }
@@ -47,7 +31,7 @@ function compare(a: JobRow, b: JobRow, key: SortKey): number {
         case "job":
             return a.job_id.localeCompare(b.job_id);
         case "status":
-            return statusRank(a.status) - statusRank(b.status);
+            return jobStatusRank(a.status) - jobStatusRank(b.status);
         case "experiment":
             return experimentOf(a).localeCompare(experimentOf(b));
         case "run":
@@ -64,17 +48,11 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 type Props = {
     jobs: JobRow[];
-    deletingIds: string[];
     onOpenJob: (row: JobRow) => void;
     onDeleteJob: (row: JobRow) => void;
 };
 
-export function JobsDashboard({
-    jobs: rows,
-    deletingIds,
-    onOpenJob,
-    onDeleteJob,
-}: Props) {
+export function JobsDashboard({ jobs: rows, onOpenJob, onDeleteJob }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>("status");
     const [sortDir, setSortDir] = useState<SortDir>("asc");
     const [hiddenStatuses, setHiddenStatuses] = useState<string[]>([]);
@@ -94,11 +72,11 @@ export function JobsDashboard({
         () =>
             Array.from(
                 new Set([
-                    ...STATUS_ORDER,
+                    ...JOB_STATUSES,
                     ...countsByStatus.keys(),
                     ...hiddenStatuses,
                 ]),
-            ).sort((a, b) => statusRank(a) - statusRank(b)),
+            ).sort((a, b) => jobStatusRank(a) - jobStatusRank(b)),
         [countsByStatus, hiddenStatuses],
     );
 
@@ -150,9 +128,7 @@ export function JobsDashboard({
                             onClick={() => toggleStatus(status)}
                             aria-pressed={!hidden}
                         >
-                            <span
-                                className={`jobs-dashboard__status jobs-dashboard__status--${status}`}
-                            >
+                            <span className={jobStatusClass(status)}>
                                 {status}
                             </span>
                             <span className="jobs-dashboard__filter-count">
@@ -191,7 +167,11 @@ export function JobsDashboard({
                     </thead>
                     <tbody>
                         {visibleRows.map((row) => {
-                            const deleting = deletingIds.includes(row.id);
+                            // Deletion is a status the backend reports, not
+                            // something this table remembers: the row keeps
+                            // saying `deleting` across a reload, and stops
+                            // when the control plane has removed the job.
+                            const deleting = row.status === "deleting";
                             return (
                                 <tr
                                     key={row.id}
@@ -206,9 +186,7 @@ export function JobsDashboard({
                                         {row.job_id}
                                     </td>
                                     <td>
-                                        <span
-                                            className={`jobs-dashboard__status jobs-dashboard__status--${row.status}`}
-                                        >
+                                        <span className={jobStatusClass(row.status)}>
                                             {row.status}
                                         </span>
                                     </td>
@@ -229,7 +207,15 @@ export function JobsDashboard({
                                             type="button"
                                             className="jobs-dashboard__delete"
                                             aria-label={`Delete job ${row.job_id}`}
-                                            disabled={deleting}
+                                            // An abandoned job has no record
+                                            // to write the request on; the
+                                            // control plane clears those.
+                                            disabled={deleting || row.abandoned}
+                                            title={
+                                                row.abandoned
+                                                    ? "Nothing owns this job; the control plane clears it"
+                                                    : undefined
+                                            }
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onDeleteJob(row);

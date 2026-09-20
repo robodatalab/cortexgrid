@@ -105,14 +105,3 @@
   border-radius: 3px;
   margin-left: auto;
 }
-
-.experiment-tree__job-status--pending { color: #666; }
-.experiment-tree__job-status--running { color: #0066cc; }
-.experiment-tree__job-status--finished { color: #228b22; }
-.experiment-tree__job-status--failed { color: #cc0000; }
-.experiment-tree__job-status--broken {
-  color: #fff;
-  background: #cc0000;
-  font-weight: 500;
-}
-

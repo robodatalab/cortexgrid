@@ -39,10 +39,10 @@ class TestSimpleEndpoints(unittest.TestCase):
 
 
 class TestListRunJobs(unittest.TestCase):
-    @patch("cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status")
+    @patch("cortexgrid_ui.backend.streams.job_status.get_ray_job_status")
     @patch(
         "cortexgrid_ui.backend.streams.run_jobs_stream.list_ray_jobs_with_submission_id",
-        return_value=[],
+        return_value=["run-1-j1-0", "run-1-j2-0"],
     )
     @patch("cortexgrid_ui.backend.streams.run_jobs_stream.list_experiment_run_jobs")
     def test_returns_list_with_status_per_job(
@@ -68,7 +68,7 @@ class TestListRunJobs(unittest.TestCase):
         )
 
     @patch(
-        "cortexgrid_ui.backend.streams.run_jobs_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch(
@@ -102,10 +102,13 @@ class TestPollJob(unittest.TestCase):
         return_value="http://test:8265/#/jobs/ray-1",
     )
     @patch(
-        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
-    @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
+    @patch(
+        "cortexgrid.ray_util.list_ray_jobs_with_submission_id",
+        return_value=["run-1-job-1-0"],
+    )
     @patch("cortexgrid_ui.backend.streams.job_details_stream.JobLifecycle")
     def test_returns_lifecycle_and_ray_status(
         self,
@@ -135,7 +138,7 @@ class TestPollJob(unittest.TestCase):
         "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
@@ -184,7 +187,7 @@ class TestPollJob(unittest.TestCase):
         "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
@@ -234,7 +237,7 @@ class TestPollJob(unittest.TestCase):
         "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])
@@ -271,7 +274,7 @@ class TestPollJob(unittest.TestCase):
         "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_url", return_value=None
     )
     @patch(
-        "cortexgrid_ui.backend.streams.job_details_stream.get_ray_job_status",
+        "cortexgrid_ui.backend.streams.job_status.get_ray_job_status",
         return_value=JobStatus.RUNNING,
     )
     @patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[])

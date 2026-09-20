@@ -314,8 +314,15 @@ class FakeRay:
             sid: FakeRayJob(sid, status) for sid, status in (jobs or {}).items()
         }
 
-    def list_jobs(self) -> list[FakeRayJob]:
-        return list(self.jobs.values())
+    def list_jobs(self) -> list[Any]:
+        """As the SDK returns them: the status is an enum, not a string."""
+        return [
+            SimpleNamespace(
+                submission_id=job.submission_id,
+                status=SimpleNamespace(value=job.status),
+            )
+            for job in self.jobs.values()
+        ]
 
     def stop_job(self, submission_id: str) -> None:
         if submission_id in self.jobs:

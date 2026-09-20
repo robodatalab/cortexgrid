@@ -58,15 +58,9 @@ def get_ray_status(ray_job_id: str | None) -> str | None:
     return client.get_job_status(ray_job_id).value
 
 
-def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
-    """Derive a job's observable status from a live Ray query.
-
-    Returns ``PENDING`` both when ``ray_job_id is None`` (never submitted)
-    and when Ray itself reports ``PENDING`` (queued). Callers that need
-    to distinguish those two must check ``ray_job_id is None`` first.
-    """
-    ray_status = get_ray_status(ray_job_id)
-    if ray_job_id is None:
+def to_job_status(ray_status: str | None) -> JobStatus:
+    """Map one of Ray's words onto ours. `None` means never submitted."""
+    if ray_status is None:
         return JobStatus.PENDING
     if ray_status == "SUCCEEDED":
         return JobStatus.FINISHED
@@ -75,6 +69,32 @@ def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
     if ray_status == "STOPPED":
         return JobStatus.STOPPED
     return JobStatus.RUNNING
+
+
+def get_ray_job_status(ray_job_id: str | None) -> JobStatus:
+    """Derive a job's observable status from a live Ray query.
+
+    Returns ``PENDING`` both when ``ray_job_id is None`` (never submitted)
+    and when Ray itself reports ``PENDING`` (queued). Callers that need
+    to distinguish those two must check ``ray_job_id is None`` first.
+
+    One query per job. A caller with many jobs wants
+    ``list_ray_job_statuses`` instead, which answers for all of them in
+    a single call.
+    """
+    if ray_job_id is None:
+        return JobStatus.PENDING
+    return to_job_status(get_ray_status(ray_job_id))
+
+
+def list_ray_job_statuses() -> dict[str, JobStatus]:
+    """Every ray job's status, by submission id, in one call."""
+    client = get_ray_job_submission_client()
+    return {
+        job.submission_id: to_job_status(job.status.value)
+        for job in client.list_jobs()
+        if job.submission_id is not None
+    }
 
 
 def get_ray_logs(ray_job_id: str | None) -> str | None:
