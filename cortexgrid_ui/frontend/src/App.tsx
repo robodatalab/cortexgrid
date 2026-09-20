@@ -56,7 +56,6 @@ function App() {
   >(null)
   const [view, setView] = useState<RailView>('experiments')
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
-  const [deletingJobIds, setDeletingJobIds] = useState<string[]>([])
 
   const experimentsByName = useStreamList<ExperimentMeta>(
     '/api/experiments/meta/stream',
@@ -86,11 +85,7 @@ function App() {
       case 'run':
         return `/api/runs/${encodeURIComponent(target.run_id)}`
       case 'job':
-        // An abandoned job has no run left to delete it from: all that
-        // remains of it is its Ray attempts, so those get purged.
-        return target.row.abandoned
-          ? `/api/jobs/abandoned/${encodeURIComponent(target.row.run_id ?? '')}/${encodeURIComponent(target.row.job_id)}`
-          : `/api/runs/${encodeURIComponent(target.row.run_id ?? '')}/jobs/${encodeURIComponent(target.row.job_id)}`
+        return `/api/runs/${encodeURIComponent(target.row.run_id ?? '')}/jobs/${encodeURIComponent(target.row.job_id)}`
       case 'model':
         return `/api/models/${encodeURIComponent(target.model.family)}/${encodeURIComponent(target.model.suffix)}/${encodeURIComponent(target.model.run_name)}`
       case 'model-family':
@@ -102,17 +97,7 @@ function App() {
     if (pendingDelete === null) return
     const target = pendingDelete
     setPendingDelete(null)
-    if (target.kind === 'job') {
-      setDeletingJobIds((prev) => [...prev, target.row.id])
-    }
-    let res: Response
-    try {
-      res = await fetch(deleteUrl(target), { method: 'DELETE' })
-    } finally {
-      if (target.kind === 'job') {
-        setDeletingJobIds((prev) => prev.filter((id) => id !== target.row.id))
-      }
-    }
+    const res = await fetch(deleteUrl(target), { method: 'DELETE' })
     if (!res.ok) {
       alert(`Delete failed: HTTP ${res.status}\n${await res.text()}`)
       return
@@ -154,9 +139,7 @@ function App() {
       case 'run':
         return `Delete run "${target.run_name}"? This cannot be undone.`
       case 'job':
-        return target.row.abandoned
-          ? `Delete abandoned job "${target.row.job_id}"? Its Ray submission is stopped and purged. This cannot be undone.`
-          : `Delete job "${target.row.job_id}" from run "${target.row.run_name}"? Its Ray attempts, code package and history go with it. This cannot be undone.`
+        return `Delete job "${target.row.job_id}" from run "${target.row.run_name}"? Its Ray attempts, code package and history go with it. This cannot be undone.`
       case 'model':
         return `Delete model "${target.model.family}/${target.model.suffix}" from run "${target.model.run_name}"? This cannot be undone.`
       case 'model-family':
@@ -323,7 +306,6 @@ function App() {
           ) : view === 'jobs' ? (
             <JobsDashboard
               jobs={jobRows}
-              deletingIds={deletingJobIds}
               onOpenJob={navigateToJob}
               onDeleteJob={(row) => setPendingDelete({ kind: 'job', row })}
             />

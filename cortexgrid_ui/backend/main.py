@@ -15,7 +15,7 @@ from cortexgrid.experiment import (
     list_run_ids_in_experiment,
 )
 from cortexgrid.infra import get_ray_job_server_uri
-from cortexgrid.jobs import stop_experiment_run_jobs
+from cortexgrid.jobs import request_job_deletion, stop_experiment_run_jobs
 from cortexgrid.model_serving import (
     ModelRequirements,
     ServingMessage,
@@ -57,6 +57,7 @@ from cortexgrid_ui.backend.streams import (
     experiment_notes_stream,
     experiments_stream,
     job_details_stream,
+    jobs_stream,
     models_stream,
     run_dashboard_stream,
     run_jobs_stream,
@@ -129,6 +130,7 @@ async def _start_refreshers() -> None:
         experiments_stream.experiments_meta_refresher,
         experiments_stream.runs_refresher,
         run_jobs_stream.refresher,
+        jobs_stream.refresher,
         run_dashboard_stream.refresher,
         job_details_stream.refresher,
         run_notes_stream.refresher,
@@ -335,6 +337,36 @@ async def runs_stream_endpoint(ws: WebSocket, experiment_name: str) -> None:
 @app.websocket("/api/runs/{run_id}/jobs/stream")
 async def run_jobs_stream_endpoint(ws: WebSocket, run_id: str) -> None:
     await serve_websocket(run_jobs_stream.refresher, ws, run_id)
+
+
+@app.websocket("/api/jobs/stream")
+async def jobs_stream_endpoint(ws: WebSocket) -> None:
+    await serve_websocket(jobs_stream.refresher, ws, jobs_stream.META_TOPIC)
+
+
+@app.delete("/api/runs/{run_id}/jobs/{job_id}")
+async def job_delete(run_id: str, job_id: str) -> dict[str, str]:
+    """Ask for a job to be deleted.
+
+    Writes the latch and nothing else: the control plane stops the Ray
+    attempts, wipes the package and removes the record. The row is pushed
+    to `deleting` here rather than waiting for the next sweep, so the
+    table reflects the request immediately.
+    """
+    try:
+        request_job_deletion(run_id, job_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"No job {job_id!r} in run {run_id!r}"
+        )
+    row = jobs_stream.cache.get(jobs_stream.META_TOPIC).get(
+        jobs_stream.row_id(run_id, job_id)
+    )
+    if row is not None:
+        await jobs_stream.refresher.update_or_insert(
+            jobs_stream.META_TOPIC, row.id, replace(row, status="deleting")
+        )
+    return {"status": "ok"}
 
 
 @app.websocket("/api/runs/{run_name}/stream")

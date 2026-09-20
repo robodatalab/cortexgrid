@@ -21,6 +21,7 @@ type SortDir = "asc" | "desc";
 // `broken` is what the backend reports when Ray cannot say, the same word
 // the experiments tree uses for it.
 const STATUS_ORDER = [
+    "deleting",
     "running",
     "pending",
     "failed",
@@ -64,17 +65,11 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 
 type Props = {
     jobs: JobRow[];
-    deletingIds: string[];
     onOpenJob: (row: JobRow) => void;
     onDeleteJob: (row: JobRow) => void;
 };
 
-export function JobsDashboard({
-    jobs: rows,
-    deletingIds,
-    onOpenJob,
-    onDeleteJob,
-}: Props) {
+export function JobsDashboard({ jobs: rows, onOpenJob, onDeleteJob }: Props) {
     const [sortKey, setSortKey] = useState<SortKey>("status");
     const [sortDir, setSortDir] = useState<SortDir>("asc");
     const [hiddenStatuses, setHiddenStatuses] = useState<string[]>([]);
@@ -191,7 +186,11 @@ export function JobsDashboard({
                     </thead>
                     <tbody>
                         {visibleRows.map((row) => {
-                            const deleting = deletingIds.includes(row.id);
+                            // Deletion is a status the backend reports, not
+                            // something this table remembers: the row keeps
+                            // saying `deleting` across a reload, and stops
+                            // when the control plane has removed the job.
+                            const deleting = row.status === "deleting";
                             return (
                                 <tr
                                     key={row.id}
@@ -229,7 +228,15 @@ export function JobsDashboard({
                                             type="button"
                                             className="jobs-dashboard__delete"
                                             aria-label={`Delete job ${row.job_id}`}
-                                            disabled={deleting}
+                                            // An abandoned job has no record
+                                            // to write the request on; the
+                                            // control plane clears those.
+                                            disabled={deleting || row.abandoned}
+                                            title={
+                                                row.abandoned
+                                                    ? "Nothing owns this job; the control plane clears it"
+                                                    : undefined
+                                            }
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onDeleteJob(row);

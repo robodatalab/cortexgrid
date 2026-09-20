@@ -149,6 +149,7 @@
 .jobs-dashboard__status--finished { color: #228b22; }
 .jobs-dashboard__status--failed { color: #cc0000; }
 .jobs-dashboard__status--stopped { color: #a15c00; }
+.jobs-dashboard__status--deleting { color: #a15c00; font-style: italic; }
 
 .jobs-dashboard__status--broken {
     color: #fff;

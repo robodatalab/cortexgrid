@@ -583,6 +583,106 @@ class TestStopExperimentRunJobs(unittest.TestCase):
         self.assertTrue(self._loaded("requested").stop_requested)
 
 
+class TestJobLifecycleSurvivesVersionSkew(unittest.TestCase):
+    """lifecycle.json is read by code older and newer than the code that wrote it.
+
+    The control plane rolls out ahead of the clients that submit jobs —
+    `cortexgrid` on PyPI, a job already running on the cluster — and every
+    one of them parses this file. A field one side does not know must not
+    be able to break the other.
+    """
+
+    def _released_client_parse(self, text: str) -> None:
+        """Parse with the field set of the last release, which pins them."""
+
+        def released_job_lifecycle(
+            experiment_name,
+            run_id,
+            job_id,
+            stop_requested=False,
+            retry=False,
+            num_gpus=0,
+            num_cpus=1,
+            pip_requirements=(),
+            history=(),
+        ):
+            return None
+
+        data = json.loads(text)
+        data.pop("error", None)
+        released_job_lifecycle(**data)
+
+    def test_a_released_client_can_still_read_what_we_write(self) -> None:
+        text = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="j1"
+        ).to_json()
+
+        self._released_client_parse(text)
+
+    def test_an_unset_latch_is_not_written_at_all(self) -> None:
+        text = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="j1"
+        ).to_json()
+
+        self.assertNotIn("delete_requested", json.loads(text))
+
+    def test_a_set_latch_is_written_and_read_back(self) -> None:
+        text = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=RUN_ID,
+            job_id="j1",
+            delete_requested=True,
+        ).to_json()
+
+        self.assertIn("delete_requested", json.loads(text))
+        self.assertTrue(JobLifecycle.from_json(text).delete_requested)
+
+    def test_a_field_from_a_newer_writer_is_ignored(self) -> None:
+        text = json.dumps(
+            {
+                "experiment_name": EXPERIMENT_NAME,
+                "run_id": RUN_ID,
+                "job_id": "j1",
+                "a_latch_from_the_future": True,
+            }
+        )
+
+        self.assertEqual(JobLifecycle.from_json(text).job_id, "j1")
+
+    def test_a_history_field_from_a_newer_writer_is_ignored(self) -> None:
+        text = json.dumps(
+            {
+                "experiment_name": EXPERIMENT_NAME,
+                "run_id": RUN_ID,
+                "job_id": "j1",
+                "history": [
+                    {
+                        "attempt": 0,
+                        "state": "running",
+                        "start": "2026-01-01T00:00:00+00:00",
+                        "an_event_field_from_the_future": "x",
+                    }
+                ],
+            }
+        )
+
+        loaded = JobLifecycle.from_json(text)
+
+        self.assertEqual([e.state for e in loaded.history], ["running"])
+
+    def test_the_error_key_older_writers_left_behind_is_still_ignored(self) -> None:
+        text = json.dumps(
+            {
+                "experiment_name": EXPERIMENT_NAME,
+                "run_id": RUN_ID,
+                "job_id": "j1",
+                "error": "from a version that stored it here",
+            }
+        )
+
+        self.assertEqual(JobLifecycle.from_json(text).job_id, "j1")
+
+
 class TestRequestJobDeletion(unittest.TestCase):
     """Deletion is requested the way stopping is: a latch, and nothing else.
 
@@ -663,14 +763,12 @@ class TestRequestJobDeletion(unittest.TestCase):
         self.assertTrue(self._loaded("j2").delete_requested)
         self.assertTrue(self._loaded("j3").delete_requested)
 
-    def test_a_latch_written_by_an_older_client_still_loads(self) -> None:
-        """Old records have no delete_requested key; they read as not requested."""
+    def test_a_record_without_the_key_reads_as_not_requested(self) -> None:
+        """What every job written before this latch existed looks like."""
         self._save_job("j1")
         path = self.fake_mlflow.root / "job" / "j1" / "lifecycle.json"
-        data = json.loads(path.read_text())
-        del data["delete_requested"]
-        path.write_text(json.dumps(data))
 
+        self.assertNotIn("delete_requested", json.loads(path.read_text()))
         self.assertFalse(self._loaded("j1").delete_requested)
 
 

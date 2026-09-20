@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import cloudpickle  # type: ignore
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 import inspect
 import io
 import json
@@ -67,6 +67,16 @@ class LifecycleEvent:
     error: str | None = None
 
 
+def _known_fields_only(cls: type, data: dict[str, Any]) -> dict[str, Any]:
+    """`data` minus the keys `cls` has no field for.
+
+    Records outlive the code that wrote them and the code that reads them:
+    a control plane one release ahead writes fields an older client has
+    never seen, and that client has to keep reading its own jobs."""
+    known = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in known}
+
+
 @dataclass
 class JobLifecycle:
     """Static identity and latches for a job.
@@ -91,13 +101,30 @@ class JobLifecycle:
     history: list[LifecycleEvent] = field(default_factory=list)
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self))
+        """The record as it goes to MLflow.
+
+        A latch that is still False is left out. Every reader of this file
+        pins the fields it knows — a released client parses it with an
+        exact constructor call — so a latch a reader has never heard of
+        must not appear until something actually set it.
+        """
+        data = asdict(self)
+        if not self.delete_requested:
+            data.pop("delete_requested")
+        return json.dumps(data)
 
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
-        data = json.loads(text)
-        data.pop("error", None)
-        data["history"] = [LifecycleEvent(**e) for e in data.get("history", [])]
+        """Parse a record, including one a newer writer produced.
+
+        Fields this version does not know are dropped rather than raising,
+        so a client keeps working while the cluster runs ahead of it.
+        """
+        data = _known_fields_only(cls, json.loads(text))
+        data["history"] = [
+            LifecycleEvent(**_known_fields_only(LifecycleEvent, e))
+            for e in data.get("history", [])
+        ]
         return cls(**data)
 
     def get_ray_job_id(
