@@ -22,6 +22,10 @@ class Operator(abc.ABC):
     def name(self) -> str:
         return type(self).__name__
 
+    def applies(self, deps: dict) -> bool:
+        """Whether the operator acts under `deps`; a pipeline skips it otherwise."""
+        return True
+
     @abc.abstractmethod
     def setup(self, deps: dict) -> None: ...
 
@@ -32,7 +36,7 @@ class Operator(abc.ABC):
 class ConditionalOperator(Operator):
     """Wraps an Operator and gates its setup/teardown on a predicate over deps.
 
-    Surfaces the inner operator's name so progress checkpoints in
+    Surfaces the inner operator's name so the steps `done` in
     infra-config.yaml stay readable (e.g. `PostgresCredentials`, not
     `ConditionalOperator`).
     """
@@ -44,6 +48,9 @@ class ConditionalOperator(Operator):
     @property
     def name(self) -> str:
         return self.inner.name
+
+    def applies(self, deps: dict) -> bool:
+        return self.predicate(deps)
 
     def setup(self, deps: dict) -> None:
         if self.predicate(deps):
@@ -59,14 +66,18 @@ class Pipeline(Operator):
         self.operators = operators
         self.on_step_done: Optional[StepCallback] = None
 
+    def steps(self, deps: dict) -> list[Operator]:
+        """The operators that act under `deps`, in setup order."""
+        return [op for op in self.operators if op.applies(deps)]
+
     def setup(self, deps: dict) -> None:
-        for op in self.operators:
+        for op in self.steps(deps):
             op.setup(deps)
             if self.on_step_done is not None:
                 self.on_step_done(op.name)
 
     def teardown(self, deps: dict) -> None:
-        for op in reversed(self.operators):
+        for op in reversed(self.steps(deps)):
             op.teardown(deps)
             if self.on_step_done is not None:
                 self.on_step_done(op.name)

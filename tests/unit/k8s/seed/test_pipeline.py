@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from k8s.seed.pipeline import Operator, Pipeline
+from k8s.seed.pipeline import ConditionalOperator, Operator, Pipeline
 
 
 class _Recorder(Operator):
@@ -85,6 +85,32 @@ class TestPipelineOnStepDone(unittest.TestCase):
         p.setup({})
         p.teardown({})
         self.assertEqual(events, ["A.setup", "A.teardown"])
+
+
+class TestPipelineSkipsInapplicableSteps(unittest.TestCase):
+    """A ConditionalOperator whose predicate is false is not a step: it neither
+    runs nor reports done, so it is never recorded as done."""
+
+    def _pipeline(self, events: list[str]) -> Pipeline:
+        return Pipeline([
+            _Recorder("A", events),
+            ConditionalOperator(_Recorder("B", events), lambda deps: deps["b"]),
+        ])
+
+    def test_setup_and_teardown_skip_it(self) -> None:
+        events: list[str] = []
+        seen: list[str] = []
+        p = self._pipeline(events)
+        p.on_step_done = seen.append
+        p.setup({"b": False})
+        p.teardown({"b": False})
+        self.assertEqual(events, ["A.setup", "A.teardown"])
+        self.assertEqual(seen, ["_Recorder", "_Recorder"])
+
+    def test_steps_lists_only_applicable_operators(self) -> None:
+        p = self._pipeline([])
+        self.assertEqual(len(p.steps({"b": False})), 1)
+        self.assertEqual(len(p.steps({"b": True})), 2)
 
 
 if __name__ == "__main__":

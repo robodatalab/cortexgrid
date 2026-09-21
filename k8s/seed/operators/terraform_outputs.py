@@ -8,7 +8,7 @@ S3_SECRET_ACCESS_KEY, MLFLOW_BACKEND_STORE_URI, NOTES_DB_URI and
 CORTEXGRID_DB_URI.
 
 Needs terraform on the laptop, AWS credentials that can read the
-terraform/platform state, and the stack applied (`make head-aws-apply`).
+terraform/platform state, and the stack applied (`./cg add head --aws` does both).
 
 Required deps: (none).
 """
@@ -49,7 +49,7 @@ class TerraformOutputs(Operator):
         if missing:
             sys.exit(
                 f"Error: terraform/platform outputs missing: {', '.join(missing)}. "
-                f"Apply the stack first (make head-aws-apply)."
+                f"Apply the stack first (./cg add head --aws)."
             )
         log.info("Publishing terraform outputs to the head secrets store...")
         for secret_id, name in _OUTPUTS.items():

@@ -8,8 +8,8 @@ The platform is a hybrid: a single k3s **head** plus zero or more **workers**. T
 
 | Role | Label | What lands there | Typical box |
 |------|-------|------------------|-------------|
-| `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexgrid-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`head-aws-apply` + `head-setup`) **or** on-prem ThinkStation/DGX (`head-setup` only) |
-| `worker` | `role=worker`, `worker=true`, `gpu=true` (GPU hosts only) | `ray-worker` (GPU, requests 1 GPU) or `ray-worker-cpu` DaemonSet, 1 Pod per node | DGX, ThinkStation, EC2 - anything joined via `worker-setup` |
+| `head` | `role=head` | k3s control plane, Argo CD, mlflow, cortexgrid-ui-backend, jobs-control-plane, prometheus stack, ray-head | AWS EC2 (`./cg add head --aws`) **or** on-prem ThinkStation/DGX (`./cg add head --onprem`) |
+| `worker` | `role=worker`, `worker=true`, `gpu=true` (GPU hosts only) | `ray-worker` (GPU, requests 1 GPU) or `ray-worker-cpu` DaemonSet, 1 Pod per node | DGX, ThinkStation, EC2 - anything joined via `./cg add worker` |
 
 Cluster topology — which IP is head vs worker, where the head's HDD is mounted — lives in [infra-config.yaml](../../infra-config.yaml) at the repo root. That file is written by the seed scripts and read by every infra script. Roles are applied as node labels (`role=head`, `role=worker`) at seed time; manifests reference those labels and stay agnostic of specific IPs. Ray worker placement uses separate compute labels: `worker=true`, plus `gpu=true` when `nvidia-smi -L` on the host lists a GPU (`ComputeLabels`).
 
@@ -48,41 +48,58 @@ argo-bootstrap-<profile>           bootstrap (defined in argocd.yaml; no upstrea
 
 The bootstrap App's `directory.exclude: 'ui/**'` keeps it from claiming anything below `ui/`, so the two aggregators own their subtrees exclusively. Bootstrap directly owns everything else: `secrets/`, the cluster-infra leaves (cert-manager, tailscale-operator, nvidia, monitoring), and `ui.yaml` itself. App-specific observability (e.g. `mlflow-monitoring`'s Grafana dashboards) lives next to the App it observes, inside the relevant aggregator — bootstrap owns only the *platform* (Prometheus, Grafana, etc.), not per-app dashboards.
 
-**Why secrets/ must stay bootstrap-owned.** ArgoCD reads its source repo using the `argo-github-repo` Secret, which is produced by an `ExternalSecret` backed by the `ClusterSecretStore` from `secrets/external-secrets/`. If those resources live downstream of an aggregator, ArgoCD enters a chicken-and-egg state on any sync that prunes them — the aggregator can't reload its source until git auth is restored, and git auth comes from what the aggregator was supposed to manage. Bootstrap-owning `secrets/` keeps the trust chain rooted at a layer that doesn't depend on git working. Recovery from accidentally nesting it requires re-running `make head-setup` so [BootstrapSecrets](../../k8s/seed/operators/bootstrap_secrets.py) can re-seed `argo-github-repo` directly via `kubectl apply`.
+**Why secrets/ must stay bootstrap-owned.** ArgoCD reads its source repo using the `argo-github-repo` Secret, which is produced by an `ExternalSecret` backed by the `ClusterSecretStore` from `secrets/external-secrets/`. If those resources live downstream of an aggregator, ArgoCD enters a chicken-and-egg state on any sync that prunes them — the aggregator can't reload its source until git auth is restored, and git auth comes from what the aggregator was supposed to manage. Bootstrap-owning `secrets/` keeps the trust chain rooted at a layer that doesn't depend on git working. Recovery from accidentally nesting it requires re-running `./cg add head` so [BootstrapSecrets](../../k8s/seed/operators/bootstrap_secrets.py) can re-seed `argo-github-repo` directly via `kubectl apply`.
 
 **Test triggers.** Each aggregator subscribes to a distinct ArgoCD notification trigger (`on-cortexgrid-stack-deployed`, `on-cortexgrid-ui-stack-deployed`) declared in [argocd.yaml](../../k8s/argocd.yaml) and uses `oncePer: app.status.sync.revision` so it fires exactly once per main commit, only after every child is Synced + Healthy. The corresponding GitHub workflows under [.github/workflows/](../../.github/workflows/) listen for the matching `repository_dispatch` event types — no polling, no per-commit dedup logic on the GH side.
 
 ### Seeding
 
-Nodes are seeded and torn down via the repo-root Makefile:
+Roles are added and deleted with `./cg` at the repo root ([k8s/seed/cli.py](../../k8s/seed/cli.py)):
 
 ```bash
 # AWS head (provision EC2 + VPC + S3 + RDS, then bootstrap k3s on it)
-make head-aws-apply
-make head-setup IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage
+./cg add head --aws
 
 # On-prem head (skip terraform; just bootstrap k3s on an existing box)
-make head-setup IP=<head-ip> STORAGE_PATH=<hdd-mount> [SSH_USER=<user>]
+./cg add head --onprem --storage=<hdd-mount> <head-ip> [--ssh-user=<user>]
 
-# Worker (any box, GPU or CPU-only, AWS or on-prem)
-make worker-setup IP=<worker-ip> [SSH_USER=<user>]
+# Worker (any box, GPU or CPU-only, AWS or on-prem), under an alias
+./cg add worker --alias=<name> <worker-ip> [--ssh-user=<user>]
 
 # Head as a worker too (runs Ray workers next to the control plane)
-make worker-setup IP=<head-ip> [SSH_USER=<user>]
+./cg add worker --alias=<name> <head-ip>
 
 # Teardown
-make node-teardown IP=<any-ip> [SSH_USER=<user>]
-make worker-teardown IP=<head-ip> [SSH_USER=<user>]   # removes only the worker role; on a plain worker, same as node-teardown
-make head-aws-destroy   # AWS only - destroys EC2 + VPC + S3 + RDS
+./cg del worker <name>   # on the head's IP, removes only the head's worker role
+./cg del head            # refused while workers remain; on AWS, also destroys EC2 + VPC + S3 + RDS
+./cg del --all           # every worker, then the head
+./cg restart             # tear every role down, then add it back
 ```
 
-`worker-setup` on the head's IP does not join or relabel it: it only runs `ComputeLabels` (`worker=true`, plus `gpu=true` on a GPU host) and records `worker: true` on the head's `infra-config.yaml` entry, which `head-setup` re-runs, `node-teardown` and `restart` honour.
+A worker on the head's IP does not join or relabel the head: it only runs `ComputeLabels` (`worker=true`, plus `gpu=true` on a GPU host). `infra-config.yaml` records it as a worker entry of its own, next to the head's:
 
-Worker-before-head is supported: if the head hasn't been seeded yet, `make worker-setup` installs node prerequisites and drops a systemd timer on the worker that polls the head secrets server (`http://robolab-head:7700`) for the head's credentials and joins automatically once the head appears. The command returns immediately.
+```yaml
+head:
+  ip: 100.110.47.88
+  profile: onprem
+  storage: /home/ptrochim/GitHub/storage
+  done: [InstallPrereqs, TailscaleHostname, HeadServer, ..., ArgoReady]
+workers:
+  p5:
+    ip: 100.110.47.88
+    done: [ComputeLabels]
+  dgx:
+    ip: 100.80.27.32
+    done: [InstallPrereqs, JoinCluster, NodeLabel, ComputeLabels]
+```
+
+`done` lists the steps of that role that completed: a failed `add` shows where it stopped, and `del` removes each step as it undoes it. Adding a role again with the same parameters re-runs its setup.
+
+Worker-before-head is supported: if the head hasn't been seeded yet, `./cg add worker` installs node prerequisites and drops a systemd timer on the worker that polls the head secrets server (`http://robolab-head:7700`) for the head's credentials and joins automatically once the head appears. The command returns immediately.
 
 ### Storage routing (head HDD)
 
-`STORAGE_PATH` passed to `head-setup` becomes the local-path-provisioner directory on the head node. Any in-cluster PVC (Postgres, MinIO, Prometheus, Grafana, Alertmanager) lands there instead of the default `/var/lib/rancher/k3s/storage`, keeping PV data off the root volume. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, patched idempotently by [k8s/seed/operators/local_path.py](../../k8s/seed/operators/local_path.py) using the value from `infra-config.yaml`. The stamped path is declarative, not quota-enforced.
+`--storage` passed to `./cg add head` (`/storage` on AWS) becomes the local-path-provisioner directory on the head node. Any in-cluster PVC (Postgres, MinIO, Prometheus, Grafana, Alertmanager) lands there instead of the default `/var/lib/rancher/k3s/storage`, keeping PV data off the root volume. The routing is a node-specific entry in the k3s-bundled `local-path-config` ConfigMap, patched idempotently by [k8s/seed/operators/local_path.py](../../k8s/seed/operators/local_path.py) using the value from `infra-config.yaml`. The stamped path is declarative, not quota-enforced.
 
 In the AWS profile, mlflow's backend store and artifact store are RDS + S3 - no PVC. Only the prometheus stack uses PVCs there. In the on-prem profile, MinIO and Postgres also live on this volume.
 
@@ -102,13 +119,13 @@ Each GPU worker also advertises its GPU memory as the custom Ray resource `vram_
 
 Workers register with the head's GCS via the in-cluster Service at `ray-head.ray.svc.cluster.local:6379`. Ray pools every worker's GPU into a single scheduler - a job asking for 1 GPU lands on any worker, a job asking for more parallelises across them. No code change at the cortexgrid submission site.
 
-**To run ray on AWS:** join GPU EC2 instances via `worker-setup`. ray-head stays on the AWS EC2 head; ray-worker DaemonSet lights up one Pod per GPU EC2.
+**To run ray on AWS:** join GPU EC2 instances via `./cg add worker`. ray-head stays on the AWS EC2 head; ray-worker DaemonSet lights up one Pod per GPU EC2.
 
-**To run ray on-prem:** join the DGX (or any GPU box on Tailscale) via `worker-setup`. The head can be either AWS EC2 or another on-prem box - ray-head only needs CPU and reaches workers through the cluster's Tailscale-routed overlay network.
+**To run ray on-prem:** join the DGX (or any GPU box on Tailscale) via `./cg add worker`. The head can be either AWS EC2 or another on-prem box - ray-head only needs CPU and reaches workers through the cluster's Tailscale-routed overlay network.
 
-**To run ray fully on-prem:** seed the head on an on-prem box (`head-setup` only, no `head-aws-apply`), then join GPU workers. The auto-detected `onprem` profile brings in MinIO + Postgres so mlflow has somewhere to store metadata and artifacts.
+**To run ray fully on-prem:** seed the head on an on-prem box (`./cg add head --onprem`), then join GPU workers. The auto-detected `onprem` profile brings in MinIO + Postgres so mlflow has somewhere to store metadata and artifacts.
 
-**Adding/removing capacity at runtime:** `worker-setup IP=<new-box>` or `node-teardown IP=<old-box>` - the DaemonSets self-adjust; ray-head's GCS picks up the new worker (or notices the missing one) on the next heartbeat.
+**Adding/removing capacity at runtime:** `./cg add worker --alias=<name> <new-box>` or `./cg del worker <name>` - the DaemonSets self-adjust; ray-head's GCS picks up the new worker (or notices the missing one) on the next heartbeat.
 
 ## Future extensions
 

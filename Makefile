@@ -1,45 +1,8 @@
 SHELL := /bin/bash
 
-.PHONY: head-setup worker-setup worker-teardown node-teardown restart head-aws-apply head-aws-destroy tailnet-dns-apply tailnet-dns-destroy dev install-frontend dev-frontend-against help
+.PHONY: tailnet-dns-apply tailnet-dns-destroy dev install-frontend dev-frontend-against help
 
-# Optional SSH_USER; defaults to the laptop user if not passed.
-SSH_USER_FLAG = $(if $(SSH_USER),--ssh-user=$(SSH_USER))
-
-head-setup:
-	@[ -n "$(IP)" ]           || { echo "IP is required (e.g. make head-setup IP=100.110.47.89 STORAGE_PATH=... PROFILE=onprem)"; exit 1; }
-	@[ -n "$(STORAGE_PATH)" ] || { echo "STORAGE_PATH is required (path to the HDD mount used for PVCs)"; exit 1; }
-	@[ -n "$(PROFILE)" ]      || { echo "PROFILE is required (aws|onprem)"; exit 1; }
-	uv run python -m k8s.seed.setup_node --type=head --ip=$(IP) --storage-path=$(STORAGE_PATH) --profile=$(PROFILE) $(SSH_USER_FLAG)
-
-worker-setup:
-	@[ -n "$(IP)" ]      || { echo "IP is required (e.g. make worker-setup IP=100.80.27.32 PROFILE=onprem)"; exit 1; }
-	@[ -n "$(PROFILE)" ] || { echo "PROFILE is required (aws|onprem)"; exit 1; }
-	uv run python -m k8s.seed.setup_node --type=worker --ip=$(IP) --profile=$(PROFILE) $(SSH_USER_FLAG)
-
-# On the head's IP, removes only the worker role; on a plain worker, same as node-teardown.
-worker-teardown:
-	@[ -n "$(IP)" ] || { echo "IP is required (e.g. make worker-teardown IP=100.110.47.88)"; exit 1; }
-	uv run python -m k8s.seed.teardown_node --ip=$(IP) --worker $(SSH_USER_FLAG)
-
-node-teardown:
-	@[ -n "$(IP)" ] || { echo "IP is required (e.g. make teardown-node IP=100.80.27.32)"; exit 1; }
-	uv run python -m k8s.seed.teardown_node --ip=$(IP) $(SSH_USER_FLAG)
-
-restart:
-	uv run python -m k8s.seed.restart_nodes
-
-head-aws-apply:
-	@[ -f .env.head ] || { echo ".env.head not found (copy .env.head.template)"; exit 1; }
-	TAILSCALE_AUTH_KEY="$$(uv run python -c 'from dotenv import dotenv_values; print(dotenv_values(".env.head").get("TAILSCALE_AUTH_KEY") or "")')"; \
-	  [ -n "$$TAILSCALE_AUTH_KEY" ] || { echo "TAILSCALE_AUTH_KEY missing from .env.head"; exit 1; }; \
-	  cd terraform/platform && \
-	  terraform init && \
-	  TF_VAR_tailscale_auth_key="$$TAILSCALE_AUTH_KEY" terraform apply -auto-approve
-	uv run python -m k8s.seed.update_ssh_config
-
-head-aws-destroy:
-	cd terraform/platform && TF_VAR_tailscale_auth_key=_ terraform destroy -auto-approve
-	uv run python -m k8s.seed.update_ssh_config --remove
+# Cluster nodes are managed by ./cg (./cg --help).
 
 tailnet-dns-apply:
 	cd terraform/tailnet-dns && terraform init && terraform apply -auto-approve

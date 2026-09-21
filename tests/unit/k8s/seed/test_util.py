@@ -18,29 +18,27 @@ from parameterized import parameterized  # type: ignore
 class TestLoadSaveConfig(unittest.TestCase):
     """load_config / save_config round-trip the infra topology via YAML."""
 
-    def test_load_config_returns_empty_when_file_missing(self) -> None:
+    def test_load_config_returns_no_workers_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             with patch.object(util, "CONFIG_FILE", Path(td) / "nope.yaml"):
-                self.assertEqual(util.load_config(), {"nodes": []})
+                self.assertEqual(util.load_config(), {"workers": {}})
 
     def test_save_then_load_roundtrips(self) -> None:
         cfg = {
-            "nodes": [
-                {"ip": "10.0.0.1", "role": "head", "storage_path": "/mnt/hdd"},
-                {"ip": "10.0.0.2", "role": "worker"},
-            ]
+            "head": {"ip": "10.0.0.1", "profile": "onprem", "storage": "/mnt/hdd", "done": []},
+            "workers": {"dgx": {"ip": "10.0.0.2", "done": ["InstallPrereqs"]}},
         }
         with tempfile.TemporaryDirectory() as td:
             with patch.object(util, "CONFIG_FILE", Path(td) / "infra.yaml"):
                 util.save_config(cfg)
                 self.assertEqual(util.load_config(), cfg)
 
-    def test_load_config_empty_file_returns_empty_nodes(self) -> None:
+    def test_load_config_empty_file_returns_no_workers(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "empty.yaml"
             path.write_text("")
             with patch.object(util, "CONFIG_FILE", path):
-                self.assertEqual(util.load_config(), {"nodes": []})
+                self.assertEqual(util.load_config(), {"workers": {}})
 
 
 class TestSshUserForIp(unittest.TestCase):
@@ -176,92 +174,15 @@ class TestResolveNodeNameKubectlBroken(unittest.TestCase):
         self.assertIn("x509", str(ctx.exception))
 
 
-class TestCheckpointStepDone(unittest.TestCase):
-    """checkpoint_step_done tracks pipeline progress on the node entry.
-
-    Setup appends; teardown pops matching. The field is removed when empty."""
-
-    def _with_temp_config(self, cfg: dict):
-        td = tempfile.TemporaryDirectory()
-        self.addCleanup(td.cleanup)
-        path = Path(td.name) / "infra.yaml"
-        patcher = patch.object(util, "CONFIG_FILE", path)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        util.save_config(cfg)
-        return path
-
-    def test_setup_appends_operator_name(self) -> None:
-        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
-        util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "setup")
-        util.checkpoint_step_done("10.0.0.1", "K3sServer", "setup")
-        self.assertEqual(
-            util.load_config()["nodes"][0]["progress"],
-            ["InstallPrereqs", "K3sServer"],
-        )
-
-    def test_teardown_pops_matching_last_entry(self) -> None:
-        self._with_temp_config(
-            {
-                "nodes": [
-                    {
-                        "ip": "10.0.0.1",
-                        "role": "head",
-                        "progress": ["InstallPrereqs", "K3sServer"],
-                    }
-                ]
-            }
-        )
-        util.checkpoint_step_done("10.0.0.1", "K3sServer", "teardown")
-        self.assertEqual(util.load_config()["nodes"][0]["progress"], ["InstallPrereqs"])
-
-    def test_teardown_ignores_non_matching_last_entry(self) -> None:
-        """Teardown of an operator whose setup never completed is a no-op.
-        Keeps the checkpoint honest when teardown is called on a partial setup."""
-        self._with_temp_config(
-            {
-                "nodes": [
-                    {"ip": "10.0.0.1", "role": "head", "progress": ["InstallPrereqs"]}
-                ]
-            }
-        )
-        util.checkpoint_step_done("10.0.0.1", "K3sServer", "teardown")
-        self.assertEqual(util.load_config()["nodes"][0]["progress"], ["InstallPrereqs"])
-
-    def test_progress_field_removed_when_list_empties(self) -> None:
-        self._with_temp_config(
-            {
-                "nodes": [
-                    {"ip": "10.0.0.1", "role": "head", "progress": ["InstallPrereqs"]}
-                ]
-            }
-        )
-        util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "teardown")
-        self.assertNotIn("progress", util.load_config()["nodes"][0])
-
-    def test_invalid_direction_raises(self) -> None:
-        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
-        with self.assertRaises(ValueError):
-            util.checkpoint_step_done("10.0.0.1", "InstallPrereqs", "sideways")
-
-    def test_unknown_ip_is_silent_noop(self) -> None:
-        """Writing a checkpoint for an IP not in the config is tolerated —
-        the dispatcher may have just removed the entry (end-of-teardown)."""
-        self._with_temp_config({"nodes": [{"ip": "10.0.0.1", "role": "head"}]})
-        util.checkpoint_step_done("10.0.0.99", "InstallPrereqs", "setup")
-        self.assertEqual(util.load_config()["nodes"], [{"ip": "10.0.0.1", "role": "head"}])
-
-
-
 class TestHeadUrl(unittest.TestCase):
     """head_url points at the registered head, or its tailnet name before one exists."""
 
     def test_uses_registered_head_ip(self) -> None:
-        cfg = {"nodes": [{"ip": "10.0.0.2", "role": "worker"}, {"ip": "10.0.0.1", "role": "head"}]}
+        cfg = {"head": {"ip": "10.0.0.1"}, "workers": {"dgx": {"ip": "10.0.0.2"}}}
         self.assertEqual(util.head_url(cfg), "http://10.0.0.1:7700")
 
     def test_falls_back_to_tailnet_hostname(self) -> None:
-        cfg = {"nodes": [{"ip": "10.0.0.2", "role": "worker"}]}
+        cfg = {"workers": {"dgx": {"ip": "10.0.0.2"}}}
         self.assertEqual(util.head_url(cfg), "http://robolab-head:7700")
 
 
