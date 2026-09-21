@@ -1,16 +1,22 @@
-"""Jobs control plane — polls MLflow for pending jobs and submits them to Ray.
+"""Jobs control plane — keeps cortexgrid's records and submits jobs to Ray.
 
 Architecture:
 
+- One process, two parts. The state API (``jobs_control_plane.api``, served
+  by uvicorn) owns the ``cortexgrid`` Postgres database: experiments, runs,
+  jobs, the model registry and deployments. The poll loop runs in a thread
+  and reaches that API through the cortexgrid library, like every client.
 - ``JobLifecycle`` is pure static identity plus the ``stop_requested`` and
   ``retry`` latches. Execution status is never persisted.
 - Ray is the source of truth for execution state. Each poll cycle reconciles
-  cortexgrid jobs (from MLflow) against the set of Ray submissions returned
-  by ``list_ray_jobs_with_submission_id``.
+  the open cortexgrid jobs - those not yet done for good - against the set
+  of Ray submissions returned by ``list_ray_jobs_with_submission_id``.
 - Submission to Ray is async — handed to a ``ProcessPoolExecutor`` so a
   large payload upload cannot block the poll loop.
 - Submission ids are shaped ``{run_id}-{job_id}-{attempt}``. Each retry
   uses a fresh attempt suffix so Ray never sees a duplicate id.
+- Each poll cycle also refreshes the deployment records from the Ray Serve
+  controller (``observe_deployments``).
 - A single heartbeat file is touched at the end of every successful
   poll cycle. The Docker healthcheck watches its mtime.
 """
@@ -18,19 +24,21 @@ Architecture:
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
+import threading
 import time
 from concurrent.futures import Future, ProcessPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import uvicorn
+
 from cortexgrid import (
     JobLifecycle,
     LifecycleEvent,
     get_ray_job_status,
-    list_experiment_run_jobs,
-    list_experiments,
     stop_ray_job,
     submit_ray_job,
     list_ray_jobs_with_submission_id,
@@ -38,6 +46,9 @@ from cortexgrid import (
     get_ray_job_attempt,
     JobStatus,
 )
+from cortexgrid.jobs import list_open_jobs
+from cortexgrid.model_serving import observe_deployments
+from jobs_control_plane.api import app
 
 
 log = logging.getLogger("jobs-control-plane")
@@ -45,6 +56,7 @@ log = logging.getLogger("jobs-control-plane")
 POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXGRID_POLL_INTERVAL", "5"))
 STARTER_WORKERS = int(os.environ.get("CORTEXGRID_STARTER_WORKERS", "4"))
 HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
+API_PORT = int(os.environ.get("CORTEXGRID_API_PORT", "8000"))
 
 
 def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
@@ -163,13 +175,7 @@ def _process_jobs_in_flight(
 def _get_jobs_for_processing(
     in_flight: dict[str, tuple[str, str, Future]],
 ) -> list[tuple[JobLifecycle, str | None]]:
-    experiments = list_experiments()
-    cortexgrid_jobs = [
-        job
-        for experiment in experiments
-        for job in list_experiment_run_jobs(experiment.run_id)
-    ]
-    all_cortexgrid_to_ray_jobs = _match_ray_jobs_to_cortexgrid_jobs(cortexgrid_jobs)
+    all_cortexgrid_to_ray_jobs = _match_ray_jobs_to_cortexgrid_jobs(list_open_jobs())
 
     # filter out the jobs that are still in flight
     not_in_flight_cortexgrid_to_ray_jobs = []
@@ -247,12 +253,32 @@ def poll_once(
                 ),
             )
 
+    # A Serve controller that cannot be read must not hold up the jobs.
+    try:
+        observe_deployments()
+    except Exception:
+        log.exception("Poll once - observing deployments failed")
+
     log.info("Poll once - ends")
     return in_flight
 
 
-def main() -> None:
-    executor = ProcessPoolExecutor(max_workers=STARTER_WORKERS)
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
+def _poll_forever() -> None:
+    # spawn, not fork: this process also runs the API's threads and its
+    # database connection pool, which a forked worker must not inherit.
+    executor = ProcessPoolExecutor(
+        max_workers=STARTER_WORKERS,
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=_configure_logging,
+    )
     in_flight: dict[str, tuple[str, str, Future]] = {}
     while True:
         try:
@@ -263,10 +289,13 @@ def main() -> None:
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
+def main() -> None:
+    # The poller reaches the state API through the cortexgrid library; until
+    # uvicorn is listening its cycles fail and are retried.
+    threading.Thread(target=_poll_forever, name="poller", daemon=True).start()
+    uvicorn.run(app, host="0.0.0.0", port=API_PORT)
+
+
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    _configure_logging()
     main()

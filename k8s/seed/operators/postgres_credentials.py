@@ -3,10 +3,10 @@
 Mirrors what terraform/platform/rds does for AWS: generate a random master
 password, persist it (here: in the in-cluster postgres-credentials Secret;
 on AWS: in tfstate via random_password.master), and publish the composed
-MLFLOW_BACKEND_STORE_URI and NOTES_DB_URI to the head secrets store. The
-password itself is never stored there as a standalone key -- it only
-appears inside the two URIs and inside the cluster Secret postgres needs
-to bootstrap.
+MLFLOW_BACKEND_STORE_URI, NOTES_DB_URI and CORTEXGRID_DB_URI to the head
+secrets store. The password itself is never stored there as a standalone
+key -- it only appears inside the URIs and inside the cluster Secret
+postgres needs to bootstrap.
 
 Idempotent: on rerun, reads the existing password from the cluster Secret
 rather than regenerating, so postgres data is preserved.
@@ -39,8 +39,10 @@ _SECRET_NAME = "postgres-credentials"
 _USER = "robolab"
 _DB_INITIAL = "mlflow"
 _DB_NOTES = "notes"
+_DB_CORTEXGRID = "cortexgrid"
 _SECRET_MLFLOW_BACKEND_STORE_URI = "MLFLOW_BACKEND_STORE_URI"
 _SECRET_NOTES_DB_URI = "NOTES_DB_URI"
+_SECRET_CORTEXGRID_DB_URI = "CORTEXGRID_DB_URI"
 
 
 class PostgresCredentials(Operator):
@@ -52,6 +54,7 @@ class PostgresCredentials(Operator):
     def teardown(self, deps: dict) -> None:
         delete_secret(_SECRET_MLFLOW_BACKEND_STORE_URI)
         delete_secret(_SECRET_NOTES_DB_URI)
+        delete_secret(_SECRET_CORTEXGRID_DB_URI)
 
     def _get_or_generate_password(self) -> str:
         existing = self._read_existing_password()
@@ -101,7 +104,10 @@ class PostgresCredentials(Operator):
         util.kubectl("apply", "-f", "-", input=manifest, capture=False)
 
     def _publish_uris(self, node_ip: str, password: str) -> None:
-        log.info("Publishing MLFLOW_BACKEND_STORE_URI + NOTES_DB_URI to the head secrets store...")
+        log.info(
+            "Publishing MLFLOW_BACKEND_STORE_URI + NOTES_DB_URI + CORTEXGRID_DB_URI "
+            "to the head secrets store..."
+        )
         set_secret(
             _SECRET_MLFLOW_BACKEND_STORE_URI,
             util.postgres_uri_for(node_ip, _DB_INITIAL, _USER, password),
@@ -109,4 +115,8 @@ class PostgresCredentials(Operator):
         set_secret(
             _SECRET_NOTES_DB_URI,
             util.postgres_uri_for(node_ip, _DB_NOTES, _USER, password),
+        )
+        set_secret(
+            _SECRET_CORTEXGRID_DB_URI,
+            util.postgres_uri_for(node_ip, _DB_CORTEXGRID, _USER, password),
         )

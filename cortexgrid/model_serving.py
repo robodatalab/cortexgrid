@@ -7,9 +7,16 @@ uploaded to MinIO under
 `serve-bundles/<run_name>/<family>__<suffix>/<fingerprint>.zip`, and
 referenced via `runtime_env.working_dir` so Ray workers fetch it from there.
 The bundle URL, class import path, pip list, and fingerprint are persisted as
-MLflow tags on the ModelVersion so `deploy_model` can find them later without
-the caller holding the class object. So are the model's `ModelRequirements`,
-which `deploy_model` turns into the replica's Ray resource requests.
+tags on the model's registry entry so `deploy_model` can find them later
+without the caller holding the class object. So are the model's
+`ModelRequirements`, which `deploy_model` turns into the replica's Ray resource
+requests.
+
+Every model `deploy_model` puts on Ray Serve gets a deployment record with the
+jobs control plane: the spec it PUT, plus the phase, message and replica
+placements the control plane last observed (`observe_deployments`, run on
+every poll cycle). Listings and status reads come from those records; waits
+ask the Serve controller directly.
 
 Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
 This relies on family/suffix/run_name not containing the literal "__".
@@ -27,16 +34,16 @@ import re
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import hashlib
 from pathlib import Path
 from typing import Any
 
-from mlflow.tracking import MlflowClient
 from ray.serve.schema import ApplicationStatus
 
+from cortexgrid import state
 from cortexgrid._bundle import bundle, digest, stage, worker_provides
-from cortexgrid.infra import get_mlflow_tracking_uri, get_ray_serve_uri
+from cortexgrid.infra import get_ray_serve_uri
 from cortexgrid.ray_util import (
     get_ray_nodes,
     get_serve_details,
@@ -157,7 +164,7 @@ def bundle_class(
     upload to MinIO: `build_bundle` followed by `upload_bundle`.
 
     Returns the metadata `deploy_model` needs later; callers (typically
-    `save_model`) persist it on the ModelVersion so the deploy step can run
+    `save_model`) persist it on the registry entry so the deploy step can run
     without holding the class object."""
     return upload_bundle(build_bundle(cls), family, suffix, run_name)
 
@@ -363,7 +370,7 @@ def _build_application_spec(
     }
 
 
-# MLflow tag keys for the bundle metadata `save_model` writes and
+# Registry tag keys for the bundle metadata `save_model` writes and
 # `deploy_model` reads back.
 _CLASS_IMPORT_PATH_TAG = "class_import_path"
 _BUNDLE_URL_TAG = "serve_bundle_url"
@@ -372,7 +379,7 @@ _BUNDLE_FINGERPRINT_TAG = "serve_bundle_fingerprint"
 
 
 def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
-    """Serialise BundleMetadata to MLflow tags. The inverse of
+    """Serialise BundleMetadata to registry tags. The inverse of
     `metadata_from_tags`; lives here next to the consumer so the tag schema
     stays in one place."""
     return {
@@ -384,7 +391,7 @@ def metadata_to_tags(meta: BundleMetadata) -> dict[str, str]:
 
 
 def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
-    """Deserialise BundleMetadata from a ModelVersion's MLflow tags. Raises
+    """Deserialise BundleMetadata from a registry entry's tags. Raises
     KeyError for a missing bundle URL or class import path."""
     return BundleMetadata(
         bundle_url=tags[_BUNDLE_URL_TAG],
@@ -399,7 +406,7 @@ def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
 @dataclass
 class ModelRequirements:
     """Hardware one replica of a model needs to be served, in GiB. Persisted as
-    tags on the ModelVersion next to the bundle metadata, so it is read without
+    tags on the registry entry next to the bundle metadata, so it is read without
     touching the weights or importing the serve-app class.
 
     Zero means no requirement: a model with no requirements is served on any
@@ -424,19 +431,19 @@ class ModelRequirements:
             )
 
 
-# MLflow tag keys for the ModelRequirements.
+# Registry tag keys for the ModelRequirements.
 _NUM_GPUS_TAG = "num_gpus"
 _RAM_GB_TAG = "ram_gb"
 _VRAM_GB_TAG = "vram_gb"
 
 
 def has_requirement_tags(tags: dict[str, str]) -> bool:
-    """Whether requirements were ever stored on the ModelVersion."""
+    """Whether requirements were ever stored on the registry entry."""
     return any(key in tags for key in (_NUM_GPUS_TAG, _RAM_GB_TAG, _VRAM_GB_TAG))
 
 
 def requirements_to_tags(requirements: ModelRequirements) -> dict[str, str]:
-    """Serialise ModelRequirements to MLflow tags. The inverse of
+    """Serialise ModelRequirements to registry tags. The inverse of
     `requirements_from_tags`."""
     return {
         _NUM_GPUS_TAG: str(requirements.num_gpus),
@@ -446,7 +453,7 @@ def requirements_to_tags(requirements: ModelRequirements) -> dict[str, str]:
 
 
 def requirements_from_tags(tags: dict[str, str]) -> ModelRequirements:
-    """Deserialise ModelRequirements from a ModelVersion's MLflow tags; a
+    """Deserialise ModelRequirements from a registry entry's tags; a
     missing tag reads as no requirement."""
     return ModelRequirements(
         # float, not int: models saved before GPUs could be shared stored a
@@ -461,17 +468,13 @@ def _load_deploy_metadata(
     family: str, suffix: str, run_name: str
 ) -> tuple[BundleMetadata, ModelRequirements]:
     """Read the bundle metadata and requirements `save_model` persisted on the
-    ModelVersion."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}__{suffix}"
-    versions = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{run_name}'"
-    )
-    if not versions:
+    registry entry."""
+    record = state.get("models", family, suffix, run_name)
+    if record is None:
         raise ValueError(
             f"No saved model for {family}/{suffix}/{run_name}; cannot deploy."
         )
-    tags = versions[0].tags or {}
+    tags = record["tags"]
     try:
         return metadata_from_tags(tags), requirements_from_tags(tags)
     except KeyError as exc:
@@ -604,6 +607,38 @@ def _spec_already_deployed(spec: dict[str, Any]) -> bool:
     return app is not None and app.get("deployed_app_config") == spec
 
 
+# Phases in which a deployment record stands for a live app: one a redeploy
+# with the same spec may leave alone. A failed app has to be cleared and
+# re-PUT, a deleting one waited out, and a missing one PUT again.
+_LIVE_PHASES = ("running", "deploying", "not_started", "unhealthy")
+
+
+def _record_is_current(
+    record: dict[str, Any] | None,
+    family: str,
+    suffix: str,
+    run_name: str,
+    meta: BundleMetadata,
+    requirements: ModelRequirements,
+    num_replicas: int,
+) -> bool:
+    """True when the deployment record shows the model live with exactly the
+    spec this deploy would PUT.
+
+    The spec is rebuilt against the GPU tiers the record was deployed with,
+    so the check asks neither Ray's state API nor the Serve controller: a
+    redeploy that changes nothing costs one lookup. A tier added to or gone
+    from the cluster since reaches the spec on the next deploy that changes
+    anything else; until then the placement fallback keeps larger new GPUs
+    usable (see `_placement_preferences`)."""
+    if record is None or record["phase"] not in _LIVE_PHASES:
+        return False
+    spec = _build_application_spec(
+        family, suffix, run_name, meta, requirements, num_replicas, record["tiers"]
+    )
+    return spec == record["spec"]
+
+
 def deploy_model(
     family: str,
     suffix: str,
@@ -617,7 +652,7 @@ def deploy_model(
     whatever client the app's routes need - streaming, long timeouts, custom
     request schemas - against that URL; cortexgrid imposes no traffic contract.
 
-    The serve-app class is pulled from the MLflow ModelVersion tags `save_model`
+    The serve-app class is pulled from the registry entry's tags `save_model`
     wrote at save time; the caller does not need to hold the class object.
     Each of the `num_replicas` replicas requests the model's `ModelRequirements`
     from Ray, so it is placed only on a node that has them free.
@@ -628,8 +663,13 @@ def deploy_model(
 
     Re-deploying a model that is already live with exactly this spec skips the
     PUT rather than restating it: see `_spec_already_deployed` for what a
-    redundant PUT costs. The call still reports the app's phase, and with
-    `wait=True` still blocks until it is RUNNING.
+    redundant PUT costs. When the model's deployment record already shows it
+    live with this spec, the call returns from the record without asking Ray
+    at all (see `_record_is_current`). The call still reports the app's phase,
+    and with `wait=True` still blocks until it is RUNNING.
+
+    Records the deployment - the spec it PUT, where the app is served, and its
+    phase - with the jobs control plane.
 
     With `wait=True`, blocks as `wait_for_model_serving` does until the Serve
     controller reports the app RUNNING. `timeout` (default 300) caps the whole
@@ -640,11 +680,27 @@ def deploy_model(
     """
     deadline = _deadline(timeout)
     meta, requirements = _load_deploy_metadata(family, suffix, run_name)
-    # Read afresh on every deploy: the tiers are what the model is placed
-    # against, so a GPU joining or leaving the cluster has to change the spec
-    # (and therefore re-PUT it), not be remembered from an earlier call.
+    record = state.get("deployments", family, suffix, run_name)
+    if _record_is_current(
+        record, family, suffix, run_name, meta, requirements, num_replicas
+    ):
+        phase = record["phase"]
+        if wait:
+            _wait_for_application_running(record["spec"]["name"], timeout, deadline)
+            phase = "running"
+        return Deployment(
+            family=family,
+            suffix=suffix,
+            run_name=run_name,
+            url=record["url"],
+            phase=phase,
+        )
+    # Read afresh on every deploy that reaches Ray: the tiers are what the
+    # model is placed against, so a GPU joining or leaving the cluster has to
+    # change the spec (and therefore re-PUT it).
+    tiers = vram_tiers()
     spec = _build_application_spec(
-        family, suffix, run_name, meta, requirements, num_replicas, vram_tiers()
+        family, suffix, run_name, meta, requirements, num_replicas, tiers
     )
     _clear_failed_application(family, suffix, run_name, timeout, deadline)
     if not _spec_already_deployed(spec):
@@ -658,42 +714,46 @@ def deploy_model(
     if wait:
         _wait_for_application_running(spec["name"], timeout, deadline)
     app = get_serve_details().get("applications", {}).get(spec["name"], {})
+    url = f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}"
+    observed = _observed(app)
+    state.put(
+        "deployments",
+        family,
+        suffix,
+        run_name,
+        body={"spec": spec, "tiers": tiers, "url": url, **observed},
+    )
     return Deployment(
         family=family,
         suffix=suffix,
         run_name=run_name,
-        url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
-        phase=_serve_phase(str(app.get("status", ""))),
+        url=url,
+        phase=observed["phase"],
     )
 
 
 def undeploy_model(family: str, suffix: str, run_name: str) -> None:
-    """Tear down the Ray Serve app for this model."""
+    """Tear down the Ray Serve app for this model and drop its deployment record."""
     name = _app_name(family, suffix, run_name)
     remaining = [a for a in _current_application_specs() if a["name"] != name]
     put_serve_applications(remaining)
+    state.delete("deployments", family, suffix, run_name)
 
 
 def list_deployed_models() -> list[Deployment]:
-    """Return Deployment records for every Ray Serve app whose name matches our scheme."""
-    base = get_ray_serve_uri()
-    details = get_serve_details()
-    result: list[Deployment] = []
-    for app_name, app in details.get("applications", {}).items():
-        parts = app_name.split("__")
-        if len(parts) != 3:
-            continue
-        family, suffix, run_name = parts
-        result.append(
-            Deployment(
-                family=family,
-                suffix=suffix,
-                run_name=run_name,
-                url=f"{base}{_route_prefix(family, suffix, run_name)}",
-                phase=_serve_phase(str(app.get("status", ""))),
-            )
+    """Return a Deployment for every model `deploy_model` put on Ray Serve
+    whose app the control plane last saw existing."""
+    return [
+        Deployment(
+            family=record["family"],
+            suffix=record["suffix"],
+            run_name=record["run_name"],
+            url=record["url"],
+            phase=record["phase"],
         )
-    return result
+        for record in state.get("deployments")
+        if record["phase"] != _PHASE_NOT_DEPLOYED
+    ]
 
 
 @dataclass
@@ -701,7 +761,7 @@ class ServingStatus:
     """Serving lifecycle of one model, owned by the Ray Serve controller.
 
     This is the serving half of a model's life. The registry half (uploading /
-    ready in MLflow) is a separate lifecycle reported by
+    ready in the registry) is a separate lifecycle reported by
     `cortexgrid.model_storage.model_registry_status`.
 
     `phase` is one of:
@@ -727,8 +787,8 @@ class ServingStatus:
 def model_serving_status(
     family: str, suffix: str, run_name: str
 ) -> ServingStatus:
-    """Report the serving lifecycle phase of a model from the Ray Serve
-    controller, HTTP-only.
+    """Report the serving lifecycle phase of a model from its deployment
+    record, as the control plane last observed it on the Ray Serve controller.
 
     The serving lifecycle begins when `deploy_model` schedules the app and ends
     when `undeploy_model` tears it down; outside that window the phase is
@@ -738,21 +798,18 @@ def model_serving_status(
     The registry lifecycle is reported separately by
     `cortexgrid.model_storage.model_registry_status`.
     """
-    app = get_serve_details().get("applications", {}).get(
-        _app_name(family, suffix, run_name)
-    )
-    if app is None:
+    record = state.get("deployments", family, suffix, run_name)
+    if record is None or record["phase"] == _PHASE_NOT_DEPLOYED:
         return ServingStatus(
             family, suffix, run_name, _PHASE_NOT_DEPLOYED, "", None
         )
-    raw = str(app.get("status", ""))
     return ServingStatus(
         family=family,
         suffix=suffix,
         run_name=run_name,
-        phase=_serve_phase(raw),
-        message=str(app.get("message", "")) or raw,
-        url=f"{get_ray_serve_uri()}{_route_prefix(family, suffix, run_name)}",
+        phase=record["phase"],
+        message=record["message"],
+        url=record["url"],
     )
 
 
@@ -778,14 +835,18 @@ def model_replica_placements(
 
     This is what the requirements and the size-class preferences actually
     resolved to: `deploy_model` asks for the smallest GPU that fits, and this
-    is the card it got. Empty when no app exists, and while an app is
+    is the card it got. Read from the deployment record, as the control plane
+    last observed it. Empty when no app exists, and while an app is
     `deploying` it fills in as replicas are placed.
     """
-    app = get_serve_details().get("applications", {}).get(
-        _app_name(family, suffix, run_name)
-    )
-    if app is None:
+    record = state.get("deployments", family, suffix, run_name)
+    if record is None:
         return []
+    return [ReplicaPlacement(**replica) for replica in record["replicas"]]
+
+
+def _placements(app: dict[str, Any]) -> list[ReplicaPlacement]:
+    """Where the Serve controller reports each replica of an app running."""
     return [
         ReplicaPlacement(
             replica_id=str(replica.get("replica_id", "")),
@@ -796,6 +857,33 @@ def model_replica_placements(
         for deployment in app.get("deployments", {}).values()
         for replica in deployment.get("replicas", [])
     ]
+
+
+def _observed(app: dict[str, Any] | None) -> dict[str, Any]:
+    """What the Serve controller reports for one app, in the fields a
+    deployment record keeps; an app that does not exist reads as
+    "not_deployed"."""
+    if app is None:
+        return {"phase": _PHASE_NOT_DEPLOYED, "message": "", "replicas": []}
+    raw = str(app.get("status", ""))
+    return {
+        "phase": _serve_phase(raw),
+        "message": str(app.get("message", "")) or raw,
+        "replicas": [asdict(placement) for placement in _placements(app)],
+    }
+
+
+def observe_deployments() -> None:
+    """Bring every deployment record up to date with one read of the Serve
+    controller: its phase, message, and where its replicas run. The jobs
+    control plane calls this on every poll cycle; only records whose
+    observation changed are written."""
+    applications = get_serve_details().get("applications", {})
+    for record in state.get("deployments"):
+        family, suffix, run_name = record["family"], record["suffix"], record["run_name"]
+        observed = _observed(applications.get(_app_name(family, suffix, run_name)))
+        if any(record[key] != value for key, value in observed.items()):
+            state.patch("deployments", family, suffix, run_name, body=observed)
 
 
 @dataclass

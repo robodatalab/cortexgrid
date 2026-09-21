@@ -5,13 +5,13 @@ the Jobs tab opens on a warm cache instead of waiting out a full sweep.
 
 A row exists here exactly when a job's lifecycle record does. The rows
 come from ``list_experiments()`` for the (experiment, run) pairs and
-``list_experiment_run_jobs(run_id)`` for the jobs each run owns, which is
-the reader of the ``job/<job_id>/lifecycle.json`` artifacts. Ray is asked
+``list_experiment_run_jobs(run_id)`` for the jobs each run owns, both read
+from the jobs control plane's records. Ray is asked
 once per sweep for its submission ids, and only to give a row that
 already exists its status; it never contributes a row.
 
 Model deployments are listed alongside them. A deployment is a Ray Serve
-app, not a Ray job, so it has no lifecycle record: each app
+app, not a Ray job, so it has no lifecycle record: each deployment record
 ``list_deployed_models()`` returns is a row of kind ``deployment``, whose
 status is the app's serving phase.
 """

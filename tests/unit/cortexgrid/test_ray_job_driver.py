@@ -1,6 +1,6 @@
 """The cluster-side driver: run the job's function, record what it produced.
 
-The driver is the only writer of `job/{job_id}/result.pkl`. Recording is best
+The driver is the only writer of the job's result record. Recording is best
 effort — a job that ran must not be reported as failed because its outcome
 could not be uploaded — but it never swallows the job's own exception: Ray
 derives the job's state from the driver's exit code.
@@ -80,12 +80,12 @@ class TestRayJobDriver(unittest.TestCase):
         self.assertIn("ValueError: bad batch", self.recorded[0].traceback or "")
 
     def test_a_failed_recording_does_not_fail_a_job_that_ran(self) -> None:
-        self.save.side_effect = RuntimeError("mlflow down")
+        self.save.side_effect = RuntimeError("control plane down")
 
         main(self._payload_file(_returns, 1))  # must not raise
 
     def test_a_failed_recording_does_not_mask_the_jobs_exception(self) -> None:
-        self.save.side_effect = RuntimeError("mlflow down")
+        self.save.side_effect = RuntimeError("control plane down")
 
         with self.assertRaises(ValueError):
             main(self._payload_file(_raises))

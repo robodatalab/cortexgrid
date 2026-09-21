@@ -14,6 +14,7 @@ from cortexgrid.mlflow_util import (
     list_run_params,
     list_run_artifacts,
 )
+from tests.fakes import FakeState
 
 
 RUN_ID = "test-run-123"
@@ -93,25 +94,11 @@ class TestMlflowUtil(unittest.TestCase):
         result = list_run_artifacts(RUN_ID)
         self.assertEqual(result, ["model.pt", "job/job-1"])
 
-    @patch("cortexgrid.experiment.MlflowClient")
-    @patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="http://test:5000")
-    def test_list_experiments_returns_experiment_objects(self, _mock_uri: MagicMock, mock_mlflow_cls: MagicMock) -> None:
-        fake_client = MagicMock()
-        mock_mlflow_cls.return_value = fake_client
-
-        exp_a = MagicMock(experiment_id="1")
-        exp_a.name = "alpha"
-        exp_b = MagicMock(experiment_id="2")
-        exp_b.name = "beta"
-        fake_client.search_experiments.return_value = [exp_a, exp_b]
-
-        run_a1 = MagicMock()
-        run_a1.info.run_id = "run-a1"
-        run_b1 = MagicMock()
-        run_b1.info.run_id = "run-b1"
-        run_b2 = MagicMock()
-        run_b2.info.run_id = "run-b2"
-        fake_client.search_runs.side_effect = [[run_a1], [run_b1, run_b2]]
+    def test_list_experiments_returns_experiment_objects(self) -> None:
+        fake_state = FakeState().install(self)
+        fake_state.seed_run("run-a1", experiment_name="alpha")
+        fake_state.seed_run("run-b1", experiment_name="beta")
+        fake_state.seed_run("run-b2", experiment_name="beta")
 
         result = list_experiments()
 

@@ -169,13 +169,14 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 | S3 bucket `robolab-data` | AES256, public access blocked. Used for cortexgrid data uploads and mlflow artifacts under `mlflow-artifacts/`. |
 | IAM user policy | Attaches read/write to the `robolab-dgx` IAM user created in `head/`. |
 
-#### `rds/` — Postgres for mlflow backend store
+#### `rds/` — Postgres for mlflow, notes and cortexgrid
 
 | Resource | Purpose |
 |----------|---------|
 | `db.t4g.micro` Postgres 16 | Single-AZ, encrypted gp3, ingress only from the head's SG. |
 | Random master password | 32 chars, lives only in tfstate and the composed URIs. |
-| Outputs `mlflow_backend_store_uri`, `notes_db_uri` | Pre-composed `postgresql://...` URIs. Head setup publishes them as `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI`; mlflow's `mlflow-config` ExternalSecret reads the first directly. On-prem writes the same keys with in-cluster Postgres URIs, so the workload manifest is profile-agnostic. |
+| `notes` and `cortexgrid` databases | Created and schema-applied by `notes.tf` / `cortexgrid.tf` via `psql` over the tailnet. `cortexgrid` holds the jobs control plane's records. |
+| Outputs `mlflow_backend_store_uri`, `notes_db_uri`, `cortexgrid_db_uri` | Pre-composed `postgresql://...` URIs. Head setup publishes them as `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI` and `CORTEXGRID_DB_URI`; mlflow's `mlflow-config` ExternalSecret reads the first directly. On-prem writes the same keys with in-cluster Postgres URIs, so the workload manifest is profile-agnostic. |
 
 ### Service discovery
 
@@ -192,9 +193,9 @@ prefix:
 | `ROUTE53_*` | `route53-creds` | cert-manager DNS-01 (real AWS on both profiles) |
 | `S3_*` | `s3-creds` | Object storage (real AWS on AWS profile, MinIO on on-prem) |
 
-- `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `RAY_SERVE_URI`).
-- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL`, `S3_REGION` and the `robolab-dgx` user's keys (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) from [terraform/platform](../terraform/platform/outputs.tf) outputs.
-- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI` + `NOTES_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `RAY_SERVE_URI`, `JOBS_CONTROL_PLANE_URI`).
+- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `CORTEXGRID_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL`, `S3_REGION` and the `robolab-dgx` user's keys (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) from [terraform/platform](../terraform/platform/outputs.tf) outputs.
+- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI` + `CORTEXGRID_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 - Both profiles: `ROUTE53_*` come from `.env.head`, as keys of an IAM user created in the AWS console.
 - ESO syncs the store into k8s Secrets (`route53-creds`, `s3-creds`, `mlflow-config`); Reflector mirrors them into every workload namespace.
 

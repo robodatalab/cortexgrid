@@ -8,18 +8,13 @@ detail dict on every poll.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 
-from cortexgrid import s3_util
-from cortexgrid.experiment import get_mlflow_tracking_uri
+from cortexgrid import s3_util, state
 from cortexgrid.jobs import JobLifecycle
-from cortexgrid.mlflow_util import list_run_artifacts
 from cortexgrid.ray_util import get_ray_job_status, get_ray_job_url
 from cortexgrid_ui.backend.streams.config import JOB_STREAM_POLL_INTERVAL_SEC
 from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
-from mlflow.tracking import MlflowClient
 
 RunId = str
 JobId = str
@@ -55,9 +50,9 @@ class JobDetail:
 
 
 def tarball_exists(run_id: str, job_id: str) -> bool:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    manifest_path = client.download_artifacts(run_id, f"job/{job_id}/manifest.json")
-    manifest = json.loads(Path(manifest_path).read_text())
+    manifest = state.get("runs", run_id, "jobs", job_id, "manifest")
+    if manifest is None:
+        return False
     bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
     try:
         s3_util.get_s3_client().head_object(Bucket=bucket, Key=key)
@@ -68,19 +63,18 @@ def tarball_exists(run_id: str, job_id: str) -> bool:
 
 def poll_job(key: JobStreamKey) -> dict[JobId, JobDetail]:
     run_id, job_id = key
-    job_entries = list_run_artifacts(run_id, f"job/{job_id}")
-    lifecycle_ready = any(Path(p).name == "lifecycle.json" for p in job_entries)
-    manifest_ready = any(Path(p).name == "manifest.json" for p in job_entries)
-    code_ready = manifest_ready and tarball_exists(run_id, job_id)
+    try:
+        lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
+    except FileNotFoundError:
+        lifecycle = None
     readiness = Readiness(
-        code=code_ready,
-        lifecycle=lifecycle_ready,
-        lifecycle_error=None if lifecycle_ready else "lifecycle.json not uploaded",
+        code=tarball_exists(run_id, job_id),
+        lifecycle=lifecycle is not None,
+        lifecycle_error=None if lifecycle is not None else "lifecycle not recorded",
     )
-    if not lifecycle_ready:
+    if lifecycle is None:
         return {job_id: JobDetail(job_id=job_id, readiness=readiness)}
 
-    lifecycle = JobLifecycle.load_from_mlflow(run_id, job_id)
     ray_job_id = lifecycle.get_ray_job_id()
     history = [
         HistoryEntry(**asdict(event), ray_url=get_ray_job_url(event.ray_job_id))

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 try:
@@ -23,6 +21,7 @@ from cortexgrid.checkpoint import (
     set_cortexgrid_job_id,
 )
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
+from tests.fakes import FakeState
 
 
 def _make_experiment() -> Experiment:
@@ -30,35 +29,6 @@ def _make_experiment() -> Experiment:
         experiment_name="exp",
         run_id="run-1",
     )
-
-
-class FakeMLflow:
-    """Fake MlflowClient backed by a temp directory."""
-
-    def __init__(self) -> None:
-        self.root = Path(tempfile.mkdtemp())
-
-    def log_artifact(
-        self, run_id: str, local_path: str, artifact_path: str = ""
-    ) -> None:
-        dest = self.root / artifact_path
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_path, dest / Path(local_path).name)
-
-    def download_artifacts(self, run_id: str, path: str) -> str:
-        local = self.root / path
-        if not local.exists():
-            raise FileNotFoundError(path)
-        return str(local)
-
-    def list_artifacts(self, run_id: str, path: str = "") -> list:
-        parent = self.root / path if path else self.root
-        if not parent.is_dir():
-            return []
-        return [
-            SimpleNamespace(path=f"{path}/{p.name}" if path else p.name)
-            for p in parent.iterdir()
-        ]
 
 
 class FakeS3:
@@ -86,19 +56,12 @@ class TestCheckpointPrefix(unittest.TestCase):
     def setUp(self) -> None:
         clear_instance()
         set_instance(_make_experiment())
-        self.fake_mlflow = FakeMLflow()
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run("run-1", experiment_name="exp")
         self.fake_s3 = FakeS3()
-        patchers = [
-            patch("cortexgrid.checkpoint.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.checkpoint.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-            patch("cortexgrid.checkpoint.s3_util", self.fake_s3),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        patcher = patch("cortexgrid.checkpoint.s3_util", self.fake_s3)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self) -> None:
         clear_instance()
@@ -117,9 +80,8 @@ class TestCheckpointPrefix(unittest.TestCase):
             ckpt.lr = 0.001
 
         prefix = _checkpoint_prefix()
-        manifest_path = self.fake_mlflow.root / prefix / "manifest.json"
-        self.assertTrue(manifest_path.exists())
-        manifest = json.loads(manifest_path.read_text())
+        self.assertIn(("run-1", prefix), self.fake_state.checkpoints)
+        manifest = self.fake_state.checkpoints[("run-1", prefix)]
         self.assertIn("epoch", manifest["attrs"])
         self.assertIn("lr", manifest["attrs"])
 

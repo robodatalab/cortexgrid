@@ -17,6 +17,7 @@ _PLATFORM = {
     "s3_secret_access_key": "shh",
     "mlflow_backend_store_uri": "postgresql://mlflow",
     "notes_db_uri": "postgresql://notes",
+    "cortexgrid_db_uri": "postgresql://cortexgrid",
     "rds_endpoint": "unused",
 }
 
@@ -54,6 +55,7 @@ class TestTerraformOutputs(unittest.TestCase):
                 "S3_SECRET_ACCESS_KEY": "shh",
                 "MLFLOW_BACKEND_STORE_URI": "postgresql://mlflow",
                 "NOTES_DB_URI": "postgresql://notes",
+                "CORTEXGRID_DB_URI": "postgresql://cortexgrid",
             },
         )
 

@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
-from types import SimpleNamespace
 import unittest
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from ray import serve as ray_serve
@@ -32,11 +31,14 @@ from cortexgrid.model_serving import (
     model_replica_placements,
     model_serving_messages,
     model_serving_status,
+    observe_deployments,
     requirements_from_tags,
     requirements_to_tags,
     undeploy_model,
     wait_for_model_serving,
 )
+
+from tests.fakes import FakeState
 
 
 _FAKE_META = BundleMetadata(
@@ -77,27 +79,52 @@ class FakeServeState:
         self.apps = {a["name"]: a for a in applications}
 
 
-def _stub_build_spec(
+def _seed_saved_model(
+    records: FakeState,
     family: str,
     suffix: str,
     run_name: str,
-    meta: BundleMetadata,
-    requirements: ModelRequirements,
-    num_replicas: int,
-    tiers: list[int],
-) -> dict[str, Any]:
-    return {
-        "name": f"{family}__{suffix}__{run_name}",
-        "route_prefix": f"/r/{family}/{suffix}/{run_name}",
-        "import_path": "stub:Stub",
-        "args": {"family": family, "suffix": suffix, "run_name": run_name},
-        "runtime_env": {"working_dir": meta.bundle_url},
-    }
+    requirements: ModelRequirements = _GPU_REQUIREMENTS,
+) -> None:
+    """Register the model as `save_model` does: its bundle and requirements as
+    tags on the registry entry."""
+    records.seed_model(
+        family,
+        suffix,
+        run_name,
+        "s3://bucket/weights",
+        {**metadata_to_tags(_FAKE_META), **requirements_to_tags(requirements)},
+    )
+
+
+def _seed_deployment(
+    records: FakeState, family: str, suffix: str, run_name: str, **fields: Any
+) -> None:
+    """Record a deployment as `deploy_model` leaves one it saw RUNNING, with
+    `fields` overriding what it holds."""
+    records.put(
+        "deployments",
+        family,
+        suffix,
+        run_name,
+        body={
+            "spec": {"name": f"{family}__{suffix}__{run_name}"},
+            "tiers": _TIERS,
+            "url": f"http://ray:30000/r/{family}/{suffix}/{run_name}",
+            "phase": "running",
+            # An app with no message is recorded with its raw status.
+            "message": "RUNNING",
+            "replicas": [],
+            **fields,
+        },
+    )
 
 
 class TestModelServing(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeServeState()
+        self.records = FakeState().install(self)
+        _seed_saved_model(self.records, "Qwen2", "instruct", "boogey-46")
         patches = [
             patch(
                 "cortexgrid.model_serving.get_serve_details",
@@ -112,10 +139,6 @@ class TestModelServing(unittest.TestCase):
                 return_value="http://ray:30000",
             ),
             patch(
-                "cortexgrid.model_serving._load_deploy_metadata",
-                return_value=(_FAKE_META, _GPU_REQUIREMENTS),
-            ),
-            patch(
                 "cortexgrid.model_serving.vram_tiers",
                 return_value=_TIERS,
             ),
@@ -125,10 +148,13 @@ class TestModelServing(unittest.TestCase):
             self.addCleanup(p.stop)
         build_spec = patch(
             "cortexgrid.model_serving._build_application_spec",
-            side_effect=_stub_build_spec,
+            wraps=_build_application_spec,
         )
         self.build_spec = build_spec.start()
         self.addCleanup(build_spec.stop)
+
+    def _record(self) -> dict[str, Any]:
+        return self.records.deployments[("Qwen2", "instruct", "boogey-46")]
 
     def test_deploy_builds_the_spec_from_the_stored_requirements(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=3)
@@ -141,6 +167,16 @@ class TestModelServing(unittest.TestCase):
         deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(self.build_spec.call_args.args[-2], 1)
+
+    def test_deploy_records_the_spec_it_put_and_the_tiers_it_built_against(
+        self,
+    ) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(
+            self._record()["spec"], self.state.apps["Qwen2__instruct__boogey-46"]
+        )
+        self.assertEqual(self._record()["tiers"], _TIERS)
 
     def test_deployed_model_appears_in_listings(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -158,19 +194,33 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(list_deployed_models(), [])
 
+    def test_undeploy_drops_the_deployment_record(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        undeploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(self.records.deployments, {})
+
     def test_deployment_url_combines_serve_uri_and_route(self) -> None:
         d = deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(d.url, "http://ray:30000/r/Qwen2/instruct/boogey-46")
 
-    def test_apps_not_using_our_naming_scheme_excluded_from_listings(self) -> None:
+    def test_serve_apps_without_a_deployment_record_are_not_listed(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
         self.state.apps["unrelated-app"] = {"name": "unrelated-app"}
         self.state.apps["only__two"] = {"name": "only__two"}
+        observe_deployments()
 
         listed = list_deployed_models()
 
         self.assertEqual([d.family for d in listed], ["Qwen2"])
+
+    def test_model_whose_app_is_gone_is_not_listed(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.apps.clear()
+        observe_deployments()
+
+        self.assertEqual(list_deployed_models(), [])
 
     def test_list_returns_empty_when_nothing_deployed(self) -> None:
         self.assertEqual(list_deployed_models(), [])
@@ -279,8 +329,13 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(puts, [[name]])
 
-    def test_redeploying_an_unchanged_spec_skips_the_put(self) -> None:
+    def test_redeploying_an_unchanged_spec_without_a_record_skips_the_put(
+        self,
+    ) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
+        # A model deployed before deployment records existed has none, so the
+        # redeploy asks Ray whether it already has the spec.
+        self.records.deployments.clear()
         puts: list[list[str]] = []
 
         with patch(
@@ -309,10 +364,54 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(puts, [])
 
-    def test_redeploying_a_changed_spec_puts_it_again(self) -> None:
+    def test_redeploying_an_unchanged_spec_makes_no_ray_calls(self) -> None:
+        # The record shows the model live with this spec, so the redeploy is
+        # answered from it: not even the GPU tiers are read.
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+        with (
+            patch("cortexgrid.model_serving.vram_tiers") as tiers,
+            patch("cortexgrid.model_serving.get_serve_details") as details,
+            patch("cortexgrid.model_serving.put_serve_applications") as put,
+        ):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        tiers.assert_not_called()
+        details.assert_not_called()
+        put.assert_not_called()
+
+    def test_redeploying_an_unchanged_spec_reports_the_recorded_phase(self) -> None:
+        # The phase is what the control plane last observed, not a fresh read.
+        self.state.status = "DEPLOYING"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.status = "RUNNING"
+
+        d = deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(d.phase, "deploying")
+
+    def test_redeploying_an_unchanged_spec_with_wait_reports_it_running(
+        self,
+    ) -> None:
+        self.state.status = "DEPLOYING"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.status = "RUNNING"
+
+        d = deploy_model("Qwen2", "instruct", "boogey-46", wait=True)
+
+        self.assertEqual(d.phase, "running")
+
+    def test_redeploying_with_changed_requirements_puts_the_new_spec(self) -> None:
         name = "Qwen2__instruct__boogey-46"
         deploy_model("Qwen2", "instruct", "boogey-46")
-        self.state.apps[name]["runtime_env"] = {"working_dir": "s3://bundles/old.zip"}
+        # Re-saved asking for twice the RAM.
+        _seed_saved_model(
+            self.records,
+            "Qwen2",
+            "instruct",
+            "boogey-46",
+            ModelRequirements(num_gpus=1, ram_gb=32.0, vram_gb=24.0),
+        )
         puts: list[list[str]] = []
 
         def put(applications: list[dict[str, Any]]) -> None:
@@ -323,6 +422,46 @@ class TestModelServing(unittest.TestCase):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(puts, [[name]])
+        self.assertEqual(
+            self._record()["spec"]["args"]["ray_actor_options"]["memory"],
+            32 * 1024**3,
+        )
+
+    def test_redeploying_with_more_replicas_puts_the_new_spec(self) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=1)
+        puts: list[list[str]] = []
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+
+        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+            deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=2)
+
+        self.assertEqual(puts, [[name]])
+        self.assertEqual(self._record()["spec"]["args"]["num_replicas"], 2)
+
+    def test_redeploying_over_a_failed_record_removes_the_app_and_puts_it_back(
+        self,
+    ) -> None:
+        name = "Qwen2__instruct__boogey-46"
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        self.state.status = "DEPLOY_FAILED"
+        observe_deployments()
+        puts: list[list[str]] = []
+
+        def put(applications: list[dict[str, Any]]) -> None:
+            puts.append([a["name"] for a in applications])
+            self.state.put(applications)
+            # Ray starts the app afresh.
+            self.state.status = "DEPLOYING"
+
+        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+            deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(puts, [[], [name]])
+        self.assertEqual(self._record()["phase"], "deploying")
 
 
 
@@ -421,14 +560,24 @@ class TestWaitForModelServing(unittest.TestCase):
 class TestModelServingStatus(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeServeState()
+        self.records = FakeState().install(self)
+        _seed_saved_model(self.records, "fam", "suf", "run")
         patches = [
             patch(
                 "cortexgrid.model_serving.get_serve_details",
                 side_effect=self.state.get_details,
             ),
             patch(
+                "cortexgrid.model_serving.put_serve_applications",
+                side_effect=self.state.put,
+            ),
+            patch(
                 "cortexgrid.model_serving.get_ray_serve_uri",
                 return_value="http://ray:30000",
+            ),
+            patch(
+                "cortexgrid.model_serving.vram_tiers",
+                return_value=_TIERS,
             ),
         ]
         for p in patches:
@@ -436,11 +585,23 @@ class TestModelServingStatus(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def _serve_app(self, status: str, message: str = "") -> None:
-        self.state.apps["fam__suf__run"] = {"name": "fam__suf__run"}
+        """Deploy the model, then have the controller report `status` for it
+        and the control plane observe that."""
+        deploy_model("fam", "suf", "run")
         self.state.status = status
         self.state.message = message
+        observe_deployments()
 
     def test_not_deployed_when_no_serve_app(self) -> None:
+        s = model_serving_status("fam", "suf", "run")
+        self.assertEqual(s.phase, "not_deployed")
+        self.assertIsNone(s.url)
+
+    def test_not_deployed_once_the_app_is_gone(self) -> None:
+        deploy_model("fam", "suf", "run")
+        self.state.apps.clear()
+        observe_deployments()
+
         s = model_serving_status("fam", "suf", "run")
         self.assertEqual(s.phase, "not_deployed")
         self.assertIsNone(s.url)
@@ -738,16 +899,9 @@ class TestServeDependencies(unittest.TestCase):
     def _load_with_tags(
         self, tags: dict[str, str]
     ) -> tuple[BundleMetadata, ModelRequirements]:
-        client = MagicMock()
-        client.search_model_versions.return_value = [SimpleNamespace(tags=tags)]
-        with (
-            patch("cortexgrid.model_serving.MlflowClient", return_value=client),
-            patch(
-                "cortexgrid.model_serving.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-        ):
-            return _load_deploy_metadata("fam", "suf", "run")
+        records = FakeState().install(self)
+        records.seed_model("fam", "suf", "run", "s3://bucket/weights", tags)
+        return _load_deploy_metadata("fam", "suf", "run")
 
     def test_bundle_metadata_round_trips_through_tags(self) -> None:
         meta = BundleMetadata(
@@ -759,7 +913,7 @@ class TestServeDependencies(unittest.TestCase):
 
         self.assertEqual(self._load_with_tags(metadata_to_tags(meta))[0], meta)
 
-    def test_requirements_load_from_the_same_version(self) -> None:
+    def test_requirements_load_from_the_same_registry_entry(self) -> None:
         tags = {
             **metadata_to_tags(_FAKE_META),
             **requirements_to_tags(_GPU_REQUIREMENTS),
@@ -823,14 +977,18 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
 
 class TestReplicaPlacements(unittest.TestCase):
     """`model_replica_placements` reports which worker each replica landed on -
-    what the requirements and the size-class preferences resolved to."""
+    what the requirements and the size-class preferences resolved to - as the
+    control plane last observed it."""
 
     def _placements(self, app: dict[str, Any] | None) -> list[Any]:
+        records = FakeState().install(self)
+        _seed_deployment(records, "fam", "suf", "run")
         details = {"applications": {"fam__suf__run": app} if app else {}}
         with patch(
             "cortexgrid.model_serving.get_serve_details", return_value=details
         ):
-            return model_replica_placements("fam", "suf", "run")
+            observe_deployments()
+        return model_replica_placements("fam", "suf", "run")
 
     def test_reports_the_worker_each_replica_runs_on(self) -> None:
         placements = self._placements(
@@ -877,6 +1035,76 @@ class TestReplicaPlacements(unittest.TestCase):
 
     def test_a_model_that_is_not_deployed_has_no_placements(self) -> None:
         self.assertEqual(self._placements(None), [])
+
+    def test_a_model_never_deployed_has_no_placements(self) -> None:
+        FakeState().install(self)
+
+        self.assertEqual(model_replica_placements("fam", "suf", "run"), [])
+
+
+class TestObserveDeployments(unittest.TestCase):
+    """`observe_deployments` brings every deployment record up to date with
+    one read of the Serve controller, writing only what changed."""
+
+    _REPLICA = {
+        "replica_id": "r1",
+        "state": "RUNNING",
+        "node_id": "n1",
+        "node_ip": "10.0.0.7",
+    }
+
+    def setUp(self) -> None:
+        self.records = FakeState().install(self)
+        _seed_deployment(self.records, "fam", "suf", "run")
+
+    def _observe(self, applications: dict[str, Any]) -> dict[str, Any]:
+        with patch(
+            "cortexgrid.model_serving.get_serve_details",
+            return_value={"applications": applications},
+        ):
+            observe_deployments()
+        return self.records.deployments[("fam", "suf", "run")]
+
+    def test_records_the_phase_and_message_the_controller_reports(self) -> None:
+        record = self._observe(
+            {"fam__suf__run": {"status": "UNHEALTHY", "message": "health check failed"}}
+        )
+
+        self.assertEqual(
+            (record["phase"], record["message"]), ("unhealthy", "health check failed")
+        )
+
+    def test_records_where_the_replicas_run(self) -> None:
+        record = self._observe(
+            {
+                "fam__suf__run": {
+                    "status": "RUNNING",
+                    "deployments": {"Model": {"replicas": [self._REPLICA]}},
+                }
+            }
+        )
+
+        self.assertEqual(record["replicas"], [self._REPLICA])
+
+    def test_an_app_gone_from_ray_is_marked_not_deployed(self) -> None:
+        _seed_deployment(
+            self.records, "fam", "suf", "run", replicas=[self._REPLICA]
+        )
+
+        record = self._observe({})
+
+        self.assertEqual(
+            (record["phase"], record["message"], record["replicas"]),
+            ("not_deployed", "", []),
+        )
+
+    def test_an_unchanged_observation_writes_nothing(self) -> None:
+        # The control plane observes on every poll cycle; a steady app must not
+        # cost a write each time.
+        with patch("cortexgrid.state.patch") as write:
+            self._observe({"fam__suf__run": {"status": "RUNNING"}})
+
+        write.assert_not_called()
 
 
 class TestSmallestDevicePlacement(unittest.TestCase):

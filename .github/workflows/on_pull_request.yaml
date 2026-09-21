@@ -169,7 +169,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11.13"
-      - run: uv run python -m unittest discover -s tests/unit/jobs_control_plane -v
+      - run: uv run --group control-plane python -m unittest discover -s tests/unit/jobs_control_plane -v
 
   test_k8s_seed:
     needs: detect

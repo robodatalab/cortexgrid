@@ -31,6 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from cortexgrid import state
 from cortexgrid.checkpoint import checkpoint, resume
 from cortexgrid.experiment import (
     Experiment,
@@ -188,16 +189,14 @@ def import_model(
     and record on the current Experiment's run which imported model it used.
 
     The model belongs to no run (see `cortexgrid.model_storage.import_model`),
-    so the run keeps the link instead: the tag
-    `imported_model/<family>/<suffix>` holds the version's `created_at`, set
-    whether this call uploaded the model or reused it."""
+    so the run keeps the link instead: the run's record notes the model's
+    `created_at` under (family, suffix), whether this call uploaded the model
+    or reused it."""
     experiment = Experiment.get_instance()
     model = _import_model_storage(
         source, serve_app, family, suffix, requirements, config
     )
-    get_mlflow_client().set_tag(
-        experiment.run_id, f"imported_model/{family}/{suffix}", model.created_at
-    )
+    _record_imported_model(experiment.run_id, family, suffix, model)
     return model
 
 
@@ -215,16 +214,27 @@ def register_model(
     `import_model` without the import: everything it needs beyond its code goes
     in `config`, which the serve-app reads with `model_config` at construction
     (see `cortexgrid.model_storage.register_model`). The model belongs to no
-    run, so the run keeps the link the same way, under the same tag
-    `imported_model/<family>/<suffix>`."""
+    run, so the run keeps the link the same way."""
     experiment = Experiment.get_instance()
     model = _register_model_storage(
         serve_app, family, suffix, requirements, config
     )
-    get_mlflow_client().set_tag(
-        experiment.run_id, f"imported_model/{family}/{suffix}", model.created_at
-    )
+    _record_imported_model(experiment.run_id, family, suffix, model)
     return model
+
+
+def _record_imported_model(
+    run_id: str, family: str, suffix: str, model: SavedModel
+) -> None:
+    """Note on the run's record which imported model it used."""
+    state.put(
+        "runs",
+        run_id,
+        "imported-models",
+        family,
+        suffix,
+        body={"created_at": model.created_at},
+    )
 
 
 __all__ = [

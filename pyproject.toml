@@ -60,6 +60,11 @@ ui = [
     "kubernetes>=31,<32",
     "psycopg[binary]>=3.2",
 ]
+control-plane = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "psycopg[binary,pool]>=3.2",
+]
 test-torch = [
     "torch>=2.0.0",
 ]

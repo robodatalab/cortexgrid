@@ -36,10 +36,20 @@ spec:
             # resource. Bump higher only after measuring head CPU under load.
             - name: CORTEXGRID_STARTER_WORKERS
               value: "2"
+            - name: CORTEXGRID_API_PORT
+              value: "{{ .Values.services.jobsControlPlane.port }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.services.jobsControlPlane.port }}
           envFrom:
             # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.services.jobsControlPlane.port }}
+            periodSeconds: 10
           livenessProbe:
             exec:
               command:

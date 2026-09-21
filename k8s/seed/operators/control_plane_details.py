@@ -27,6 +27,9 @@ class ControlPlaneDetails(Operator):
         set_secret(util.SECRET_MLFLOW_TRACKING_URI, util.mlflow_tracking_uri_for(node_ip))
         set_secret(util.SECRET_RAY_JOB_SERVER_URI, util.ray_job_server_uri_for(node_ip))
         set_secret(util.SECRET_RAY_SERVE_URI, util.ray_serve_uri_for(node_ip))
+        set_secret(
+            util.SECRET_JOBS_CONTROL_PLANE_URI, util.jobs_control_plane_uri_for(node_ip)
+        )
 
     def teardown(self, deps: dict) -> None:
         log.info("Deleting k3s token + service URLs from the head secrets store...")
@@ -35,3 +38,4 @@ class ControlPlaneDetails(Operator):
         delete_secret(util.SECRET_MLFLOW_TRACKING_URI)
         delete_secret(util.SECRET_RAY_JOB_SERVER_URI)
         delete_secret(util.SECRET_RAY_SERVE_URI)
+        delete_secret(util.SECRET_JOBS_CONTROL_PLANE_URI)

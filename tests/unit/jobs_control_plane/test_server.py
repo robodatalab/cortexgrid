@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import json
+import copy
 import os
 import shutil
-import tarfile
 import tempfile
 import unittest
 from concurrent.futures import Future
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import cloudpickle  # type: ignore
+import requests  # type: ignore
 from parameterized import parameterized
 
-from cortexgrid.experiment import Experiment
 from cortexgrid.jobs import JobLifecycle, LifecycleEvent, Payload
 from cortexgrid.ray_util import JobStatus, ray_submission_id
 from jobs_control_plane.server import (
@@ -24,6 +21,8 @@ from jobs_control_plane.server import (
     _submit_job_worker,
     poll_once,
 )
+
+from tests.fakes import FakeState
 
 
 EXPERIMENT_NAME = "exp"
@@ -46,65 +45,6 @@ def _make_lifecycle(
         retry=retry,
         pip_requirements=pip_requirements or [],
     )
-
-
-class FakeMLflow:
-    """MlflowClient stand-in backed by a real temp directory."""
-
-    def __init__(self) -> None:
-        self.artifact_root = Path(tempfile.mkdtemp())
-
-    def list_artifacts(self, run_id: str, path: str = "") -> list[SimpleNamespace]:
-        target = self.artifact_root / path
-        if not target.exists():
-            return []
-        return [
-            SimpleNamespace(path=f"{path}/{d.name}", is_dir=d.is_dir())
-            for d in target.iterdir()
-        ]
-
-    def download_artifacts(self, run_id: str, artifact_path: str) -> str:
-        target = self.artifact_root / artifact_path
-        if not target.exists():
-            raise FileNotFoundError(artifact_path)
-        return str(target)
-
-    def log_artifact(
-        self, run_id: str, local_path: str, artifact_path: str = ""
-    ) -> None:
-        dest_dir = self.artifact_root / artifact_path
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_path, dest_dir / Path(local_path).name)
-
-    def log_artifacts(
-        self, run_id: str, local_dir: str, artifact_path: str = ""
-    ) -> None:
-        dest = self.artifact_root / artifact_path
-        shutil.copytree(local_dir, str(dest), dirs_exist_ok=True)
-
-    def add_job(
-        self,
-        job_id: str,
-        lifecycle: JobLifecycle,
-        payload: Payload | None = None,
-        fake_s3: "FakeS3 | None" = None,
-    ) -> None:
-        job_dir = self.artifact_root / "job" / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / "lifecycle.json").write_text(lifecycle.to_json())
-        if payload is not None:
-            assert fake_s3 is not None, "fake_s3 is required when seeding a payload"
-            staging = Path(tempfile.mkdtemp())
-            project_dest = staging / "project_code_root"
-            shutil.copytree(payload.project_code_root, str(project_dest), dirs_exist_ok=True)
-            (project_dest / "payload.pkl").write_bytes(cloudpickle.dumps(payload))
-            tarball = staging / "project_code_root.tar.gz"
-            with tarfile.open(tarball, "w:gz") as tar:
-                tar.add(str(project_dest), arcname="project_code_root")
-            uri = fake_s3.upload(
-                str(tarball), dest_path=f"job/{job_id}/project_code_root.tar.gz"
-            )
-            (job_dir / "manifest.json").write_text(json.dumps({"code_tarball_uri": uri}))
 
 
 class FakeS3:
@@ -235,15 +175,17 @@ class TestMatchRayJobsToCortexgridJobs(unittest.TestCase):
 class TestPollOnce(unittest.TestCase):
     """Tests for ``poll_once`` covering the cjob × ray_state action matrix.
 
-    The test rig patches the four boundary calls ``poll_once`` makes into
-    cortexgrid (``list_experiments``, ``list_experiment_run_jobs``,
-    ``list_ray_jobs_with_submission_id``, ``get_ray_job_status``) and the
-    one outbound side effect (``stop_ray_job``). The executor is a
-    MagicMock whose ``submit`` records ``(run_id, job_id, attempt)``.
+    The jobs live in a ``FakeState`` holding a single run; the test rig
+    patches the Ray calls ``poll_once`` makes (``list_ray_jobs_with_submission_id``,
+    ``get_ray_job_status``), the one outbound side effect (``stop_ray_job``)
+    and the Serve controller read behind ``observe_deployments``. The
+    executor is a MagicMock whose ``submit`` records ``(run_id, job_id, attempt)``.
     """
 
     def setUp(self) -> None:
-        self._cjobs: list[JobLifecycle] = []
+        self.records = FakeState().install(self)
+        self.records.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
+        self._serve_details = MagicMock(return_value={})
         self._ray_state: dict[str, JobStatus] = {}
         self._submitted: list[tuple[str, str, int]] = []
         self._stopped: list[str] = []
@@ -259,26 +201,12 @@ class TestPollOnce(unittest.TestCase):
 
         self.executor.submit.side_effect = _submit_side_effect
 
-        def _list_jobs(run_id: str) -> list[JobLifecycle]:
-            return [j for j in self._cjobs if j.run_id == run_id]
-
         def _get_status(rjob: str | None) -> JobStatus:
             if rjob is None:
                 return JobStatus.PENDING
             return self._ray_state[rjob]
 
         patchers = [
-            patch(
-                "jobs_control_plane.server.list_experiments",
-                side_effect=lambda: [
-                    Experiment(experiment_name=EXPERIMENT_NAME, run_id=r)
-                    for r in sorted({j.run_id for j in self._cjobs})
-                ],
-            ),
-            patch(
-                "jobs_control_plane.server.list_experiment_run_jobs",
-                side_effect=_list_jobs,
-            ),
             patch(
                 "jobs_control_plane.server.list_ray_jobs_with_submission_id",
                 side_effect=lambda: list(self._ray_state.keys()),
@@ -291,7 +219,7 @@ class TestPollOnce(unittest.TestCase):
                 "jobs_control_plane.server.stop_ray_job",
                 side_effect=self._stopped.append,
             ),
-            patch("cortexgrid.jobs.JobLifecycle.save_to_mlflow"),
+            patch("cortexgrid.model_serving.get_serve_details", self._serve_details),
         ]
         for p in patchers:
             p.start()
@@ -355,7 +283,9 @@ class TestPollOnce(unittest.TestCase):
         stop_requested: bool,
         expected_action: str,
     ) -> None:
-        self._cjobs.append(_make_lifecycle(retry=retry, stop_requested=stop_requested))
+        self.records.seed_job(
+            _make_lifecycle(retry=retry, stop_requested=stop_requested)
+        )
         if ray_state is not None:
             self._seed_ray_attempt(RUN_ID, JOB_ID, 0, ray_state)
 
@@ -379,7 +309,7 @@ class TestPollOnce(unittest.TestCase):
 
     def test_retry_uses_next_attempt_number_after_several_failures(self) -> None:
         """A retry chain must increment the attempt beyond the highest Ray knows."""
-        self._cjobs.append(_make_lifecycle(retry=True))
+        self.records.seed_job(_make_lifecycle(retry=True))
         for attempt in range(4):
             self._seed_ray_attempt(RUN_ID, JOB_ID, attempt, JobStatus.FAILED)
 
@@ -391,7 +321,7 @@ class TestPollOnce(unittest.TestCase):
         self,
     ) -> None:
         """Regression for the lex-sort bug: attempt 10 must win over attempt 2."""
-        self._cjobs.append(_make_lifecycle(retry=True))
+        self.records.seed_job(_make_lifecycle(retry=True))
         self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
         self._seed_ray_attempt(RUN_ID, JOB_ID, 2, JobStatus.FAILED)
         self._seed_ray_attempt(RUN_ID, JOB_ID, 10, JobStatus.FAILED)
@@ -401,7 +331,7 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 11)])
 
     def test_in_flight_job_is_not_redispatched(self) -> None:
-        self._cjobs.append(_make_lifecycle())
+        self.records.seed_job(_make_lifecycle())
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         self.in_flight[key] = (RUN_ID, JOB_ID, Future())  # not done
 
@@ -412,7 +342,7 @@ class TestPollOnce(unittest.TestCase):
     def test_in_flight_job_with_failed_ray_state_is_not_redispatched(self) -> None:
         """If a worker is still running for this job identity, skip it
         regardless of what Ray reports for the most recent attempt."""
-        self._cjobs.append(_make_lifecycle(retry=True))
+        self.records.seed_job(_make_lifecycle(retry=True))
         self._seed_ray_attempt(RUN_ID, JOB_ID, 0, JobStatus.FAILED)
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         self.in_flight[key] = (RUN_ID, JOB_ID, Future())  # not done
@@ -422,7 +352,7 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(self._submitted, [])
 
     def test_done_futures_are_reaped_before_dispatch(self) -> None:
-        self._cjobs.append(_make_lifecycle())
+        self.records.seed_job(_make_lifecycle())
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         done: Future = Future()
         done.set_result(None)
@@ -434,13 +364,14 @@ class TestPollOnce(unittest.TestCase):
         self.assertIsNot(updated_in_flight[key][2], done)
 
     def test_multiple_jobs_are_handled_independently(self) -> None:
-        self._cjobs = [
+        for lifecycle in [
             _make_lifecycle(job_id="job-new"),
             _make_lifecycle(job_id="job-running"),
             _make_lifecycle(job_id="job-fail", retry=True),
             _make_lifecycle(job_id="job-stop", stop_requested=True),
             _make_lifecycle(job_id="job-done"),
-        ]
+        ]:
+            self.records.seed_job(lifecycle)
         self._seed_ray_attempt(RUN_ID, "job-running", 0, JobStatus.RUNNING)
         self._seed_ray_attempt(RUN_ID, "job-fail", 0, JobStatus.FAILED)
         self._seed_ray_attempt(RUN_ID, "job-stop", 0, JobStatus.RUNNING)
@@ -455,7 +386,7 @@ class TestPollOnce(unittest.TestCase):
         self.assertEqual(self._stopped, [ray_submission_id(RUN_ID, "job-stop", 0)])
 
     def test_in_flight_is_populated_after_dispatch(self) -> None:
-        self._cjobs.append(_make_lifecycle())
+        self.records.seed_job(_make_lifecycle())
 
         updated_in_flight = poll_once(self.executor, self.in_flight)
 
@@ -469,46 +400,80 @@ class TestPollOnce(unittest.TestCase):
                 attempt=0, state="pending", start="2026-04-15T10:00:00+00:00"
             )
         )
+        self.records.seed_job(lifecycle)
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         failed: Future = Future()
         failed.set_exception(RuntimeError("payload download failed"))
         self.in_flight[key] = (RUN_ID, JOB_ID, failed)
 
-        with patch.object(JobLifecycle, "load_from_mlflow", return_value=lifecycle):
-            updated_in_flight = poll_once(self.executor, self.in_flight)
+        updated_in_flight = poll_once(self.executor, self.in_flight)
 
-        self.assertEqual(lifecycle.history[-1].error, "payload download failed")
-        self.assertNotIn(key, updated_in_flight)
+        history = self.records.jobs[(RUN_ID, JOB_ID)]["history"]
+        self.assertEqual(history[-1]["error"], "payload download failed")
+        # The job is still pending, so the same cycle hands it to a fresh worker.
+        self.assertIsNot(updated_in_flight[key][2], failed)
 
     def test_worker_exception_does_not_block_subsequent_dispatch(self) -> None:
         """After a worker raises, the next poll can redispatch the job."""
-        self._cjobs.append(_make_lifecycle())
+        self.records.seed_job(_make_lifecycle())
         key = ray_submission_id(RUN_ID, JOB_ID, None)
         failed: Future = Future()
         failed.set_exception(RuntimeError("boom"))
         self.in_flight[key] = (RUN_ID, JOB_ID, failed)
 
-        with (
-            patch.object(
-                JobLifecycle, "load_from_mlflow", return_value=_make_lifecycle()
-            ),
-            patch.object(JobLifecycle, "save_to_mlflow"),
-        ):
-            poll_once(self.executor, self.in_flight)
+        poll_once(self.executor, self.in_flight)
 
         self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
+
+    @parameterized.expand(
+        [
+            ("finished", JobStatus.FINISHED, False),
+            ("stopped_even_with_retry", JobStatus.STOPPED, True),
+            ("failed_without_retry", JobStatus.FAILED, False),
+        ]
+    )
+    def test_job_done_for_good_is_not_read_by_later_cycles(
+        self, name: str, ray_state: JobStatus, retry: bool
+    ) -> None:
+        """Once a cycle records a terminal state with no retry to follow, the
+        job leaves jobs/open and later cycles leave it alone."""
+        self.records.seed_job(_make_lifecycle(retry=retry))
+        self._seed_ray_attempt(RUN_ID, JOB_ID, 0, ray_state)
+        poll_once(self.executor, self.in_flight)
+        recorded = copy.deepcopy(self.records.jobs[(RUN_ID, JOB_ID)])
+        # Ray forgetting the job (a head restart) would make a cycle that
+        # still read it record a fresh pending entry.
+        self._ray_state.clear()
+
+        poll_once(self.executor, self.in_flight)
+
+        self.assertEqual(self.records.jobs[(RUN_ID, JOB_ID)], recorded)
+        self.assertEqual(self._submitted, [])
+
+    def test_failing_deployment_observation_does_not_fail_the_cycle(self) -> None:
+        """A Serve controller that cannot be read must not hold up the jobs."""
+        self.records.seed_job(_make_lifecycle())
+        self._serve_details.side_effect = requests.ConnectionError("serve is down")
+
+        with self.assertLogs("jobs-control-plane", level="ERROR"):
+            updated_in_flight = poll_once(self.executor, self.in_flight)
+
+        self._serve_details.assert_called_once()
+        self.assertEqual(self._submitted, [(RUN_ID, JOB_ID, 0)])
+        self.assertIn(ray_submission_id(RUN_ID, JOB_ID, None), updated_in_flight)
 
 
 class TestSubmitJobWorker(unittest.TestCase):
     """Sanity tests for ``_submit_job_worker`` under its new contract.
 
     The worker now always appends an ``attempt`` suffix to the submission
-    id, raises on MLflow/Ray errors (no more swallowing), and does not
+    id, raises on state/S3/Ray errors (no more swallowing), and does not
     write anything back to the lifecycle.
     """
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
+        self.records = FakeState().install(self)
+        self.records.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
         self.fake_s3 = FakeS3()
         self.submitted: list[dict[str, Any]] = []
         self.project_root = Path(tempfile.mkdtemp())
@@ -520,11 +485,6 @@ class TestSubmitJobWorker(unittest.TestCase):
             self.submitted.append(kwargs)
 
         patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
             patch("cortexgrid.jobs.s3_util", self.fake_s3),
             patch(
                 "jobs_control_plane.server.submit_ray_job",
@@ -536,7 +496,7 @@ class TestSubmitJobWorker(unittest.TestCase):
             self.addCleanup(p.stop)
         self.addCleanup(os.chdir, self.original_cwd)
         self.addCleanup(shutil.rmtree, self.project_root, True)
-        self.addCleanup(shutil.rmtree, self.fake_mlflow.artifact_root, True)
+        self.addCleanup(shutil.rmtree, self.fake_s3.root, True)
 
     def _seed(
         self,
@@ -544,12 +504,14 @@ class TestSubmitJobWorker(unittest.TestCase):
         with_payload: bool = True,
         pip_requirements: list[str] | None = None,
     ) -> None:
-        lifecycle = _make_lifecycle(
-            stop_requested=stop_requested, pip_requirements=pip_requirements
+        self.records.seed_job(
+            _make_lifecycle(
+                stop_requested=stop_requested, pip_requirements=pip_requirements
+            )
         )
-        payload = None
         if with_payload:
-            payload = Payload(
+            # Uploads the code tarball to the fake S3 and records its manifest.
+            Payload(
                 experiment_name=EXPERIMENT_NAME,
                 run_id=RUN_ID,
                 job_id=JOB_ID,
@@ -557,8 +519,7 @@ class TestSubmitJobWorker(unittest.TestCase):
                 args=(),
                 kwargs={},
                 project_code_root=str(self.project_root),
-            )
-        self.fake_mlflow.add_job(JOB_ID, lifecycle, payload, fake_s3=self.fake_s3)
+            ).save_to_mlflow()
 
     def test_happy_path_submits_to_ray_with_attempt_suffix(self) -> None:
         self._seed()
