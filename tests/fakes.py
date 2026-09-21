@@ -1,16 +1,24 @@
 """In-memory fakes for the infrastructure cortexgrid talks to.
 
 Tests using these fakes assert on observable post-state of S3, MLflow,
-Ray and Postgres rather than on which helper functions were called.
+Ray, the jobs control plane's records and Postgres rather than on which
+helper functions were called.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import time
+import unittest
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
-from mlflow.exceptions import MlflowException
+import requests  # type: ignore
+
+from cortexgrid import state
 
 
 @dataclass
@@ -87,71 +95,16 @@ class FakeMlflowRun:
 
 
 @dataclass
-class FakeArtifact:
-    path: str
-    is_dir: bool
-
-
-@dataclass
-class FakeMlflowModelVersion:
-    name: str
-    version: str
-    source: str | None
-    run_id: str
-    tags: dict[str, str] = field(default_factory=dict)
-    creation_timestamp: int = 1700000000000
-
-
-@dataclass
 class FakeMlflowClient:
-    """Tracks soft-delete state via lifecycle_stage like real mlflow does."""
+    """The MLflow side of an experiment or run: soft-deleted via
+    lifecycle_stage, like real MLflow."""
 
     experiments: list[FakeMlflowExperiment] = field(default_factory=list)
     runs: list[FakeMlflowRun] = field(default_factory=list)
-    artifacts: dict[str, list[FakeArtifact]] = field(default_factory=dict)
-    model_versions: list[FakeMlflowModelVersion] = field(default_factory=list)
-    registered_models: set[str] = field(default_factory=set)
 
     def __init__(self, *, tracking_uri: str = "", **_: Any) -> None:
         self.experiments = []
         self.runs = []
-        self.artifacts = {}
-        self.model_versions = []
-        self.registered_models = set()
-        self._next_version = 1
-
-    def seed(
-        self,
-        experiments: list[FakeMlflowExperiment] | None = None,
-        runs: list[FakeMlflowRun] | None = None,
-        artifacts: dict[str, list[FakeArtifact]] | None = None,
-        model_versions: list[FakeMlflowModelVersion] | None = None,
-    ) -> "FakeMlflowClient":
-        self.experiments = list(experiments or [])
-        self.runs = list(runs or [])
-        self.artifacts = dict(artifacts or {})
-        self.model_versions = list(model_versions or [])
-        self.registered_models = {v.name for v in self.model_versions}
-        return self
-
-    def search_experiments(self, **_: Any) -> list[FakeMlflowExperiment]:
-        return [e for e in self.experiments if e.lifecycle_stage == "active"]
-
-    def search_runs(
-        self,
-        experiment_ids: list[str],
-        filter_string: str = "",
-        **_: Any,
-    ) -> list[FakeMlflowRun]:
-        result = [
-            r
-            for r in self.runs
-            if r.experiment_id in experiment_ids and r.lifecycle_stage == "active"
-        ]
-        if "attributes.run_name = '" in filter_string:
-            wanted = filter_string.split("attributes.run_name = '")[1].split("'")[0]
-            result = [r for r in result if r.run_name == wanted]
-        return result
 
     def get_experiment(self, experiment_id: str) -> FakeMlflowExperiment:
         for e in self.experiments:
@@ -159,106 +112,17 @@ class FakeMlflowClient:
                 return e
         raise KeyError(experiment_id)
 
-    def list_artifacts(self, run_id: str, path: str = "") -> list[FakeArtifact]:
-        all_for_run = self.artifacts.get(run_id, [])
-        if not path:
-            return list(all_for_run)
-        return [a for a in all_for_run if a.path.startswith(f"{path}/") or a.path == path]
-
     def get_run(self, run_id: str) -> FakeMlflowRun:
         for r in self.runs:
             if r.run_id == run_id:
                 return r
         raise KeyError(run_id)
 
-    def get_experiment_by_name(self, name: str) -> FakeMlflowExperiment | None:
-        # Like mlflow: deleted experiments are returned too.
-        for e in self.experiments:
-            if e.name == name:
-                return e
-        return None
-
-    def rename_experiment(self, experiment_id: str, new_name: str) -> None:
-        e = self.get_experiment(experiment_id)
-        if e.lifecycle_stage != "active":
-            raise ValueError("Cannot rename a non-active experiment.")
-        e.name = new_name
-
-    def restore_experiment(self, experiment_id: str) -> None:
-        self.get_experiment(experiment_id).lifecycle_stage = "active"
-
     def delete_run(self, run_id: str) -> None:
-        for r in self.runs:
-            if r.run_id == run_id:
-                r.lifecycle_stage = "deleted"
-                return
-        raise KeyError(run_id)
+        self.get_run(run_id).lifecycle_stage = "deleted"
 
     def delete_experiment(self, experiment_id: str) -> None:
-        for e in self.experiments:
-            if e.experiment_id == experiment_id:
-                e.lifecycle_stage = "deleted"
-                return
-        raise KeyError(experiment_id)
-
-    def search_model_versions(
-        self, filter_string: str = ""
-    ) -> list[FakeMlflowModelVersion]:
-        result = list(self.model_versions)
-        if "name='" in filter_string:
-            n = filter_string.split("name='")[1].split("'")[0]
-            result = [v for v in result if v.name == n]
-        if "tags.run_name='" in filter_string:
-            rn = filter_string.split("tags.run_name='")[1].split("'")[0]
-            result = [v for v in result if v.tags.get("run_name") == rn]
-        if "run_id='" in filter_string:
-            rid = filter_string.split("run_id='")[1].split("'")[0]
-            result = [v for v in result if v.run_id == rid]
-        return result
-
-    def create_registered_model(self, name: str) -> SimpleNamespace:
-        if name in self.registered_models:
-            raise MlflowException("RESOURCE_ALREADY_EXISTS")
-        self.registered_models.add(name)
-        return SimpleNamespace(name=name)
-
-    def get_registered_model(self, name: str) -> SimpleNamespace:
-        if name not in self.registered_models:
-            raise MlflowException("RESOURCE_DOES_NOT_EXIST")
-        return SimpleNamespace(name=name)
-
-    def create_model_version(
-        self,
-        name: str,
-        source: str,
-        run_id: str,
-        tags: dict[str, str] | None = None,
-    ) -> FakeMlflowModelVersion:
-        v = FakeMlflowModelVersion(
-            name=name,
-            version=str(self._next_version),
-            source=source,
-            run_id=run_id,
-            tags=dict(tags or {}),
-        )
-        self._next_version += 1
-        self.model_versions.append(v)
-        return v
-
-    def set_model_version_tag(
-        self, name: str, version: str, key: str, value: str
-    ) -> None:
-        for v in self.model_versions:
-            if v.name == name and v.version == version:
-                v.tags[key] = value
-                return
-        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
-
-    def delete_model_version(self, name: str, version: str) -> None:
-        self.model_versions = [
-            v for v in self.model_versions
-            if not (v.name == name and v.version == version)
-        ]
+        self.get_experiment(experiment_id).lifecycle_stage = "deleted"
 
 
 @dataclass
@@ -353,3 +217,289 @@ class _FakeCursor:
 
     def fetchall(self) -> list[tuple[Any, ...]]:
         return list(self._result)
+
+
+_EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_TERMINAL = ("finished", "stopped")
+
+
+def _json(value: Any) -> Any:
+    """What `value` looks like after a trip through the API's JSON."""
+    return json.loads(json.dumps(value))
+
+
+def _not_found(segments: tuple[str, ...]) -> requests.HTTPError:
+    return requests.HTTPError(f"404 Not Found: /{'/'.join(segments)}")
+
+
+class FakeState:
+    """In-memory stand-in for the jobs control plane's state API
+    (jobs_control_plane/api.py over jobs_control_plane/db.py), installed over
+    the functions of `cortexgrid.state`.
+
+    Mirrors the routes and their semantics: a missing record reads as None,
+    a write under a run that has no record fails like the API's 404, the
+    stop latch never clears, deleting a run cascades to everything recorded
+    under it, and `jobs/open` leaves out the jobs that are done for good.
+    Tests seed and assert on the dicts below directly; `seed_*` helpers fill
+    in what the API would have stored.
+    """
+
+    def __init__(self) -> None:
+        self.experiments: dict[str, dict[str, Any]] = {}
+        self.runs: dict[str, dict[str, Any]] = {}
+        self.jobs: dict[tuple[str, str], dict[str, Any]] = {}
+        self.manifests: dict[tuple[str, str], dict[str, Any]] = {}
+        self.results: dict[tuple[str, str], bytes] = {}
+        self.checkpoints: dict[tuple[str, str], dict[str, Any]] = {}
+        self.imported_models: dict[tuple[str, str, str], str] = {}
+        self.models: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.deployments: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self._clock = 0
+
+    def install(self, test: unittest.TestCase) -> "FakeState":
+        patcher = patch.multiple(
+            state,
+            get=self.get,
+            get_bytes=self.get_bytes,
+            put=self.put,
+            put_bytes=self.put_bytes,
+            patch=self.patch,
+            post=self.post,
+            delete=self.delete,
+        )
+        patcher.start()
+        test.addCleanup(patcher.stop)
+        return self
+
+    def _now(self) -> str:
+        self._clock += 1
+        return (_EPOCH + timedelta(seconds=self._clock)).isoformat()
+
+    # Seeding
+
+    def seed_run(
+        self, run_id: str, run_name: str | None = None, experiment_name: str = "exp"
+    ) -> None:
+        if experiment_name not in self.experiments:
+            self.seed_experiment(experiment_name)
+        self.runs[run_id] = {
+            "run_id": run_id,
+            "run_name": run_name or run_id,
+            "experiment_name": experiment_name,
+            "created_at": self._now(),
+        }
+
+    def seed_experiment(self, name: str, mlflow_experiment_id: str = "1") -> None:
+        self.experiments[name] = {
+            "name": name,
+            "mlflow_experiment_id": mlflow_experiment_id,
+            "created_at": self._now(),
+        }
+
+    def seed_job(self, lifecycle: Any) -> None:
+        """Record a cortexgrid.jobs.JobLifecycle as its save would."""
+        self.put("runs", lifecycle.run_id, "jobs", lifecycle.job_id, body=asdict(lifecycle))
+
+    def seed_model(
+        self,
+        family: str,
+        suffix: str,
+        run_name: str,
+        source: str,
+        tags: dict[str, str],
+        run_id: str | None = None,
+        creation_timestamp: int | None = None,
+    ) -> None:
+        self.models[(family, suffix, run_name)] = {
+            "tags": {"family": family, "suffix": suffix, "run_name": run_name, **tags},
+            "source": source,
+            "run_id": run_id,
+            "creation_timestamp": (
+                int(time.time() * 1000) if creation_timestamp is None else creation_timestamp
+            ),
+        }
+
+    # cortexgrid.state
+
+    def get(self, *segments: str, params: dict[str, str] | None = None) -> Any:
+        params = params or {}
+        match segments:
+            case ("experiments",):
+                return _json(list(self.experiments.values()))
+            case ("experiments", name):
+                return _json(self.experiments.get(name))
+            case ("runs",):
+                return _json([
+                    run for run in self.runs.values()
+                    if params.get("experiment_name") in (None, run["experiment_name"])
+                    and params.get("run_name") in (None, run["run_name"])
+                ])
+            case ("runs", run_id):
+                return _json(self.runs.get(run_id))
+            case ("runs", run_id, "jobs"):
+                return _json([j for (r, _), j in self.jobs.items() if r == run_id])
+            case ("jobs", "open"):
+                return _json([j for j in self.jobs.values() if not _job_done(j)])
+            case ("runs", run_id, "jobs", job_id):
+                return _json(self.jobs.get((run_id, job_id)))
+            case ("runs", run_id, "jobs", job_id, "manifest"):
+                return _json(self.manifests.get((run_id, job_id)))
+            case ("runs", run_id, "checkpoints", prefix):
+                return _json(self.checkpoints.get((run_id, prefix)))
+            case ("models",):
+                return _json([
+                    m for m in self.models.values()
+                    if params.get("run_id") in (None, m["run_id"])
+                ])
+            case ("models", family, suffix, run_name):
+                return _json(self.models.get((family, suffix, run_name)))
+            case ("deployments",):
+                return _json(list(self.deployments.values()))
+            case ("deployments", family, suffix, run_name):
+                return _json(self.deployments.get((family, suffix, run_name)))
+        raise NotImplementedError(f"FakeState has no GET /{'/'.join(segments)}")
+
+    def get_bytes(self, *segments: str) -> bytes | None:
+        match segments:
+            case ("runs", run_id, "jobs", job_id, "result"):
+                return self.results.get((run_id, job_id))
+        raise NotImplementedError(f"FakeState has no GET /{'/'.join(segments)}")
+
+    def put(self, *segments: str, body: Any) -> Any:
+        body = _json(body)
+        match segments:
+            case ("experiments", name):
+                if name not in self.experiments:
+                    self.seed_experiment(name, body["mlflow_experiment_id"])
+                return _json(self.experiments[name])
+            case ("runs", run_id):
+                self._require_experiment(segments, body["experiment_name"])
+                self.runs[run_id] = {
+                    "run_id": run_id,
+                    **body,
+                    "created_at": self.runs.get(run_id, {}).get("created_at", self._now()),
+                }
+                return None
+            case ("runs", run_id, "imported-models", family, suffix):
+                self._require_run(segments, run_id)
+                self.imported_models[(run_id, family, suffix)] = body["created_at"]
+                return None
+            case ("runs", run_id, "jobs", job_id):
+                self._require_run(segments, run_id)
+                existing = self.jobs.get((run_id, job_id))
+                if existing is None:
+                    self.jobs[(run_id, job_id)] = {**body, "run_id": run_id, "job_id": job_id}
+                else:
+                    existing["history"] = body["history"]
+                    existing["stop_requested"] = (
+                        existing["stop_requested"] or body["stop_requested"]
+                    )
+                return None
+            case ("runs", run_id, "jobs", job_id, "manifest"):
+                self._require_run(segments, run_id)
+                self.manifests[(run_id, job_id)] = body
+                return None
+            case ("runs", run_id, "checkpoints", prefix):
+                self._require_run(segments, run_id)
+                self.checkpoints[(run_id, prefix)] = body
+                return None
+            case ("models", family, suffix, run_name):
+                if body["run_id"] is not None:
+                    self._require_run(segments, body["run_id"])
+                self.models[(family, suffix, run_name)] = {
+                    **body,
+                    "creation_timestamp": int(time.time() * 1000),
+                }
+                return None
+            case ("deployments", family, suffix, run_name):
+                self.deployments[(family, suffix, run_name)] = {
+                    "family": family,
+                    "suffix": suffix,
+                    "run_name": run_name,
+                    **body,
+                }
+                return None
+        raise NotImplementedError(f"FakeState has no PUT /{'/'.join(segments)}")
+
+    def put_bytes(self, *segments: str, body: bytes) -> None:
+        match segments:
+            case ("runs", run_id, "jobs", job_id, "result"):
+                self._require_run(segments, run_id)
+                self.results[(run_id, job_id)] = bytes(body)
+                return
+        raise NotImplementedError(f"FakeState has no PUT /{'/'.join(segments)}")
+
+    def patch(self, *segments: str, body: Any) -> bool:
+        body = _json(body)
+        match segments:
+            case ("models", family, suffix, run_name, "tags"):
+                model = self.models.get((family, suffix, run_name))
+                if model is None:
+                    return False
+                model["tags"].update(body)
+                return True
+            case ("deployments", family, suffix, run_name):
+                deployment = self.deployments.get((family, suffix, run_name))
+                if deployment is None:
+                    return False
+                deployment.update(body)
+                return True
+        raise NotImplementedError(f"FakeState has no PATCH /{'/'.join(segments)}")
+
+    def post(self, *segments: str) -> None:
+        match segments:
+            case ("runs", run_id, "stop"):
+                for (r, _), job in self.jobs.items():
+                    if r == run_id:
+                        job["stop_requested"] = True
+                return
+        raise NotImplementedError(f"FakeState has no POST /{'/'.join(segments)}")
+
+    def delete(self, *segments: str, params: dict[str, str] | None = None) -> None:
+        match segments:
+            case ("experiments", name):
+                for run_id in [r for r, run in self.runs.items() if run["experiment_name"] == name]:
+                    self._delete_run(run_id)
+                self.experiments.pop(name, None)
+                return
+            case ("runs", run_id):
+                self._delete_run(run_id)
+                return
+            case ("models",):
+                run_id = (params or {})["run_id"]
+                self.models = {k: m for k, m in self.models.items() if m["run_id"] != run_id}
+                return
+            case ("models", family, suffix, run_name):
+                self.models.pop((family, suffix, run_name), None)
+                return
+            case ("deployments", family, suffix, run_name):
+                self.deployments.pop((family, suffix, run_name), None)
+                return
+        raise NotImplementedError(f"FakeState has no DELETE /{'/'.join(segments)}")
+
+    def _delete_run(self, run_id: str) -> None:
+        """The run and, as the schema's ON DELETE CASCADE does, all under it."""
+        self.runs.pop(run_id, None)
+        for table in (self.jobs, self.manifests, self.results, self.checkpoints):
+            for key in [k for k in table if k[0] == run_id]:
+                del table[key]
+        for key in [k for k in self.imported_models if k[0] == run_id]:
+            del self.imported_models[key]
+        self.models = {k: m for k, m in self.models.items() if m["run_id"] != run_id}
+
+    def _require_run(self, segments: tuple[str, ...], run_id: str) -> None:
+        if run_id not in self.runs:
+            raise _not_found(segments)
+
+    def _require_experiment(self, segments: tuple[str, ...], name: str) -> None:
+        if name not in self.experiments:
+            raise _not_found(segments)
+
+
+def _job_done(job: dict[str, Any]) -> bool:
+    """The schema's generated `jobs.done` column."""
+    if not job["history"]:
+        return False
+    last = job["history"][-1]["state"]
+    return last in _TERMINAL or (last == "failed" and not job["retry"])

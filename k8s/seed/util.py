@@ -1,7 +1,7 @@
-"""Shared helpers for setup-node.py and teardown-node.py.
+"""Shared helpers for the ./cg CLI (cli.py) and the operators.
 
-Holds everything both scripts touch: paths, constants, infra-config.yaml I/O,
-.env loading, Fabric SSH helpers, and kubectl wrappers.
+Holds paths, constants, infra-config.yaml I/O, .env loading, Fabric SSH
+helpers, and kubectl wrappers.
 """
 
 import io
@@ -33,13 +33,15 @@ SECRET_CONTROL_PLANE_IP = "CONTROL_PLANE_TAILSCALE_IP"
 SECRET_MLFLOW_TRACKING_URI = "MLFLOW_TRACKING_URI"
 SECRET_RAY_JOB_SERVER_URI = "RAY_JOB_SERVER_URI"
 SECRET_RAY_SERVE_URI = "RAY_SERVE_URI"
+SECRET_JOBS_CONTROL_PLANE_URI = "JOBS_CONTROL_PLANE_URI"
 
-# NodePorts must match k8s/workloads/{mlflow,ray}/service.yaml. Seed pipeline
+# NodePorts must match the chart's Services (k8s/charts/cortexgrid). Seed pipeline
 # stores the full URL in the head secrets store at setup time; downstream
 # consumers read the URL, not the port.
 _MLFLOW_NODEPORT = 30500
 _RAY_DASHBOARD_NODEPORT = 30265
 _RAY_SERVE_NODEPORT = 30000
+_JOBS_CONTROL_PLANE_NODEPORT = 30700
 _POSTGRES_NODEPORT = 30432
 _MINIO_S3_NODEPORT = 30900
 
@@ -54,6 +56,10 @@ def ray_job_server_uri_for(tailscale_ip: str) -> str:
 
 def ray_serve_uri_for(tailscale_ip: str) -> str:
     return f"http://{tailscale_ip}:{_RAY_SERVE_NODEPORT}"
+
+
+def jobs_control_plane_uri_for(tailscale_ip: str) -> str:
+    return f"http://{tailscale_ip}:{_JOBS_CONTROL_PLANE_NODEPORT}"
 
 
 def postgres_uri_for(tailscale_ip: str, db: str, user: str, password: str) -> str:
@@ -101,7 +107,7 @@ def head_url(cfg: dict) -> str:
     Uses the registered head's IP. Before a head is registered, falls back to the
     tailnet name TailscaleHostname gives the head during its setup.
     """
-    head = next((n for n in cfg.get("nodes", []) if n["role"] == "head"), None)
+    head = cfg.get("head")
     return head_url_for(head["ip"] if head else HEAD_TAILNET_HOSTNAME)
 
 
@@ -126,40 +132,19 @@ log = logging.getLogger("k8s.seed.util")
 
 
 def load_config() -> dict:
-    if not CONFIG_FILE.exists():
-        return {"nodes": []}
-    with open(CONFIG_FILE) as f:
-        return yaml.safe_load(f) or {"nodes": []}
+    """infra-config.yaml: the `head` (absent until one is added) and the
+    `workers` by alias, each entry with the setup steps it has `done`."""
+    cfg: dict = {}
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE) as f:
+            cfg = yaml.safe_load(f) or {}
+    cfg.setdefault("workers", {})
+    return cfg
 
 
 def save_config(cfg: dict) -> None:
     with open(CONFIG_FILE, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
-
-
-def checkpoint_step_done(ip: str, operator_name: str, direction: str) -> None:
-    """Record progress of a pipeline step against the node entry in infra-config.yaml.
-
-    Setup appends operator_name to node['progress']. Teardown pops the last
-    entry iff it matches operator_name (teardown runs operators in reverse,
-    so the last-completed setup step is the first to be torn down).
-    The `progress` field is removed when the list becomes empty.
-    """
-    if direction not in ("setup", "teardown"):
-        raise ValueError(f"direction must be 'setup' or 'teardown', got {direction!r}")
-    cfg = load_config()
-    for node in cfg["nodes"]:
-        if node["ip"] != ip:
-            continue
-        progress = node.setdefault("progress", [])
-        if direction == "setup":
-            progress.append(operator_name)
-        elif progress and progress[-1] == operator_name:
-            progress.pop()
-        if not progress:
-            node.pop("progress", None)
-        break
-    save_config(cfg)
 
 
 def ssh_user_for_ip(ip: str) -> str | None:

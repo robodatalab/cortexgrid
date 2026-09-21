@@ -1,6 +1,7 @@
 {{- if .Values.postgres.enabled }}
-# Bootstraps the `notes` database and applies its schema. Mirrors what
-# terraform/platform/rds/notes.tf does for AWS via local-exec psql provisioners.
+# Bootstraps the `notes` and `cortexgrid` databases and applies their schemas.
+# Mirrors what terraform/platform/rds/{notes,cortexgrid}.tf do for AWS via
+# local-exec psql provisioners.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -49,6 +50,10 @@ spec:
                 | grep -q '^1$' \
                 || psql -d postgres -c 'CREATE DATABASE notes'
               psql -d notes -v ON_ERROR_STOP=1 -f /schema/notes_schema.sql
+              psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='cortexgrid'" \
+                | grep -q '^1$' \
+                || psql -d postgres -c 'CREATE DATABASE cortexgrid'
+              psql -d cortexgrid -v ON_ERROR_STOP=1 -f /schema/cortexgrid_schema.sql
       volumes:
         - name: schema
           configMap:

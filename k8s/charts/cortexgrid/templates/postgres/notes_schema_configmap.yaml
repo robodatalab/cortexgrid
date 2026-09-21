@@ -8,4 +8,6 @@ metadata:
 data:
   notes_schema.sql: |-
 {{ .Files.Get "files/postgres/notes_schema.sql" | indent 4 }}
+  cortexgrid_schema.sql: |-
+{{ .Files.Get "files/postgres/cortexgrid_schema.sql" | indent 4 }}
 {{- end }}

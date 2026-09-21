@@ -1,9 +1,9 @@
 """Notes storage for the cortexgrid UI.
 
 Two independent tables in the `notes` Postgres database:
-- run_notes: notes attached to an MLflow run.
-- experiment_notes: meta-notes attached to an MLflow experiment, not tied
-  to a specific run.
+- run_notes: notes attached to a run.
+- experiment_notes: meta-notes attached to an experiment, not tied to a
+  specific run.
 
 Connection URI is resolved per-call via cortexgrid.secrets.
 """

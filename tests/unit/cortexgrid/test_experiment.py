@@ -13,12 +13,20 @@ from cortexgrid.experiment import (
     get_experiment_by_run_name,
     set_instance,
 )
+from cortexgrid.jobs import JobLifecycle
+
+from tests.fakes import FakeRay, FakeS3, FakeState
 
 
 class TestExperiment(unittest.TestCase):
     def setUp(self) -> None:
         set_instance(None)
+        self.records = FakeState().install(self)
         self.fake_mlflow = MagicMock()
+        self.fake_mlflow.create_experiment.return_value = "e1"
+        self.fake_mlflow.create_run.return_value = MagicMock(
+            info=MagicMock(run_id="run-1")
+        )
         for p in (
             patch("cortexgrid.infra.get_secret", return_value="http://mlflow"),
             patch(
@@ -38,8 +46,19 @@ class TestExperiment(unittest.TestCase):
         exp = Experiment.init()
 
         self.assertTrue(exp.experiment_name)
-        self.assertTrue(exp.run_id)
+        self.assertEqual(exp.run_id, "run-1")
         self.assertIs(Experiment.get_instance(), exp)
+
+    def test_init_records_the_experiment_and_run(self) -> None:
+        exp = Experiment.init("my-exp")
+
+        self.assertEqual(
+            self.records.experiments["my-exp"]["mlflow_experiment_id"], "e1"
+        )
+        self.assertEqual(self.records.runs["run-1"]["experiment_name"], "my-exp")
+        self.fake_mlflow.create_run.assert_called_once_with(
+            experiment_id="e1", run_name=exp.run_name()
+        )
 
     def test_init_returns_existing_instance_on_second_call(self) -> None:
         first = Experiment.init()
@@ -63,59 +82,52 @@ class TestExperiment(unittest.TestCase):
         with self.assertRaises(ValueError):
             Experiment.from_experiment("other-exp", "other-run")
 
+    def test_run_name_is_the_recorded_run_name(self) -> None:
+        self.records.seed_run("run-xyz", run_name="boogey-46", experiment_name="my-exp")
+
+        exp = Experiment.from_experiment("my-exp", "run-xyz")
+
+        self.assertEqual(exp.run_name(), "boogey-46")
+
     def test_get_experiment_by_run_name_returns_matching_experiment(self) -> None:
-        self.fake_mlflow.search_experiments.return_value = [
-            MagicMock(experiment_id="e1"),
-            MagicMock(experiment_id="e2"),
-        ]
-        self.fake_mlflow.search_runs.return_value = [
-            MagicMock(info=MagicMock(experiment_id="e2", run_id="r-7")),
-        ]
-        self.fake_mlflow.get_experiment.return_value = MagicMock(name=None)
-        self.fake_mlflow.get_experiment.return_value.name = "trainers"
+        self.records.seed_run("r-1", run_name="happy-12", experiment_name="evals")
+        self.records.seed_run("r-7", run_name="boogey-46", experiment_name="trainers")
 
         result = get_experiment_by_run_name("boogey-46")
 
-        self.fake_mlflow.search_runs.assert_called_once_with(
-            experiment_ids=["e1", "e2"],
-            filter_string="attributes.run_name = 'boogey-46'",
-            max_results=1,
-        )
-        self.fake_mlflow.get_experiment.assert_called_once_with("e2")
         self.assertEqual(result, Experiment("trainers", "r-7"))
 
     def test_get_experiment_by_run_name_raises_when_no_runs_match(self) -> None:
-        self.fake_mlflow.search_experiments.return_value = [
-            MagicMock(experiment_id="e1"),
-        ]
-        self.fake_mlflow.search_runs.return_value = []
+        self.records.seed_run("r-1", run_name="happy-12", experiment_name="evals")
         with self.assertRaises(ValueError):
             get_experiment_by_run_name("missing")
 
     def test_get_experiment_by_run_name_raises_when_no_experiments_exist(self) -> None:
-        self.fake_mlflow.search_experiments.return_value = []
         with self.assertRaises(ValueError):
             get_experiment_by_run_name("anything")
 
     def test_get_jobs_lists_cortexgrid_job_ids(self) -> None:
-        self.fake_mlflow.list_artifacts.return_value = [
-            MagicMock(path="job/job-1", is_dir=True),
-            MagicMock(path="job/job-2", is_dir=True),
-        ]
+        self.records.seed_run("run-xyz", experiment_name="my-exp")
+        self.records.seed_run("run-other", experiment_name="my-exp")
+        for run_id, job_id in (
+            ("run-xyz", "job-1"),
+            ("run-xyz", "job-2"),
+            ("run-other", "job-3"),
+        ):
+            self.records.seed_job(
+                JobLifecycle(experiment_name="my-exp", run_id=run_id, job_id=job_id)
+            )
 
         exp = Experiment.from_experiment("my-exp", "run-xyz")
         result = exp.get_jobs()
 
-        self.fake_mlflow.list_artifacts.assert_called_once_with(
-            "run-xyz", path="job"
-        )
         self.assertEqual(result, ["job-1", "job-2"])
 
 
 class TestDeletedExperimentNames(unittest.TestCase):
     """Against a real MLflow store (SQLite), because its rules on deleted
     experiments are what these paths work around: a deleted experiment keeps
-    its name reserved, cannot be renamed, and cannot take new runs."""
+    its name reserved and cannot take new runs."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -131,24 +143,49 @@ class TestDeletedExperimentNames(unittest.TestCase):
     def setUp(self) -> None:
         set_instance(None)
         self.addCleanup(set_instance, None)
-        p = patch(
-            "cortexgrid.experiment.get_mlflow_tracking_uri",
-            return_value=self.tracking_uri,
-        )
-        p.start()
-        self.addCleanup(p.stop)
+        self.records = FakeState().install(self)
+        for p in (
+            patch(
+                "cortexgrid.experiment.get_mlflow_tracking_uri",
+                return_value=self.tracking_uri,
+            ),
+            patch("cortexgrid.s3_util.get_s3_client", return_value=FakeS3()),
+            patch("cortexgrid.s3_util.get_s3_bucket", return_value="test-bucket"),
+            patch(
+                "cortexgrid.ray_util.get_ray_job_submission_client",
+                return_value=FakeRay(),
+            ),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
 
     def _run_experiment_id(self, exp: Experiment) -> str:
         return self.client.get_run(exp.run_id).info.experiment_id
 
-    def test_init_adds_a_run_to_the_active_experiment_of_that_name(self) -> None:
-        experiment_id = self.client.create_experiment("reused")
+    def _mlflow_experiment_id(self, name: str) -> str:
+        return self.records.experiments[name]["mlflow_experiment_id"]
 
-        exp = Experiment.init("reused")
+    def test_init_creates_an_mlflow_experiment_of_the_same_name(self) -> None:
+        exp = Experiment.init("fresh")
 
-        self.assertEqual(self._run_experiment_id(exp), experiment_id)
+        new = self.client.get_experiment(self._mlflow_experiment_id("fresh"))
+        self.assertEqual(new.name, "fresh")
+        self.assertEqual(self._run_experiment_id(exp), new.experiment_id)
 
-    def test_init_creates_a_new_experiment_when_the_named_one_was_deleted(
+    def test_init_adds_a_run_to_the_mlflow_experiment_of_an_existing_experiment(
+        self,
+    ) -> None:
+        first = Experiment.init("reused")
+        Experiment.close()
+
+        second = Experiment.init("reused")
+
+        experiment_id = self._mlflow_experiment_id("reused")
+        self.assertNotEqual(first.run_id, second.run_id)
+        self.assertEqual(self._run_experiment_id(first), experiment_id)
+        self.assertEqual(self._run_experiment_id(second), experiment_id)
+
+    def test_init_suffixes_a_name_a_deleted_mlflow_experiment_still_holds(
         self,
     ) -> None:
         # Deleted outside cortexgrid (e.g. the MLflow UI), so still under its name.
@@ -157,52 +194,48 @@ class TestDeletedExperimentNames(unittest.TestCase):
 
         exp = Experiment.init("reborn")
 
-        new = self.client.get_experiment_by_name("reborn")
-        assert new is not None
+        new = self.client.get_experiment(self._mlflow_experiment_id("reborn"))
         self.assertNotEqual(new.experiment_id, old_id)
+        self.assertRegex(new.name, r"^reborn__[0-9a-f]{8}$")
         self.assertEqual(new.lifecycle_stage, "active")
         self.assertEqual(self._run_experiment_id(exp), new.experiment_id)
 
-    def test_init_leaves_the_replaced_experiment_deleted_under_another_name(
+    def test_delete_experiment_soft_deletes_the_mlflow_experiment_under_its_name(
         self,
     ) -> None:
-        old_id = self.client.create_experiment("replaced")
-        self.client.delete_experiment(old_id)
-
-        Experiment.init("replaced")
-
-        old = self.client.get_experiment(old_id)
-        self.assertEqual(old.lifecycle_stage, "deleted")
-        self.assertEqual(old.name, f"replaced__deleted__{old_id}")
-
-    def test_delete_experiment_releases_the_name(self) -> None:
-        old_id = self.client.create_experiment("released")
+        exp = Experiment.init("released")
+        old_id = self._mlflow_experiment_id("released")
 
         delete_experiment("released")
 
-        self.assertIsNone(self.client.get_experiment_by_name("released"))
         old = self.client.get_experiment(old_id)
         self.assertEqual(old.lifecycle_stage, "deleted")
-        self.assertEqual(old.name, f"released__deleted__{old_id}")
+        self.assertEqual(old.name, "released")
+        self.assertNotIn("released", self.records.experiments)
+        self.assertNotIn(exp.run_id, self.records.runs)
 
     def test_init_after_delete_experiment_creates_a_new_experiment(self) -> None:
-        old_id = self.client.create_experiment("cycled")
+        Experiment.init("cycled")
+        Experiment.close()
+        old_id = self._mlflow_experiment_id("cycled")
         delete_experiment("cycled")
 
         exp = Experiment.init("cycled")
 
-        new = self.client.get_experiment_by_name("cycled")
-        assert new is not None
+        new = self.client.get_experiment(self._mlflow_experiment_id("cycled"))
         self.assertNotEqual(new.experiment_id, old_id)
+        self.assertRegex(new.name, r"^cycled__[0-9a-f]{8}$")
         self.assertEqual(self._run_experiment_id(exp), new.experiment_id)
 
     def test_delete_experiment_twice_is_a_no_op(self) -> None:
-        self.client.create_experiment("twice")
+        Experiment.init("twice")
+        old_id = self._mlflow_experiment_id("twice")
 
         delete_experiment("twice")
         delete_experiment("twice")
 
-        self.assertIsNone(self.client.get_experiment_by_name("twice"))
+        self.assertNotIn("twice", self.records.experiments)
+        self.assertEqual(self.client.get_experiment(old_id).lifecycle_stage, "deleted")
 
 
 if __name__ == "__main__":

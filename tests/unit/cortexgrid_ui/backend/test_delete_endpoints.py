@@ -7,18 +7,19 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from cortexgrid.experiment import list_experiments, set_instance
+from cortexgrid.jobs import JobLifecycle
 from cortexgrid_ui.backend.main import app
 from cortexgrid_ui.backend.streams import experiments_stream
 from cortexgrid_ui.backend.streams.experiments_stream import Run
 
 from tests.fakes import (
-    FakeArtifact,
     FakeMlflowClient,
     FakeMlflowExperiment,
     FakeMlflowRun,
     FakeNotesDB,
     FakeRay,
     FakeS3,
+    FakeState,
 )
 
 
@@ -36,18 +37,6 @@ def _patched_infra(
     )
     stack.enter_context(
         patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
-    )
-    stack.enter_context(
-        patch("cortexgrid.jobs.MlflowClient", return_value=mlflow)
-    )
-    stack.enter_context(
-        patch("cortexgrid.jobs.get_mlflow_tracking_uri", return_value="")
-    )
-    stack.enter_context(
-        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow)
-    )
-    stack.enter_context(
-        patch("cortexgrid.model_storage.get_mlflow_tracking_uri", return_value="")
     )
     stack.enter_context(
         patch(
@@ -85,15 +74,43 @@ def _make_run(experiment: str, run_id: str, run_name: str) -> Run:
     return Run(experiment_name=experiment, run_id=run_id, run_name=run_name, jobs=[])
 
 
-def _seed_job_package(s3: FakeS3, job_id: str) -> None:
+def _record_run(
+    state: FakeState,
+    mlflow: FakeMlflowClient,
+    experiment: str,
+    run_id: str,
+    run_name: str,
+) -> None:
+    """A run as Experiment.init leaves it: cortexgrid's records of the run and
+    its experiment, each mapped onto its MLflow counterpart."""
+    experiment_id = f"mlflow-{experiment}"
+    if experiment not in state.experiments:
+        state.seed_experiment(experiment, mlflow_experiment_id=experiment_id)
+        mlflow.experiments.append(
+            FakeMlflowExperiment(experiment_id=experiment_id, name=experiment)
+        )
+    state.seed_run(run_id, run_name, experiment_name=experiment)
+    mlflow.runs.append(
+        FakeMlflowRun(run_id=run_id, run_name=run_name, experiment_id=experiment_id)
+    )
+
+
+def _record_job(state: FakeState, s3: FakeS3, run_id: str, job_id: str) -> None:
+    """A submitted job: its code tarball in S3 and its lifecycle recorded."""
     s3.objects[f"job/{job_id}/project_code_root.tar.gz"] = b"code"
-    s3.objects[f"job/{job_id}/manifest.json"] = b"{}"
-    s3.objects[f"job/{job_id}/lifecycle.json"] = b"{}"
+    state.seed_job(
+        JobLifecycle(
+            experiment_name=state.runs[run_id]["experiment_name"],
+            run_id=run_id,
+            job_id=job_id,
+        )
+    )
 
 
 class TestDeleteRunEndpoint(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.state = FakeState().install(self)
         set_instance(None)
         _reset_stream()
         experiments_stream.experiments_meta_refresher.pin(
@@ -103,25 +120,12 @@ class TestDeleteRunEndpoint(unittest.TestCase):
         self.addCleanup(set_instance, None)
 
     def _build_world(self) -> tuple[FakeS3, FakeMlflowClient, FakeRay, FakeNotesDB]:
-        exp_a = FakeMlflowExperiment(experiment_id="e1", name="alpha")
-        run_a = FakeMlflowRun(
-            run_id="run-1", run_name="alpha-run", experiment_id="e1"
-        )
-        exp_b = FakeMlflowExperiment(experiment_id="e2", name="beta")
-        run_b = FakeMlflowRun(
-            run_id="run-2", run_name="beta-run", experiment_id="e2"
-        )
-        mlflow = FakeMlflowClient().seed(
-            [exp_a, exp_b],
-            [run_a, run_b],
-            {
-                "run-1": [FakeArtifact(path="job/j1", is_dir=True)],
-                "run-2": [FakeArtifact(path="job/j2", is_dir=True)],
-            },
-        )
+        mlflow = FakeMlflowClient()
+        _record_run(self.state, mlflow, "alpha", "run-1", "alpha-run")
+        _record_run(self.state, mlflow, "beta", "run-2", "beta-run")
         s3 = FakeS3()
-        _seed_job_package(s3, "j1")
-        _seed_job_package(s3, "j2")
+        _record_job(self.state, s3, "run-1", "j1")
+        _record_job(self.state, s3, "run-2", "j2")
         ray = FakeRay({"run-1-j1-0": "RUNNING", "run-2-j2-0": "RUNNING"})
         db = FakeNotesDB(
             run_notes=[
@@ -183,7 +187,7 @@ class TestDeleteRunEndpoint(unittest.TestCase):
         self.assertEqual(ray.jobs["run-2-j2-0"].status, "RUNNING")
 
     def test_deletes_run_when_cache_has_not_yet_picked_it_up(self) -> None:
-        """Cache mid-refresh: run exists in mlflow but cache is empty."""
+        """Cache mid-refresh: run is recorded but cache is empty."""
         s3, mlflow, ray, db = self._build_world()
 
         with _patched_infra(s3, mlflow, ray, db):
@@ -200,6 +204,7 @@ class TestDeleteRunEndpoint(unittest.TestCase):
 class TestDeleteExperimentEndpoint(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.state = FakeState().install(self)
         set_instance(None)
         _reset_stream()
         experiments_stream.experiments_meta_refresher.pin(
@@ -209,28 +214,14 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
         self.addCleanup(set_instance, None)
 
     def _build_world(self) -> tuple[FakeS3, FakeMlflowClient, FakeRay, FakeNotesDB]:
-        exp_a = FakeMlflowExperiment(experiment_id="e1", name="alpha")
-        runs_a = [
-            FakeMlflowRun(run_id="run-1", run_name="alpha-1", experiment_id="e1"),
-            FakeMlflowRun(run_id="run-2", run_name="alpha-2", experiment_id="e1"),
-        ]
-        exp_b = FakeMlflowExperiment(experiment_id="e2", name="beta")
-        run_b = FakeMlflowRun(
-            run_id="run-3", run_name="beta-1", experiment_id="e2"
-        )
-        mlflow = FakeMlflowClient().seed(
-            [exp_a, exp_b],
-            [*runs_a, run_b],
-            {
-                "run-1": [FakeArtifact(path="job/j1", is_dir=True)],
-                "run-2": [FakeArtifact(path="job/j2", is_dir=True)],
-                "run-3": [FakeArtifact(path="job/j3", is_dir=True)],
-            },
-        )
+        mlflow = FakeMlflowClient()
+        _record_run(self.state, mlflow, "alpha", "run-1", "alpha-1")
+        _record_run(self.state, mlflow, "alpha", "run-2", "alpha-2")
+        _record_run(self.state, mlflow, "beta", "run-3", "beta-1")
         s3 = FakeS3()
-        _seed_job_package(s3, "j1")
-        _seed_job_package(s3, "j2")
-        _seed_job_package(s3, "j3")
+        _record_job(self.state, s3, "run-1", "j1")
+        _record_job(self.state, s3, "run-2", "j2")
+        _record_job(self.state, s3, "run-3", "j3")
         ray = FakeRay(
             {
                 "run-1-j1-0": "RUNNING",
@@ -318,7 +309,7 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
     def test_deletes_experiment_when_cache_has_not_picked_it_up_at_all(
         self,
     ) -> None:
-        """Cache mid-refresh: experiment exists in mlflow but cache is empty."""
+        """Cache mid-refresh: experiment is recorded but cache is empty."""
         s3, mlflow, ray, db = self._build_world()
 
         with _patched_infra(s3, mlflow, ray, db):
@@ -341,10 +332,10 @@ class TestDeleteExperimentEndpoint(unittest.TestCase):
     def test_deletes_experiment_when_cache_has_only_some_of_its_runs(
         self,
     ) -> None:
-        """Cache mid-refresh: cache shows run-1 only, mlflow has run-1 + run-2.
+        """Cache mid-refresh: cache shows run-1 only, the records hold run-1 + run-2.
 
-        The endpoint must enumerate runs from mlflow (the source of truth)
-        rather than the cache, otherwise run-2's notes leak.
+        The endpoint must enumerate runs from the run records (the source of
+        truth) rather than the cache, otherwise run-2's notes leak.
         """
         s3, mlflow, ray, db = self._build_world()
         _seed_cache(

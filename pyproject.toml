@@ -1,6 +1,6 @@
 [project]
 name = "cortexgrid"
-version = "0.3.8"
+version = "0.3.9"
 description = "Connect your ML code to the RoboLab compute cluster — Ray, MLflow, and S3"
 readme = "docs/cortexgrid/README.md"
 license = "Apache-2.0"
@@ -59,6 +59,11 @@ ui = [
     "pydantic-settings>=2.6,<3",
     "kubernetes>=31,<32",
     "psycopg[binary]>=3.2",
+]
+control-plane = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "psycopg[binary,pool]>=3.2",
 ]
 test-torch = [
     "torch>=2.0.0",

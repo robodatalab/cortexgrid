@@ -1,6 +1,6 @@
 """Experiments + runs streams.
 
-Two Refreshers fed by MLflow:
+Two Refreshers fed by cortexgrid's experiment and run records:
   * `experiments_meta_refresher` (pinned, single topic): per-experiment
     metadata (name + creation time). Always warm so the UI's experiment
     list is available without per-experiment subscriptions.
@@ -13,14 +13,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 
-from cortexgrid.infra import get_mlflow_tracking_uri
+from cortexgrid import state
+from cortexgrid.jobs import list_experiment_run_jobs
 from cortexgrid.ray_util import (
     get_ray_job_id_for_cortexgrid_job,
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
-from mlflow.tracking import MlflowClient
 
 from cortexgrid_ui.backend.streams.config import EXPERIMENTS_STREAM_POLL_INTERVAL_SEC
 from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
@@ -57,12 +58,18 @@ class Run:
     ended_at_ms: int | None = None
 
 
+def _ms(timestamp: str) -> int:
+    """An ISO 8601 timestamp from the control plane, as ms since the epoch."""
+    return int(datetime.fromisoformat(timestamp).timestamp() * 1000)
+
+
 def _build_run(
     run_id: RunId,
     experiment_name: ExperimentName,
+    run_name: RunName,
     job_ids: list[JobId],
     all_ray_submission_ids: list[str],
-    info,
+    started_at_ms: int,
 ) -> Run:
     jobs = []
     for job_id in job_ids:
@@ -77,42 +84,38 @@ def _build_run(
     return Run(
         experiment_name=experiment_name,
         run_id=run_id,
-        run_name=info.run_name or run_id,
+        run_name=run_name,
         jobs=jobs,
-        started_at_ms=info.start_time,
-        ended_at_ms=info.end_time or None,
+        started_at_ms=started_at_ms,
+        # Nothing ends a run: it lasts until it is deleted.
+        ended_at_ms=None,
     )
 
 
 def poll_experiments_meta(_: None) -> dict[ExperimentName, ExperimentMeta]:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
     return {
-        e.name: ExperimentMeta(name=e.name, created_at_ms=e.creation_time)
-        for e in client.search_experiments()
+        e["name"]: ExperimentMeta(name=e["name"], created_at_ms=_ms(e["created_at"]))
+        for e in state.get("experiments")
     }
 
 
 def poll_runs(experiment_name: ExperimentName) -> dict[RunName, Run]:
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    exp = client.get_experiment_by_name(experiment_name)
-    if exp is None:
+    records = state.get("runs", params={"experiment_name": experiment_name})
+    if not records:
         return {}
     all_ray_submission_ids = list_ray_jobs_with_submission_id()
     runs: dict[RunName, Run] = {}
-    for mlflow_run in client.search_runs(experiment_ids=[exp.experiment_id]):
-        run_id = mlflow_run.info.run_id
+    for record in records:
+        run_id = record["run_id"]
         try:
-            job_ids = [
-                f.path.split("/")[-1]
-                for f in client.list_artifacts(run_id, path="job")
-                if f.is_dir
-            ]
+            job_ids = [job.job_id for job in list_experiment_run_jobs(run_id)]
             run = _build_run(
                 run_id,
                 experiment_name,
+                record["run_name"],
                 job_ids,
                 all_ray_submission_ids,
-                mlflow_run.info,
+                _ms(record["created_at"]),
             )
         except Exception:
             log.exception("Building run data failed for %s", run_id)

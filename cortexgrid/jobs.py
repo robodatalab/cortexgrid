@@ -16,16 +16,14 @@ import time
 import traceback
 from typing import Any, Callable
 
-from cortexgrid import s3_util
+from cortexgrid import s3_util, state
 from cortexgrid._bundle import bundle, stage, worker_provides
-from cortexgrid.infra import get_mlflow_tracking_uri
 from cortexgrid.ray_util import (
     JobStatus,
     get_ray_job_id_for_cortexgrid_job,
     get_ray_job_status,
 )
 from haikunator import Haikunator  # type: ignore
-from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, ConfigDict
 
 log = logging.getLogger(__name__)
@@ -94,7 +92,11 @@ class JobLifecycle:
 
     @classmethod
     def from_json(cls, text: str) -> "JobLifecycle":
-        data = json.loads(text)
+        return cls.from_dict(json.loads(text))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobLifecycle":
+        data = dict(data)
         data.pop("error", None)
         data["history"] = [LifecycleEvent(**e) for e in data.get("history", [])]
         return cls(**data)
@@ -107,17 +109,11 @@ class JobLifecycle:
         )
 
     def download_project_code_root(self) -> str:
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        manifest_rel = f"job/{self.job_id}/manifest.json"
-        if not any(
-            a.path == manifest_rel
-            for a in client.list_artifacts(self.run_id, f"job/{self.job_id}")
-        ):
+        manifest = state.get("runs", self.run_id, "jobs", self.job_id, "manifest")
+        if manifest is None:
             raise FileNotFoundError(
-                f"artifact {manifest_rel} not found in run {self.run_id}"
+                f"manifest of job {self.job_id} not found in run {self.run_id}"
             )
-        manifest_path = client.download_artifacts(self.run_id, manifest_rel)
-        manifest = json.loads(Path(manifest_path).read_text())
         _, _, src_path = (
             manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
         )
@@ -130,34 +126,25 @@ class JobLifecycle:
         return str(extract_dir / "project_code_root")
 
     def save_to_mlflow(self) -> None:
-        artifact_path = f"job/{self.job_id}"
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+        """Record the lifecycle with the jobs control plane; the name dates from
+        when lifecycles were MLflow artifacts. Over an existing record only
+        `history` and the `stop_requested` latch are written, and the latch is
+        never cleared, so a stop requested concurrently is not lost."""
         log.info(
             "Saving lifecycle for job %s (stop_requested=%s)",
             self.job_id,
             self.stop_requested,
         )
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            local_path = Path(tmp_dir, "lifecycle.json")
-            local_path.write_text(self.to_json())
-            client.log_artifact(
-                self.run_id, str(local_path), artifact_path=artifact_path
-            )
+        state.put("runs", self.run_id, "jobs", self.job_id, body=asdict(self))
 
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "JobLifecycle":
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        lifecycle_rel = f"job/{job_id}/lifecycle.json"
-        if not any(
-            a.path == lifecycle_rel
-            for a in client.list_artifacts(run_id, f"job/{job_id}")
-        ):
+        record = state.get("runs", run_id, "jobs", job_id)
+        if record is None:
             raise FileNotFoundError(
-                f"artifact {lifecycle_rel} not found in run {run_id}"
+                f"lifecycle of job {job_id} not found in run {run_id}"
             )
-        local_path = client.download_artifacts(run_id, lifecycle_rel)
-        return cls.from_json(Path(local_path).read_text())
+        return cls.from_dict(record)
 
 
 class Payload(BaseModel):
@@ -175,7 +162,6 @@ class Payload(BaseModel):
 
     def save_to_mlflow(self) -> None:
         artifact_path = f"job/{self.job_id}"
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info(
             "Uploading payload for job %s from %s", self.job_id, self.project_code_root
         )
@@ -191,27 +177,24 @@ class Payload(BaseModel):
                 str(tarball_path),
                 dest_path=f"{artifact_path}/project_code_root.tar.gz",
             )
-            manifest_path = Path(tmp_dir, "manifest.json")
-            manifest_path.write_text(json.dumps({"code_tarball_uri": tarball_uri}))
-            client.log_artifact(
-                self.run_id, str(manifest_path), artifact_path=artifact_path
+            state.put(
+                "runs",
+                self.run_id,
+                "jobs",
+                self.job_id,
+                "manifest",
+                body={"code_tarball_uri": tarball_uri},
             )
             log.info("Payload upload complete for job %s", self.job_id)
 
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "Payload":
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Downloading payload for job %s", job_id)
-        manifest_rel = f"job/{job_id}/manifest.json"
-        if not any(
-            a.path == manifest_rel
-            for a in client.list_artifacts(run_id, f"job/{job_id}")
-        ):
+        manifest = state.get("runs", run_id, "jobs", job_id, "manifest")
+        if manifest is None:
             raise FileNotFoundError(
-                f"artifact {manifest_rel} not found in run {run_id}"
+                f"manifest of job {job_id} not found in run {run_id}"
             )
-        manifest_path = client.download_artifacts(run_id, manifest_rel)
-        manifest = json.loads(Path(manifest_path).read_text())
         _, _, src_path = (
             manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
         )
@@ -255,8 +238,8 @@ def _try_dumps(obj: Any) -> tuple[bytes | None, str | None]:
 class JobResult:
     """What a job's function returned or raised, recorded by the driver.
 
-    Written to ``job/{job_id}/result.pkl``, beside the payload manifest and
-    the lifecycle. The value and the exception are pickled separately from
+    Recorded with the jobs control plane, beside the job's payload manifest
+    and lifecycle. The value and the exception are pickled separately from
     the envelope so an object that cannot be pickled costs only its own
     field: a job whose return value does not survive cloudpickle still
     finishes, and the reason is still readable here.
@@ -296,28 +279,20 @@ class JobResult:
         )
 
     def save_to_mlflow(self) -> None:
-        artifact_path = f"job/{self.job_id}"
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         log.info("Recording result for job %s (ok=%s)", self.job_id, self.ok)
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            local_path = Path(tmp_dir, "result.pkl")
-            local_path.write_bytes(cloudpickle.dumps(self))
-            client.log_artifact(
-                self.run_id, str(local_path), artifact_path=artifact_path
-            )
+        state.put_bytes(
+            "runs", self.run_id, "jobs", self.job_id, "result",
+            body=cloudpickle.dumps(self),
+        )
 
     @classmethod
     def load_from_mlflow(cls, run_id: str, job_id: str) -> "JobResult":
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        result_rel = f"job/{job_id}/result.pkl"
-        if not any(
-            a.path == result_rel for a in client.list_artifacts(run_id, f"job/{job_id}")
-        ):
-            raise FileNotFoundError(f"artifact {result_rel} not found in run {run_id}")
-        local_path = client.download_artifacts(run_id, result_rel)
-        result = cloudpickle.loads(Path(local_path).read_bytes())
+        blob = state.get_bytes("runs", run_id, "jobs", job_id, "result")
+        if blob is None:
+            raise FileNotFoundError(f"result of job {job_id} not found in run {run_id}")
+        result = cloudpickle.loads(blob)
         if not isinstance(result, cls):
-            raise TypeError(f"{result_rel} in run {run_id} is not a JobResult")
+            raise TypeError(f"result of job {job_id} in run {run_id} is not a JobResult")
         return result
 
     def unwrap(self) -> Any:
@@ -498,20 +473,17 @@ def schedule_remote_job(
 
 def list_experiment_run_jobs(run_id: str) -> list[JobLifecycle]:
     """Return all jobs and their lifecycle states for this experiment+run."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    entries = client.list_artifacts(run_id, path="job")
-    result: list[JobLifecycle] = []
-    for entry in entries:
-        if not entry.is_dir:
-            continue
-        job_id = Path(entry.path).name
-        try:
-            result.append(JobLifecycle.load_from_mlflow(run_id, job_id))
-        except Exception:
-            logging.getLogger(__name__).warning(
-                "Skipping job %s: missing lifecycle", job_id
-            )
-    return result
+    return [
+        JobLifecycle.from_dict(record)
+        for record in state.get("runs", run_id, "jobs") or []
+    ]
+
+
+def list_open_jobs() -> list[JobLifecycle]:
+    """Every job, across all runs, the control plane still has to act on: all
+    but those whose last observed state is terminal with no retry to follow.
+    A poll cycle costs what the live jobs cost, not the whole history."""
+    return [JobLifecycle.from_dict(record) for record in state.get("jobs", "open")]
 
 
 def stop_experiment_run_jobs(run_id: str) -> None:
@@ -522,11 +494,7 @@ def stop_experiment_run_jobs(run_id: str) -> None:
     has reached Ray. For jobs that have not yet been submitted, the
     latch short-circuits the submission path in the worker.
 
-    Idempotent: already-requested jobs are skipped, and the flag has
-    no effect on jobs that Ray already reports as terminal.
+    Idempotent: the latch only ever sets, and the flag has no effect on
+    jobs that Ray already reports as terminal.
     """
-    for job in list_experiment_run_jobs(run_id):
-        if job.stop_requested:
-            continue
-        job.stop_requested = True
-        job.save_to_mlflow()
+    state.post("runs", run_id, "stop")

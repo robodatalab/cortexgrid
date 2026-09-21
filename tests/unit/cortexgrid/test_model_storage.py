@@ -3,15 +3,10 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import time
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, call, patch
-
-from mlflow.exceptions import MlflowException
+from unittest.mock import patch
 
 import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
@@ -31,6 +26,7 @@ from cortexgrid.model_storage import (
     set_model_config,
     set_model_requirements,
 )
+from tests.fakes import FakeState
 
 
 class _FakeServeApp:
@@ -46,10 +42,9 @@ _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
 _CONFIG = {"model": "claude-opus-5", "api_key_secret": "anthropic-api-key"}
 
 
-def _recent_ms() -> int:
-    """Epoch-ms for a version created just now (well within the upload deadline),
-    so a still-"uploading" version does not read as a stale/broken upload."""
-    return int(time.time() * 1000)
+# Epoch-ms years in the past, well beyond the 3h upload deadline, so a
+# still-"uploading" entry created then reads as a stale/broken upload.
+_STALE_MS = 1700000000000
 
 
 def _make_weights_dir() -> Path:
@@ -77,105 +72,6 @@ def _serve_bundle(fingerprint: str) -> ServeBundle:
         pip_requirements=[],
         fingerprint=fingerprint,
     )
-
-
-@dataclass
-class FakeModelVersion:
-    name: str
-    version: str
-    source: str | None
-    run_id: str | None
-    tags: dict[str, str]
-    creation_timestamp: int = 1700000000000
-
-
-@dataclass
-class FakeRun:
-    run_id: str
-    run_name: str
-
-    @property
-    def info(self) -> Any:
-        return SimpleNamespace(run_id=self.run_id, run_name=self.run_name)
-
-
-class FakeMLflow:
-    """Just enough MLflow Registry surface for storage.py."""
-
-    def __init__(self) -> None:
-        self.registered: set[str] = set()
-        self.versions: list[FakeModelVersion] = []
-        self.runs: dict[str, FakeRun] = {}
-        self._next_version = 1
-
-    def create_registered_model(self, name: str) -> Any:
-        if name in self.registered:
-            raise MlflowException("RESOURCE_ALREADY_EXISTS")
-        self.registered.add(name)
-        return SimpleNamespace(name=name)
-
-    def get_registered_model(self, name: str) -> Any:
-        if name not in self.registered:
-            raise MlflowException("RESOURCE_DOES_NOT_EXIST")
-        return SimpleNamespace(name=name)
-
-    def create_model_version(
-        self,
-        name: str,
-        source: str,
-        run_id: str | None,
-        tags: dict[str, str],
-    ) -> FakeModelVersion:
-        v = FakeModelVersion(
-            name=name,
-            version=str(self._next_version),
-            source=source,
-            run_id=run_id,
-            tags=tags,
-            # MLflow stamps the creation time, so a version this fake creates
-            # is fresh rather than past the upload deadline.
-            creation_timestamp=_recent_ms(),
-        )
-        self._next_version += 1
-        self.versions.append(v)
-        return v
-
-    def search_model_versions(self, filter_string: str) -> list[FakeModelVersion]:
-        result = list(self.versions)
-        if "name='" in filter_string:
-            n = filter_string.split("name='")[1].split("'")[0]
-            result = [v for v in result if v.name == n]
-        if "tags.run_name='" in filter_string:
-            rn = filter_string.split("tags.run_name='")[1].split("'")[0]
-            result = [v for v in result if v.tags.get("run_name") == rn]
-        if "run_id='" in filter_string:
-            rid = filter_string.split("run_id='")[1].split("'")[0]
-            result = [v for v in result if v.run_id == rid]
-        return result
-
-    def set_model_version_tag(
-        self, name: str, version: str, key: str, value: str
-    ) -> None:
-        for v in self.versions:
-            if v.name == name and v.version == version:
-                v.tags[key] = value
-                return
-        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
-
-    def get_model_version(self, name: str, version: str) -> FakeModelVersion:
-        for v in self.versions:
-            if v.name == name and v.version == version:
-                return v
-        raise MlflowException("RESOURCE_DOES_NOT_EXIST")
-
-    def delete_model_version(self, name: str, version: str) -> None:
-        self.versions = [
-            v for v in self.versions
-            if not (v.name == name and v.version == version)
-        ]
-
-    def get_run(self, run_id: str) -> FakeRun:
-        return self.runs[run_id]
 
 
 class FakeS3:
@@ -211,15 +107,10 @@ class FakeS3:
         Path(Filename).write_bytes(self.objects[Key])
 
 
-def _patches(mlflow: FakeMLflow, s3: FakeS3) -> list:
+def _patches(s3: FakeS3) -> list:
     return [
-        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow),
         patch("cortexgrid.model_storage.s3_util", s3),
         patch("cortexgrid.model_storage.get_s3_bucket", return_value="b"),
-        patch(
-            "cortexgrid.model_storage.get_mlflow_tracking_uri",
-            return_value="http://x",
-        ),
         # bundling does pip freeze + import-graph walk + an S3 upload - not
         # what these tests cover; the bundle behaviour is tested separately.
         # The built bundle matches _FAKE_BUNDLE, so re-importing keeps it.
@@ -236,38 +127,43 @@ def _patches(mlflow: FakeMLflow, s3: FakeS3) -> list:
     ]
 
 
-def _seed_version(
-    mlflow: FakeMLflow,
+def _seed_model(
+    state: FakeState,
     family: str,
     suffix: str,
-    run_id: str,
+    run_id: str | None,
     run_name: str,
-) -> FakeModelVersion:
-    v = FakeModelVersion(
-        name=f"{family}__{suffix}",
-        version="1",
+    tags: dict[str, str] | None = None,
+    creation_timestamp: int | None = None,
+) -> None:
+    """Register an entry whose weights sit under the run-first layout. Created
+    just now unless `creation_timestamp` says otherwise, so an "uploading"
+    entry is still in flight rather than broken."""
+    state.seed_model(
+        family,
+        suffix,
+        run_name,
         source=f"s3://b/models/{run_name}/{family}/{suffix}/weights/",
+        tags={"size_bytes": "0", **(tags or {})},
         run_id=run_id,
-        tags={
-            "family": family,
-            "suffix": suffix,
-            "run_name": run_name,
-            "size_bytes": "0",
-        },
+        creation_timestamp=creation_timestamp,
     )
-    mlflow.versions.append(v)
-    return v
 
 
 class TestSaveModel(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
+        self.state.seed_run("r1", "boogey-46")
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
         self.weights_dir = _make_weights_dir()
         self.addCleanup(shutil.rmtree, self.weights_dir, ignore_errors=True)
+
+    def _entry(self) -> dict[str, Any]:
+        """The registry entry the saves in these tests write."""
+        return self.state.models[("Qwen2", "instruct", "boogey-46")]
 
     def test_uploads_weights_to_s3_under_run_first_layout(self) -> None:
         save_model(
@@ -286,22 +182,32 @@ class TestSaveModel(unittest.TestCase):
             "models/boogey-46/Qwen2/instruct/weights/model.safetensors", keys
         )
 
-    def test_creates_registered_model_when_missing(self) -> None:
+    def test_creates_entry_keyed_by_family_suffix_and_run_name(self) -> None:
         save_model(
             self.weights_dir, _FakeServeApp,
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        self.assertIn("Qwen2__instruct", self.mlflow.registered)
+        self.assertEqual(
+            list(self.state.models), [("Qwen2", "instruct", "boogey-46")]
+        )
 
-    def test_does_not_recreate_existing_registered_model(self) -> None:
-        self.mlflow.registered.add("Qwen2__instruct")
+    def test_saving_twice_in_a_run_replaces_the_entry(self) -> None:
+        save_model(
+            self.weights_dir, _FakeServeApp,
+            "instruct", "Qwen2",
+            run_id="r1", run_name="boogey-46",
+            config=_CONFIG,
+        )
         save_model(
             self.weights_dir, _FakeServeApp,
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        self.assertEqual(len(self.mlflow.versions), 1)
+
+        # One entry, and it is the second save: the first one's config is gone.
+        self.assertEqual(len(self.state.models), 1)
+        self.assertNotIn("config", self._entry()["tags"])
 
     def test_returns_savedmodel_with_correct_fields(self) -> None:
         result = save_model(
@@ -323,11 +229,11 @@ class TestSaveModel(unittest.TestCase):
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        v = self.mlflow.versions[0]
-        self.assertEqual(v.run_id, "r1")
-        self.assertEqual(v.tags["family"], "Qwen2")
-        self.assertEqual(v.tags["suffix"], "instruct")
-        self.assertEqual(v.tags["run_name"], "boogey-46")
+        v = self._entry()
+        self.assertEqual(v["run_id"], "r1")
+        self.assertEqual(v["tags"]["family"], "Qwen2")
+        self.assertEqual(v["tags"]["suffix"], "instruct")
+        self.assertEqual(v["tags"]["run_name"], "boogey-46")
 
     def test_stamps_size_bytes_tag_from_uploaded_files(self) -> None:
         save_model(
@@ -335,9 +241,8 @@ class TestSaveModel(unittest.TestCase):
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        v = self.mlflow.versions[0]
         # config.json '{"x": 1}' (8 bytes) + model.safetensors b"weights" (7 bytes)
-        self.assertEqual(v.tags["size_bytes"], "15")
+        self.assertEqual(self._entry()["tags"]["size_bytes"], "15")
 
     def test_returns_savedmodel_with_size_bytes(self) -> None:
         result = save_model(
@@ -361,7 +266,7 @@ class TestSaveModel(unittest.TestCase):
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        self.assertEqual(self.mlflow.versions[0].tags["lifecycle"], "ready")
+        self.assertEqual(self._entry()["tags"]["lifecycle"], "ready")
 
     def test_registers_version_before_upload_and_marks_failed_on_error(
         self,
@@ -377,10 +282,8 @@ class TestSaveModel(unittest.TestCase):
 
         # The version exists (was registered before the upload, so the dashboard
         # can surface it) and is marked upload_failed rather than left dangling.
-        self.assertEqual(len(self.mlflow.versions), 1)
-        self.assertEqual(
-            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
-        )
+        self.assertEqual(len(self.state.models), 1)
+        self.assertEqual(self._entry()["tags"]["lifecycle"], "upload_failed")
 
     def test_stores_requirements_as_tags(self) -> None:
         save_model(
@@ -389,7 +292,7 @@ class TestSaveModel(unittest.TestCase):
             run_id="r1", run_name="boogey-46",
             requirements=_GPU_REQUIREMENTS,
         )
-        tags = self.mlflow.versions[0].tags
+        tags = self._entry()["tags"]
         self.assertEqual(
             (tags["num_gpus"], tags["ram_gb"], tags["vram_gb"]),
             ("1", "16.0", "24.0"),
@@ -410,7 +313,7 @@ class TestSaveModel(unittest.TestCase):
             "instruct", "Qwen2",
             run_id="r1", run_name="boogey-46",
         )
-        tags = self.mlflow.versions[0].tags
+        tags = self._entry()["tags"]
         self.assertFalse({"num_gpus", "ram_gb", "vram_gb"} & tags.keys())
         self.assertEqual(result.requirements, ModelRequirements())
 
@@ -422,9 +325,7 @@ class TestSaveModel(unittest.TestCase):
             config=_CONFIG,
         )
 
-        self.assertEqual(
-            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
-        )
+        self.assertEqual(json.loads(self._entry()["tags"]["config"]), _CONFIG)
         self.assertEqual(result.config, _CONFIG)
 
     def test_stores_no_config_tag_without_config(self) -> None:
@@ -434,7 +335,7 @@ class TestSaveModel(unittest.TestCase):
             run_id="r1", run_name="boogey-46",
         )
 
-        self.assertNotIn("config", self.mlflow.versions[0].tags)
+        self.assertNotIn("config", self._entry()["tags"])
         self.assertEqual(result.config, {})
 
     def test_rejects_a_config_that_is_not_strings(self) -> None:
@@ -449,13 +350,17 @@ class TestSaveModel(unittest.TestCase):
 
 class TestImportModel(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
         self.weights_dir = _make_weights_dir()
         self.addCleanup(shutil.rmtree, self.weights_dir, ignore_errors=True)
+
+    def _entry(self) -> dict[str, Any]:
+        """The registry entry the imports in these tests write."""
+        return self.state.models[("Qwen2", "base", IMPORTED)]
 
     def test_registers_under_imported_run_name_without_run(self) -> None:
         result = import_model(
@@ -463,7 +368,7 @@ class TestImportModel(unittest.TestCase):
         )
         self.assertEqual(result.run_name, IMPORTED)
         self.assertEqual(result.phase, "ready")
-        self.assertIsNone(self.mlflow.versions[0].run_id)
+        self.assertIsNone(self._entry()["run_id"])
         self.assertIn(
             f"models/{IMPORTED}/Qwen2/base/weights/config.json", self.s3.objects
         )
@@ -475,7 +380,7 @@ class TestImportModel(unittest.TestCase):
         result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
         self.assertEqual(result.phase, "ready")
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
         self.assertEqual(self.s3.objects, {})
 
     def test_calls_source_only_when_uploading(self) -> None:
@@ -523,8 +428,8 @@ class TestImportModel(unittest.TestCase):
         upload_bundle.assert_called_once_with(
             _serve_bundle("code-v2"), "Qwen2", "base", IMPORTED
         )
-        self.assertEqual(len(self.mlflow.versions), 1)
-        tags = self.mlflow.versions[0].tags
+        self.assertEqual(len(self.state.models), 1)
+        tags = self._entry()["tags"]
         self.assertEqual(tags["serve_bundle_url"], "s3://b/serve-bundles/y.zip")
         self.assertEqual(tags["serve_bundle_fingerprint"], "code-v2")
         self.assertEqual(self.s3.objects, {})
@@ -532,19 +437,25 @@ class TestImportModel(unittest.TestCase):
     def test_reimport_rebundles_a_model_stored_without_a_fingerprint(
         self,
     ) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
-        v.tags["serve_bundle_url"] = "s3://b/serve-bundles/old.zip"
-        v.tags["class_import_path"] = "fake.module:FakeClass"
+        _seed_model(
+            self.state, "Qwen2", "base", None, IMPORTED,
+            tags={
+                "serve_bundle_url": "s3://b/serve-bundles/old.zip",
+                "class_import_path": "fake.module:FakeClass",
+            },
+        )
 
         import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
-        self.assertEqual(v.tags["serve_bundle_url"], _FAKE_BUNDLE.bundle_url)
-        self.assertEqual(v.tags["serve_bundle_fingerprint"], "code-v1")
+        tags = self._entry()["tags"]
+        self.assertEqual(tags["serve_bundle_url"], _FAKE_BUNDLE.bundle_url)
+        self.assertEqual(tags["serve_bundle_fingerprint"], "code-v1")
 
     def test_raises_while_another_import_is_uploading(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
-        v.tags["lifecycle"] = "uploading"
-        v.creation_timestamp = _recent_ms()
+        _seed_model(
+            self.state, "Qwen2", "base", None, IMPORTED,
+            tags={"lifecycle": "uploading"},
+        )
 
         with self.assertRaises(RuntimeError):
             import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
@@ -557,8 +468,8 @@ class TestImportModel(unittest.TestCase):
 
         import_model(fetch, _FakeServeApp, "Qwen2", "base")
 
-        self.assertEqual(len(self.mlflow.versions), 1)
-        self.assertEqual(self.mlflow.versions[0].tags["lifecycle"], "ready")
+        self.assertEqual(len(self.state.models), 1)
+        self.assertEqual(self._entry()["tags"]["lifecycle"], "ready")
 
     def test_marks_version_failed_when_source_raises(self) -> None:
         def fetch() -> Path:
@@ -567,29 +478,33 @@ class TestImportModel(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             import_model(fetch, _FakeServeApp, "Qwen2", "base")
 
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
         self.assertEqual(
-            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
+            self._entry()["tags"]["lifecycle"], "upload_failed"
         )
 
     def test_reimports_after_failed_upload(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
-        v.tags["lifecycle"] = "upload_failed"
+        _seed_model(
+            self.state, "Qwen2", "base", None, IMPORTED,
+            tags={"lifecycle": "upload_failed"},
+        )
 
         result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
         self.assertEqual(result.phase, "ready")
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
 
     def test_reimports_after_broken_upload(self) -> None:
-        # _seed_version's default creation_timestamp is past the deadline.
-        v = _seed_version(self.mlflow, "Qwen2", "base", "", IMPORTED)
-        v.tags["lifecycle"] = "uploading"
+        _seed_model(
+            self.state, "Qwen2", "base", None, IMPORTED,
+            tags={"lifecycle": "uploading"},
+            creation_timestamp=_STALE_MS,
+        )
 
         result = import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
         self.assertEqual(result.phase, "ready")
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
 
     def test_first_import_stores_requirements(self) -> None:
         result = import_model(
@@ -597,7 +512,7 @@ class TestImportModel(unittest.TestCase):
         )
 
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
-        self.assertEqual(self.mlflow.versions[0].tags["vram_gb"], "24.0")
+        self.assertEqual(self._entry()["tags"]["vram_gb"], "24.0")
 
     def test_reimport_keeps_stored_requirements(self) -> None:
         import_model(
@@ -611,7 +526,7 @@ class TestImportModel(unittest.TestCase):
         )
 
         self.assertEqual(result.requirements, edited)
-        self.assertEqual(self.mlflow.versions[0].tags["num_gpus"], "2")
+        self.assertEqual(self._entry()["tags"]["num_gpus"], "2")
 
     def test_reimport_stores_requirements_on_a_model_without_them(self) -> None:
         import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
@@ -621,7 +536,7 @@ class TestImportModel(unittest.TestCase):
         )
 
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
-        self.assertEqual(self.mlflow.versions[0].tags["ram_gb"], "16.0")
+        self.assertEqual(self._entry()["tags"]["ram_gb"], "16.0")
 
     def test_reimport_without_requirements_keeps_stored_ones(self) -> None:
         import_model(
@@ -639,7 +554,7 @@ class TestImportModel(unittest.TestCase):
 
         self.assertEqual(result.config, _CONFIG)
         self.assertEqual(
-            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
+            json.loads(self._entry()["tags"]["config"]), _CONFIG
         )
 
     def test_reimport_keeps_stored_config(self) -> None:
@@ -674,12 +589,12 @@ class TestImportModel(unittest.TestCase):
         self.assertEqual(result.config, _CONFIG)
 
     def test_survives_deleting_a_run(self) -> None:
-        self.mlflow.runs["r1"] = FakeRun("r1", "boogey-46")
+        self.state.seed_run("r1", "boogey-46")
         import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
         delete_models_for_run("r1")
 
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
         self.assertIn(
             f"models/{IMPORTED}/Qwen2/base/weights/config.json", self.s3.objects
         )
@@ -690,18 +605,22 @@ class TestRegisterModel(unittest.TestCase):
     hosted API, so there is nothing to upload but its bundle."""
 
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
+
+    def _entry(self) -> dict[str, Any]:
+        """The registry entry the registrations in these tests write."""
+        return self.state.models[("anthropic", "opus", IMPORTED)]
 
     def test_registers_under_imported_run_name_without_weights(self) -> None:
         result = register_model(_FakeServeApp, "anthropic", "opus")
 
         self.assertEqual(result.run_name, IMPORTED)
         self.assertEqual(result.phase, "ready")
-        self.assertIsNone(self.mlflow.versions[0].run_id)
+        self.assertIsNone(self._entry()["run_id"])
         self.assertEqual(result.data_blob_path, NO_WEIGHTS)
         self.assertEqual(result.size_bytes, 0)
         self.assertFalse(result.has_weights)
@@ -710,7 +629,7 @@ class TestRegisterModel(unittest.TestCase):
     def test_stores_the_serve_bundle(self) -> None:
         register_model(_FakeServeApp, "anthropic", "opus")
 
-        tags = self.mlflow.versions[0].tags
+        tags = self._entry()["tags"]
         self.assertEqual(tags["serve_bundle_url"], _FAKE_BUNDLE.bundle_url)
         self.assertEqual(tags["class_import_path"], "fake.module:FakeClass")
 
@@ -720,7 +639,7 @@ class TestRegisterModel(unittest.TestCase):
         result = register_model(_FakeServeApp, "anthropic", "opus")
 
         self.assertEqual(result.phase, "ready")
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
 
     def test_re_registration_with_changed_code_rebundles(self) -> None:
         register_model(_FakeServeApp, "anthropic", "opus")
@@ -744,7 +663,7 @@ class TestRegisterModel(unittest.TestCase):
         upload_bundle.assert_called_once_with(
             _serve_bundle("code-v2"), "anthropic", "opus", IMPORTED
         )
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
 
     def test_first_registration_stores_requirements_and_config(self) -> None:
         result = register_model(
@@ -753,9 +672,7 @@ class TestRegisterModel(unittest.TestCase):
 
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
         self.assertEqual(result.config, _CONFIG)
-        self.assertEqual(
-            json.loads(self.mlflow.versions[0].tags["config"]), _CONFIG
-        )
+        self.assertEqual(json.loads(self._entry()["tags"]["config"]), _CONFIG)
 
     def test_re_registration_keeps_an_edited_config(self) -> None:
         register_model(_FakeServeApp, "anthropic", "opus", config=_CONFIG)
@@ -769,21 +686,24 @@ class TestRegisterModel(unittest.TestCase):
         self.assertEqual(result.config, edited)
 
     def test_raises_while_another_registration_is_in_flight(self) -> None:
-        v = _seed_version(self.mlflow, "anthropic", "opus", "", IMPORTED)
-        v.tags["lifecycle"] = "uploading"
-        v.creation_timestamp = _recent_ms()
+        _seed_model(
+            self.state, "anthropic", "opus", None, IMPORTED,
+            tags={"lifecycle": "uploading"},
+        )
 
         with self.assertRaises(RuntimeError):
             register_model(_FakeServeApp, "anthropic", "opus")
 
     def test_registers_again_after_a_failed_attempt(self) -> None:
-        v = _seed_version(self.mlflow, "anthropic", "opus", "", IMPORTED)
-        v.tags["lifecycle"] = "upload_failed"
+        _seed_model(
+            self.state, "anthropic", "opus", None, IMPORTED,
+            tags={"lifecycle": "upload_failed"},
+        )
 
         result = register_model(_FakeServeApp, "anthropic", "opus")
 
         self.assertEqual(result.phase, "ready")
-        self.assertEqual(len(self.mlflow.versions), 1)
+        self.assertEqual(len(self.state.models), 1)
 
     def test_marks_version_failed_when_bundling_raises(self) -> None:
         with patch(
@@ -793,9 +713,7 @@ class TestRegisterModel(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 register_model(_FakeServeApp, "anthropic", "opus")
 
-        self.assertEqual(
-            self.mlflow.versions[0].tags["lifecycle"], "upload_failed"
-        )
+        self.assertEqual(self._entry()["tags"]["lifecycle"], "upload_failed")
 
     def test_listed_like_any_other_model(self) -> None:
         register_model(_FakeServeApp, "anthropic", "opus", config=_CONFIG)
@@ -811,22 +729,18 @@ class TestRegisterModel(unittest.TestCase):
 
         delete_model("anthropic", "opus", IMPORTED)
 
-        self.assertEqual(self.mlflow.versions, [])
+        self.assertEqual(self.state.models, {})
         self.assertIsNone(model_registry_status("anthropic", "opus", IMPORTED))
 
 
 class TestImportModelRecordsRun(unittest.TestCase):
-    """The `cortexgrid.import_model` and `cortexgrid.register_model` facades tag
-    the calling run with the model it used."""
+    """The `cortexgrid.import_model` and `cortexgrid.register_model` facades
+    record on the calling run which model it used."""
 
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        self.run_client = MagicMock()
-        for p in [
-            *_patches(self.mlflow, self.s3),
-            patch("cortexgrid.get_mlflow_client", return_value=self.run_client),
-        ]:
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
         self.addCleanup(clear_instance)
@@ -834,9 +748,10 @@ class TestImportModelRecordsRun(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.weights_dir, ignore_errors=True)
 
     def _use_run(self, run_id: str) -> None:
+        self.state.seed_run(run_id, experiment_name="experiment")
         set_instance(Experiment(experiment_name="experiment", run_id=run_id))
 
-    def test_tags_every_run_that_imports_the_model(self) -> None:
+    def test_records_every_run_that_imports_the_model(self) -> None:
         self._use_run("r1")
         model = cortexgrid.import_model(
             self.weights_dir, _FakeServeApp, "Qwen2", "base"
@@ -845,23 +760,24 @@ class TestImportModelRecordsRun(unittest.TestCase):
         cortexgrid.import_model(self.weights_dir, _FakeServeApp, "Qwen2", "base")
 
         self.assertEqual(
-            self.run_client.set_tag.call_args_list,
-            [
-                call("r1", "imported_model/Qwen2/base", model.created_at),
-                call("r2", "imported_model/Qwen2/base", model.created_at),
-            ],
+            self.state.imported_models,
+            {
+                ("r1", "Qwen2", "base"): model.created_at,
+                ("r2", "Qwen2", "base"): model.created_at,
+            },
         )
 
-    def test_tags_the_run_that_registers_a_weightless_model(self) -> None:
+    def test_records_the_run_that_registers_a_weightless_model(self) -> None:
         self._use_run("r1")
 
         model = cortexgrid.register_model(_FakeServeApp, "anthropic", "opus")
 
-        self.run_client.set_tag.assert_called_once_with(
-            "r1", "imported_model/anthropic/opus", model.created_at
+        self.assertEqual(
+            self.state.imported_models,
+            {("r1", "anthropic", "opus"): model.created_at},
         )
 
-    def test_does_not_tag_the_run_when_the_import_fails(self) -> None:
+    def test_does_not_record_on_the_run_when_the_import_fails(self) -> None:
         self._use_run("r1")
 
         def fetch() -> Path:
@@ -870,7 +786,7 @@ class TestImportModelRecordsRun(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             cortexgrid.import_model(fetch, _FakeServeApp, "Qwen2", "base")
 
-        self.run_client.set_tag.assert_not_called()
+        self.assertEqual(self.state.imported_models, {})
 
     def test_requires_an_experiment_before_fetching(self) -> None:
         calls: list[int] = []
@@ -887,14 +803,14 @@ class TestImportModelRecordsRun(unittest.TestCase):
 
 class TestLoadModel(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
     def test_returns_weights_dir_with_downloaded_files(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
         self.s3.objects[
             "models/boogey-46/Qwen2/instruct/weights/config.json"
         ] = b'{"x":1}'
@@ -916,23 +832,24 @@ class TestLoadModel(unittest.TestCase):
             load_model("anthropic", "opus", IMPORTED)
 
     def test_raises_when_version_has_no_source(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.source = None
+        self.state.seed_model(
+            "Qwen2", "instruct", "boogey-46", source="", tags={}, run_id="r1"
+        )
         with self.assertRaises(ValueError):
             load_model("Qwen2", "instruct", "boogey-46")
 
 
 class TestListModels(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
-    def test_returns_savedmodel_for_each_version(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        _seed_version(self.mlflow, "DeepSeek3", "chat", "r2", "rocky-99")
+    def test_returns_savedmodel_for_each_entry(self) -> None:
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "DeepSeek3", "chat", "r2", "rocky-99")
 
         result = list_models()
         families = sorted(m.family for m in result)
@@ -942,30 +859,31 @@ class TestListModels(unittest.TestCase):
         self.assertEqual(list_models(), [])
 
     def test_surfaces_uploading_version_with_phase(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.tags["lifecycle"] = "uploading"
-        v.creation_timestamp = _recent_ms()
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"lifecycle": "uploading"},
+        )
 
         result = list_models()
 
         self.assertEqual(result[0].phase, "uploading")
 
     def test_defaults_phase_to_ready_for_untagged_version(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         result = list_models()
 
         self.assertEqual(result[0].phase, "ready")
 
     def test_defaults_requirements_for_untagged_version(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         result = list_models()
 
         self.assertEqual(result[0].requirements, ModelRequirements())
 
     def test_defaults_config_for_untagged_version(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         result = list_models()
 
@@ -974,15 +892,17 @@ class TestListModels(unittest.TestCase):
 
 class TestSetModelRequirements(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
     def test_replaces_stored_requirements(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.tags.update({"num_gpus": "1", "ram_gb": "8.0", "vram_gb": "12.0"})
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"num_gpus": "1", "ram_gb": "8.0", "vram_gb": "12.0"},
+        )
 
         set_model_requirements(
             "Qwen2", "instruct", "boogey-46", _GPU_REQUIREMENTS
@@ -1001,27 +921,29 @@ class TestSetModelRequirements(unittest.TestCase):
 
 class TestModelConfig(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
     def test_reads_back_what_was_stored(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         set_model_config("Qwen2", "instruct", "boogey-46", _CONFIG)
 
         self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), _CONFIG)
 
     def test_reads_empty_config_for_a_model_without_one(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), {})
 
     def test_replaces_the_whole_mapping(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.tags["config"] = json.dumps(_CONFIG)
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"config": json.dumps(_CONFIG)},
+        )
 
         set_model_config(
             "Qwen2", "instruct", "boogey-46", {"model": "claude-sonnet-5"}
@@ -1034,7 +956,7 @@ class TestModelConfig(unittest.TestCase):
         )
 
     def test_rejects_a_blank_key(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         with self.assertRaises(ValueError):
             set_model_config("Qwen2", "instruct", "boogey-46", {" ": "x"})
@@ -1050,9 +972,9 @@ class TestModelConfig(unittest.TestCase):
 
 class TestModelRegistryStatus(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
@@ -1062,7 +984,7 @@ class TestModelRegistryStatus(unittest.TestCase):
         )
 
     def test_reports_ready_for_registered_model(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
 
         status = model_registry_status("Qwen2", "instruct", "boogey-46")
 
@@ -1070,9 +992,10 @@ class TestModelRegistryStatus(unittest.TestCase):
         self.assertEqual(status.phase, "ready")
 
     def test_reports_uploading_phase(self) -> None:
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.tags["lifecycle"] = "uploading"
-        v.creation_timestamp = _recent_ms()
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"lifecycle": "uploading"},
+        )
 
         status = model_registry_status("Qwen2", "instruct", "boogey-46")
 
@@ -1080,10 +1003,11 @@ class TestModelRegistryStatus(unittest.TestCase):
         self.assertEqual(status.phase, "uploading")
 
     def test_reports_broken_when_upload_exceeds_deadline(self) -> None:
-        # _seed_version's default creation_timestamp is years in the past, well
-        # beyond the 3h deadline, so a still-"uploading" version reads as stale.
-        v = _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        v.tags["lifecycle"] = "uploading"
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"lifecycle": "uploading"},
+            creation_timestamp=_STALE_MS,
+        )
 
         status = model_registry_status("Qwen2", "instruct", "boogey-46")
 
@@ -1093,66 +1017,59 @@ class TestModelRegistryStatus(unittest.TestCase):
 
 class TestDeleteModel(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
     def test_removes_version_and_blob(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
         self.s3.objects[
             "models/boogey-46/Qwen2/instruct/weights/x"
         ] = b"a"
 
         delete_model("Qwen2", "instruct", "boogey-46")
 
-        self.assertEqual(self.mlflow.versions, [])
+        self.assertEqual(self.state.models, {})
         self.assertEqual(list(self.s3.objects), [])
 
     def test_does_not_touch_unrelated_versions(self) -> None:
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        _seed_version(self.mlflow, "Qwen2", "chat", "r2", "rocky-99")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "chat", "r2", "rocky-99")
 
         delete_model("Qwen2", "instruct", "boogey-46")
 
-        remaining = sorted(v.tags["suffix"] for v in self.mlflow.versions)
+        remaining = sorted(v["tags"]["suffix"] for v in self.state.models.values())
         self.assertEqual(remaining, ["chat"])
 
 
 class TestDeleteModelsForRun(unittest.TestCase):
     def setUp(self) -> None:
-        self.mlflow = FakeMLflow()
+        self.state = FakeState().install(self)
         self.s3 = FakeS3()
-        for p in _patches(self.mlflow, self.s3):
+        for p in _patches(self.s3):
             p.start()
             self.addCleanup(p.stop)
 
     def test_deletes_every_version_tied_to_run(self) -> None:
-        self.mlflow.runs["r1"] = FakeRun("r1", "boogey-46")
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "boogey-46")
-        _seed_version(self.mlflow, "Qwen2", "chat", "r1", "boogey-46")
-        _seed_version(self.mlflow, "DeepSeek3", "chat", "r2", "rocky-99")
+        self.state.seed_run("r1", "boogey-46")
+        self.state.seed_run("r2", "rocky-99")
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+        _seed_model(self.state, "Qwen2", "chat", "r1", "boogey-46")
+        _seed_model(self.state, "DeepSeek3", "chat", "r2", "rocky-99")
         self.s3.objects["models/boogey-46/Qwen2/instruct/weights/x"] = b"a"
         self.s3.objects["models/boogey-46/Qwen2/chat/weights/y"] = b"b"
         self.s3.objects["models/rocky-99/DeepSeek3/chat/weights/z"] = b"c"
 
         delete_models_for_run("r1")
 
-        run_ids = sorted(v.run_id for v in self.mlflow.versions)
+        run_ids = sorted(v["run_id"] for v in self.state.models.values())
         self.assertEqual(run_ids, ["r2"])
         self.assertEqual(
             sorted(self.s3.objects),
             ["models/rocky-99/DeepSeek3/chat/weights/z"],
         )
-
-    def test_falls_back_to_run_id_when_run_name_missing(self) -> None:
-        self.mlflow.runs["r1"] = FakeRun("r1", "")
-        _seed_version(self.mlflow, "Qwen2", "instruct", "r1", "r1")
-        self.s3.objects["models/r1/Qwen2/instruct/weights/x"] = b"a"
-
-        delete_models_for_run("r1")
-        self.assertEqual(list(self.s3.objects), [])
 
 
 if __name__ == "__main__":

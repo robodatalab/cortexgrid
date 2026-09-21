@@ -1,4 +1,4 @@
-# Jobs Control Plane — polls MLflow for submitted jobs, schedules them on Ray
+# Jobs Control Plane — keeps cortexgrid's records in Postgres, schedules jobs on Ray
 
 FROM python:3.11.13-slim
 
@@ -12,7 +12,7 @@ WORKDIR /app
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project
+    uv sync --locked --no-install-project --group control-plane
 
 # pyproject.toml's readme and license-files; `uv sync` builds the project and needs both.
 COPY docs/cortexgrid/README.md ./docs/cortexgrid/README.md
@@ -22,7 +22,7 @@ COPY jobs_control_plane/ ./jobs_control_plane/
 
 RUN --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked
+    uv sync --locked --group control-plane
 
 CMD ["/app/.venv/bin/python", "-m", "jobs_control_plane.server"]
 

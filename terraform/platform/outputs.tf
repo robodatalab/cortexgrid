@@ -46,6 +46,12 @@ output "notes_db_uri" {
   sensitive   = true
 }
 
+output "cortexgrid_db_uri" {
+  description = "Published as CORTEXGRID_DB_URI by head setup"
+  value       = module.rds.cortexgrid_db_uri
+  sensitive   = true
+}
+
 output "rds_endpoint" {
   description = "RDS connection endpoint (host:port)"
   value       = module.rds.endpoint

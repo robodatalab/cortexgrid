@@ -22,6 +22,9 @@ services:
   postgres:
     host: postgres.cortexgrid.svc.cluster.local
     port: 5432
+  jobsControlPlane:
+    port: 8000
+    nodePort: 30700
   minio:
     host: minio.cortexgrid.svc.cluster.local
     port: 9000

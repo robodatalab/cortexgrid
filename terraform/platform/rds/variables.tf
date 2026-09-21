@@ -36,7 +36,7 @@ variable "allocated_storage_gb" {
 }
 
 variable "db_name" {
-  description = "Initial database name. mlflow is the only current consumer; additional databases on the same instance can be created later via the postgres provider or app-managed migrations."
+  description = "Initial database name, used by mlflow. The notes and cortexgrid databases on the same instance are created by notes.tf and cortexgrid.tf."
   type        = string
   default     = "mlflow"
 }

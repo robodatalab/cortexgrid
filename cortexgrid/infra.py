@@ -1,9 +1,19 @@
+import functools
+
 from cortexgrid.secrets import get_secret
 from mlflow.tracking import MlflowClient
 
 
 def get_mlflow_tracking_uri() -> str:
     return get_secret("MLFLOW_TRACKING_URI")
+
+
+@functools.cache
+def get_jobs_control_plane_uri() -> str:
+    """Base URL of the jobs control plane, which keeps cortexgrid's own records.
+    Cached: every job and registry lookup goes through it, and asking the
+    secrets server each time would add a round trip to each of them."""
+    return get_secret("JOBS_CONTROL_PLANE_URI")
 
 
 def get_ray_job_server_uri() -> str:

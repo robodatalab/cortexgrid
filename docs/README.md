@@ -56,29 +56,26 @@ See [cortexgrid/README.md](cortexgrid/README.md) for full reference
 
 **Prerequisites:** Mac on the Tailscale network, with `uv`, `kubectl` and `terraform`. A `.env.head` file at the repo root, copied from [.env.head.template](../.env.head.template) and filled in with the values head setup can't generate: GitHub token and App, Tailscale operator client, Route53 keys (created in the AWS console) and `TAILSCALE_AUTH_KEY` (AWS). On the AWS profile, also AWS credentials that can apply and read the `terraform/platform` stack.
 
-**1. Provision the AWS head infrastructure** (terraform — VPC, EC2, S3, RDS, all in one shot):
+The cluster is managed by `./cg` at the repo root (`./cg --help`, [k8s/seed/cli.py](../k8s/seed/cli.py)).
+
+**1. Add the head** (k3s + ArgoCD bootstrap), on AWS or on an on-prem host:
 
 ```bash
-make head-aws-apply
+./cg add head --aws
+./cg add head --onprem --storage=<hdd-mount> <head-tailscale-ip>
 ```
 
-This runs a single `terraform apply` against the root composition at [terraform/platform/](../terraform/platform/), which provisions network → head → s3 → rds in dependency order, then writes `Host robolab-aws <ip>` into `~/.ssh/config`. The EC2 boots, joins your tailnet as `robolab-head`, and mounts the EBS volume at `/storage`.
+`--aws` first runs a single `terraform apply` against the root composition at [terraform/platform/](../terraform/platform/), which provisions network → head → s3 → rds in dependency order. The EC2 boots, joins your tailnet as `robolab-head` and mounts the EBS volume at `/storage`; `./cg` then writes `Host robolab-aws <ip>` into `~/.ssh/config` and seeds it.
 
-**2. Seed the head** (k3s + ArgoCD bootstrap):
+**2. Add workers** (e.g. the DGX joins as a GPU worker), each under an alias of your choice:
 
 ```bash
-make head-setup IP=<robolab-head-tailscale-ip> STORAGE_PATH=/storage PROFILE=aws
+./cg add worker --alias=dgx <dgx-tailscale-ip>
 ```
 
-**3. Seed a worker** (DGX joins as GPU worker):
+To also run Ray workers on the head, add a worker on the head's IP (`./cg add worker --alias=p5 <head-ip>`); `./cg del worker p5` removes that role again and leaves the head running.
 
-```bash
-make worker-setup IP=<dgx-tailscale-ip> PROFILE=aws
-```
-
-To also run Ray workers on the head, run `worker-setup` against the head's IP; `make worker-teardown IP=<head-ip>` removes that role again and leaves the head running.
-
-**4. Point your laptop at the head** (for `cortexgrid` and `make dev`):
+**3. Point your laptop at the head** (for `cortexgrid` and `make dev`):
 
 ```bash
 export CORTEXGRID_HEAD_URL=http://robolab-head:7700
@@ -87,18 +84,19 @@ export CORTEXGRID_HEAD_URL=http://robolab-head:7700
 **Teardown:**
 
 ```bash
-make node-teardown IP=<tailscale-ip>      # k3s teardown on a single node
-make worker-teardown IP=<tailscale-ip>    # only the worker role (keeps a head); plain worker: same as node-teardown
-make head-aws-destroy                     # single terraform destroy of the platform stack
+./cg del worker dgx    # one worker
+./cg del head          # the head (on AWS, then terraform destroy of the platform stack); refused while workers remain
+./cg del --all         # every worker, then the head
+./cg restart           # tear every role down and add it back (leaves the AWS stack in place)
 ```
 
-`head-setup` starts the head secrets server and publishes `.env.head` (plus terraform outputs on AWS) to it, installs k3s, stages [k8s/argocd.yaml](../k8s/argocd.yaml), publishes the k3s token + service URLs to the secrets server, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo_deployments/](../k8s/argo_deployments/) from `main`. Topology is recorded in [infra-config.yaml](../infra-config.yaml) at the repo root.
+`./cg add head` starts the head secrets server and publishes `.env.head` (plus terraform outputs on AWS) to it, installs k3s, stages [k8s/argocd.yaml](../k8s/argocd.yaml), publishes the k3s token + service URLs to the secrets server, merges the kubeconfig into `~/.kube/config` as context `robolab`, and labels the node `role=head`. Argo CD then reconciles everything under [k8s/argo_deployments/](../k8s/argo_deployments/) from `main`. Topology is recorded in [infra-config.yaml](../infra-config.yaml) at the repo root: the head and the workers by alias, each with the setup steps it has `done`.
 
-Both `head-setup` and `worker-setup` bind k3s to Tailscale with a systemd drop-in (`/etc/systemd/system/k3s.service.d/10-tailscale.conf`, `k3s-agent.service.d` on workers; see `bind_k3s_to_tailscale` in [k8s/seed/util.py](../k8s/seed/util.py)): `After=`/`Wants=tailscaled.service` and `PartOf=tailscaled.service`. flannel's VXLAN device (`flannel.1`) is bound to `tailscale0`, and restarting tailscaled (e.g. `tailscale update`) recreates `tailscale0`, which deletes `flannel.1`; k3s does not recreate it until k3s restarts, so cross-node pod traffic silently breaks. With the drop-in, a tailscaled restart restarts k3s too (running pods stay up - k3s units use `KillMode=process`). `node-teardown` removes the drop-in.
+Both `./cg add head` and `./cg add worker` bind k3s to Tailscale with a systemd drop-in (`/etc/systemd/system/k3s.service.d/10-tailscale.conf`, `k3s-agent.service.d` on workers; see `bind_k3s_to_tailscale` in [k8s/seed/util.py](../k8s/seed/util.py)): `After=`/`Wants=tailscaled.service` and `PartOf=tailscaled.service`. flannel's VXLAN device (`flannel.1`) is bound to `tailscale0`, and restarting tailscaled (e.g. `tailscale update`) recreates `tailscale0`, which deletes `flannel.1`; k3s does not recreate it until k3s restarts, so cross-node pod traffic silently breaks. With the drop-in, a tailscaled restart restarts k3s too (running pods stay up - k3s units use `KillMode=process`). `./cg del` removes the drop-in.
 
 The head and every worker install the same k3s version, `K3S_VERSION` in [k8s/seed/util.py](../k8s/seed/util.py); a deferred worker gets it through the env file its join timer reads. Without the pin the installer takes k3s's current "stable" channel, so a worker joined later can run a newer Kubernetes than the server, which Kubernetes does not support. Setup skips a node that already has k3s installed, so bumping `K3S_VERSION` only takes effect on nodes that are torn down and set up again - the head included.
 
-A worker's k3s agent registers already labelled `role=worker`, `worker=true` and, when `nvidia-smi -L` lists a GPU, `gpu=true` (`node-label` in the agent config `JoinCluster` writes). The `ray-worker` (GPU) and `ray-worker-cpu` DaemonSets select on these - so a deferred worker is labelled whenever it eventually joins. k3s applies `node-label` only at registration, so `ComputeLabels` also applies the compute labels with kubectl on every direct `worker-setup`; re-run it on a worker that joined before these labels existed. When the head is already up (direct join), `worker-setup` waits up to 60 s for the node to register and fails if it does not, rather than recording a join that never happened.
+A worker's k3s agent registers already labelled `role=worker`, `worker=true` and, when `nvidia-smi -L` lists a GPU, `gpu=true` (`node-label` in the agent config `JoinCluster` writes). The `ray-worker` (GPU) and `ray-worker-cpu` DaemonSets select on these - so a deferred worker is labelled whenever it eventually joins. k3s applies `node-label` only at registration, so `ComputeLabels` also applies the compute labels with kubectl on every direct `./cg add worker`; re-run it on a worker that joined before these labels existed. When the head is already up (direct join), `./cg add worker` waits up to 60 s for the node to register and fails if it does not, rather than recording a join that never happened.
 
 ### Secrets management
 
@@ -169,13 +167,14 @@ Provisions the EC2 instance that runs the k3s control plane, Argo CD, and platfo
 | S3 bucket `robolab-data` | AES256, public access blocked. Used for cortexgrid data uploads and mlflow artifacts under `mlflow-artifacts/`. |
 | IAM user policy | Attaches read/write to the `robolab-dgx` IAM user created in `head/`. |
 
-#### `rds/` — Postgres for mlflow backend store
+#### `rds/` — Postgres for mlflow, notes and cortexgrid
 
 | Resource | Purpose |
 |----------|---------|
 | `db.t4g.micro` Postgres 16 | Single-AZ, encrypted gp3, ingress only from the head's SG. |
 | Random master password | 32 chars, lives only in tfstate and the composed URIs. |
-| Outputs `mlflow_backend_store_uri`, `notes_db_uri` | Pre-composed `postgresql://...` URIs. Head setup publishes them as `MLFLOW_BACKEND_STORE_URI` and `NOTES_DB_URI`; mlflow's `mlflow-config` ExternalSecret reads the first directly. On-prem writes the same keys with in-cluster Postgres URIs, so the workload manifest is profile-agnostic. |
+| `notes` and `cortexgrid` databases | Created and schema-applied by `notes.tf` / `cortexgrid.tf` via `psql` over the tailnet. `cortexgrid` holds the jobs control plane's records. |
+| Outputs `mlflow_backend_store_uri`, `notes_db_uri`, `cortexgrid_db_uri` | Pre-composed `postgresql://...` URIs. Head setup publishes them as `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI` and `CORTEXGRID_DB_URI`; mlflow's `mlflow-config` ExternalSecret reads the first directly. On-prem writes the same keys with in-cluster Postgres URIs, so the workload manifest is profile-agnostic. |
 
 ### Service discovery
 
@@ -192,9 +191,9 @@ prefix:
 | `ROUTE53_*` | `route53-creds` | cert-manager DNS-01 (real AWS on both profiles) |
 | `S3_*` | `s3-creds` | Object storage (real AWS on AWS profile, MinIO on on-prem) |
 
-- `head-setup` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `RAY_SERVE_URI`).
-- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL`, `S3_REGION` and the `robolab-dgx` user's keys (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) from [terraform/platform](../terraform/platform/outputs.tf) outputs.
-- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI` + `NOTES_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- `./cg add head` writes the head's Tailscale IP and computed service URLs (`MLFLOW_TRACKING_URI`, `RAY_JOB_SERVER_URI`, `RAY_SERVE_URI`, `JOBS_CONTROL_PLANE_URI`).
+- AWS profile: [TerraformOutputs](../k8s/seed/operators/terraform_outputs.py) publishes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI`, `CORTEXGRID_DB_URI`, `S3_BUCKET_NAME`, `S3_ENDPOINT_URL`, `S3_REGION` and the `robolab-dgx` user's keys (`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`) from [terraform/platform](../terraform/platform/outputs.tf) outputs.
+- On-prem profile: two seed operators publish profile-specific service-discovery (the on-prem analog of `TerraformOutputs` — both are *infrastructure-layer* publishers): [PostgresCredentials](../k8s/seed/operators/postgres_credentials.py) generates the postgres master password and writes `MLFLOW_BACKEND_STORE_URI`, `NOTES_DB_URI` + `CORTEXGRID_DB_URI`; [MinioCredentials](../k8s/seed/operators/minio_credentials.py) generates the MinIO admin password and writes `S3_ENDPOINT_URL` (head tailscale IP + NodePort), `S3_REGION`, `S3_BUCKET_NAME`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
 - Both profiles: `ROUTE53_*` come from `.env.head`, as keys of an IAM user created in the AWS console.
 - ESO syncs the store into k8s Secrets (`route53-creds`, `s3-creds`, `mlflow-config`); Reflector mirrors them into every workload namespace.
 

@@ -1,7 +1,8 @@
 """Durable checkpointing for cortexgrid jobs.
 
-Save arbitrary state (primitives, torch tensors, state_dicts) via MLflow
-artifacts and resume from the latest checkpoint on retry.
+Save arbitrary state (primitives, torch tensors, state_dicts) to S3, with a
+manifest recorded by the jobs control plane, and resume from the latest
+checkpoint on retry.
 
 Usage (save)::
 
@@ -20,24 +21,22 @@ Usage (resume)::
 
 from __future__ import annotations
 
-import json
 import logging
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import cloudpickle  # type: ignore
-from mlflow.tracking import MlflowClient
 
-from cortexgrid import s3_util
-from cortexgrid.experiment import Experiment, get_mlflow_tracking_uri
+from cortexgrid import s3_util, state
+from cortexgrid.experiment import Experiment
 
 log = logging.getLogger(__name__)
 _CORTEXGRID_JOB_ID: str | None = None
 
 
 class Checkpoint:
-    """Attribute-based checkpoint persisted via MLflow artifacts.
+    """Attribute-based checkpoint persisted to S3.
 
     Assign any cloudpickle-compatible value to an attribute and it will be
     saved when the context manager exits::
@@ -112,9 +111,8 @@ class Checkpoint:
             self._persist()
 
     def _persist(self) -> None:
-        """Upload attr blobs to MinIO; log manifest.json via MLflow."""
+        """Upload attr blobs to MinIO; record the manifest with the control plane."""
         exp = Experiment.get_instance()
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
         tmpdir = Path(tempfile.mkdtemp())
 
         manifest: dict[str, Any] = {"attrs": {}}
@@ -127,28 +125,17 @@ class Checkpoint:
             )
             manifest["attrs"][name] = {"uri": uri}
 
-        (tmpdir / "manifest.json").write_text(json.dumps(manifest))
-        client.log_artifact(
-            exp.run_id, str(tmpdir / "manifest.json"), artifact_path=self._prefix
-        )
+        state.put("runs", exp.run_id, "checkpoints", self._prefix, body=manifest)
         log.info("Checkpoint saved: %s (%d attrs)", self._prefix, len(self._data))
 
     @classmethod
     def _load(cls, prefix: str) -> Checkpoint | None:
-        """Download manifest via MLflow; download attr blobs from MinIO."""
+        """Read the manifest from the control plane; download attr blobs from MinIO."""
         exp = Experiment.get_instance()
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-
-        manifest_rel = f"{prefix}/manifest.json"
-        if not any(
-            a.path == manifest_rel for a in client.list_artifacts(exp.run_id, prefix)
-        ):
-            return None
-
-        try:
-            manifest_path = client.download_artifacts(exp.run_id, manifest_rel)
-            manifest = json.loads(Path(manifest_path).read_text())
-        except Exception:
+        # An unreachable control plane raises rather than reading as "no
+        # checkpoint", which would restart a retried job from scratch.
+        manifest = state.get("runs", exp.run_id, "checkpoints", prefix)
+        if manifest is None:
             return None
 
         data: dict[str, Any] = {}

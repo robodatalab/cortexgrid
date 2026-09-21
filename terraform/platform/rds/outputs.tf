@@ -17,6 +17,12 @@ output "notes_db_uri" {
   sensitive   = true
 }
 
+output "cortexgrid_db_uri" {
+  description = "Postgres URI for the jobs control plane's cortexgrid database"
+  value       = local.cortexgrid_uri
+  sensitive   = true
+}
+
 output "endpoint" {
   description = "RDS connection endpoint (host:port)"
   value       = aws_db_instance.main.endpoint

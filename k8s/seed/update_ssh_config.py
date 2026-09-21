@@ -1,12 +1,10 @@
-"""Manage the `Host robolab-aws` block in ~/.ssh/config.
+"""Manage the `Host robolab-aws` block in ~/.ssh/config for the AWS head.
 
-Default mode: poll `tailscale ip robolab-head` for up to TIMEOUT_S seconds, then
-upsert a delimited block pointing at the discovered Tailscale IP.
-
-`--remove`: strip the block.
+`upsert()` polls MagicDNS for `robolab-head` for up to TIMEOUT_S seconds, then
+writes a delimited block pointing at the discovered Tailscale IP. `remove()`
+strips the block.
 """
 
-import argparse
 import logging
 import re
 import socket
@@ -47,7 +45,9 @@ def _strip_block(text: str) -> str:
     return pattern.sub("\n", text)
 
 
-def _upsert(ip: str) -> None:
+def upsert() -> str:
+    """Point `robolab-aws` at the head once it joins the tailnet; returns its IP."""
+    ip = _poll_for_ip()
     block = (
         f"{START_MARKER}\n"
         f"Host robolab-aws {ip}\n"
@@ -62,9 +62,10 @@ def _upsert(ip: str) -> None:
     text = (text + "\n\n" if text else "") + block
     SSH_CONFIG.write_text(text)
     log.info(f"~/.ssh/config: robolab-aws -> {ip}")
+    return ip
 
 
-def _remove() -> None:
+def remove() -> None:
     if not SSH_CONFIG.exists():
         return
     text = SSH_CONFIG.read_text()
@@ -75,22 +76,3 @@ def _remove() -> None:
         SSH_CONFIG.write_text(new_text)
         log.info("Removed robolab-aws entry from ~/.ssh/config")
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--remove", action="store_true", help="Strip the block")
-    args = parser.parse_args()
-
-    if args.remove:
-        _remove()
-    else:
-        _upsert(_poll_for_ip())
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    main()

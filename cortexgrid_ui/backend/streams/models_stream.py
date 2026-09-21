@@ -1,6 +1,6 @@
 """Models stream.
 
-Single pinned topic: every ModelVersion in the MLflow Model Registry,
+Single pinned topic: every entry in cortexgrid's model registry,
 surfaced as SavedModel-shaped payloads. Items are keyed by
 `<family>/<suffix>/<run_name>` so the UI can address each version.
 """

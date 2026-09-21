@@ -1,16 +1,15 @@
-"""Model registry backed by MLflow Model Registry; weights stored directly in S3.
+"""Model registry kept by the jobs control plane; weights stored directly in S3.
 
-Mapping cortexgrid taxonomy <-> MLflow Registry:
-    family + suffix     -> RegisteredModel.name = "<family>/<suffix>"
-    run_name            -> ModelVersion.tags["run_name"]
-    family, suffix      -> ModelVersion.tags["family"], ["suffix"]   (denormalized)
-    weights blob path   -> ModelVersion.source =
+One registry entry (a `models` row) per (family, suffix, run_name):
+    family, suffix,
+    run_name            -> the entry's key, and tags["family"], ["suffix"],
+                           ["run_name"]   (denormalized)
+    weights blob path   -> source =
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
                            (NO_WEIGHTS for a model registered without any)
-    run linkage         -> ModelVersion.run_id  (built-in MLflow field; unset
-                           for imported models)
-    requirements        -> ModelVersion.tags["num_gpus"], ["ram_gb"], ["vram_gb"]
-    config              -> ModelVersion.tags["config"]  (JSON object)
+    run linkage         -> run_id  (unset for imported models)
+    requirements        -> tags["num_gpus"], ["ram_gb"], ["vram_gb"]
+    config              -> tags["config"]  (JSON object)
 
 Three ways in: `save_model` registers a fresh copy under the calling run's
 run_name every time it runs (fine-tuned output); `import_model` registers a
@@ -37,11 +36,8 @@ from pathlib import Path
 import tempfile
 from typing import Any, Callable
 
-from mlflow.exceptions import MlflowException
-from mlflow.tracking import MlflowClient
-
-from cortexgrid import s3_util
-from cortexgrid.infra import get_mlflow_tracking_uri, get_s3_bucket
+from cortexgrid import s3_util, state
+from cortexgrid.infra import get_s3_bucket
 from cortexgrid.model_serving import (
     ModelRequirements,
     build_bundle,
@@ -55,8 +51,7 @@ from cortexgrid.model_serving import (
 )
 
 
-# MLflow ModelVersion tag holding the registry lifecycle phase, and its
-# values. This is a separate lifecycle from serving (Ray Serve); see
+# Registry tag holding the registry lifecycle phase, and its values. This is a separate lifecycle from serving (Ray Serve); see
 # cortexgrid.model_serving for that vocabulary.
 _LIFECYCLE_TAG = "lifecycle"
 _PHASE_UPLOADING = "uploading"
@@ -64,16 +59,15 @@ _PHASE_READY = "ready"
 _PHASE_UPLOAD_FAILED = "upload_failed"
 _PHASE_BROKEN = "broken"
 
-# MLflow ModelVersion tag holding the model's config: whatever settings its
+# Registry tag holding the model's config: whatever settings its
 # serve-app needs that are not the weights (a provider's model id, an endpoint,
 # the name of a secret to read). cortexgrid never interprets it - it is the
 # serve-app's own vocabulary, stored next to the model so the app reads it at
 # construction instead of being redeployed to change a setting.
 #
 # One JSON object in one tag, not a tag per key: the keys are the serve-app's
-# to choose, free of MLflow's tag-key charset, and the whole mapping is
-# replaced in a single write, so removing a key needs no tag deletion. MLflow
-# caps a tag value at 8000 characters, which bounds how big a config can get.
+# to choose, and the whole mapping is replaced in a single write, so removing
+# a key needs no tag deletion.
 _CONFIG_TAG = "config"
 
 
@@ -90,10 +84,9 @@ _UPLOAD_DEADLINE = timedelta(hours=3)
 # them. Run names are haikunator "word-word-NN", so no run can take this name.
 IMPORTED = "imported"
 
-# ModelVersion.source of a model registered with no weights of its own: nothing
+# Registry source of a model registered with no weights of its own: nothing
 # was staged, so there is no blob to point at. Spelled as a URI rather than left
-# blank because MLflow rejects a source that is empty or a local path, and
-# because every reader - `load_model`, the dashboard's storage field - then sees
+# blank so every reader - `load_model`, the dashboard's storage field - sees
 # why there is no path instead of an empty one.
 NO_WEIGHTS = "cortexgrid://no-weights"
 
@@ -146,7 +139,7 @@ def _phase_for(version: Any) -> str:
 
 
 def _config_to_tag(config: dict[str, str]) -> str:
-    """Serialise a config mapping to its MLflow tag value.
+    """Serialise a config mapping to its registry tag value.
 
     Keys and values are strings: they round-trip through a tag, and the model
     card edits them as text. A caller with a number or a flag spells it as a
@@ -162,7 +155,7 @@ def _config_to_tag(config: dict[str, str]) -> str:
 
 
 def _config_from_tags(tags: dict[str, str]) -> dict[str, str]:
-    """Deserialise a config mapping from a ModelVersion's MLflow tags; a
+    """Deserialise a config mapping from a registry entry's tags; a
     missing tag reads as no config."""
     return json.loads(tags.get(_CONFIG_TAG, "{}"))
 
@@ -191,11 +184,24 @@ def _dir_size_bytes(local_dir: str | Path) -> int:
     return total
 
 
-def _ensure_registered_model(client: MlflowClient, name: str) -> None:
-    try:
-        client.get_registered_model(name)
-    except MlflowException:
-        client.create_registered_model(name)
+@dataclass
+class _ModelVersion:
+    """A registry entry as the control plane returns it."""
+
+    tags: dict[str, str]
+    source: str
+    run_id: str | None
+    creation_timestamp: int  # ms since the epoch
+
+
+def _get_version(family: str, suffix: str, run_name: str) -> _ModelVersion | None:
+    record = state.get("models", family, suffix, run_name)
+    return None if record is None else _ModelVersion(**record)
+
+
+def _set_tags(family: str, suffix: str, run_name: str, tags: dict[str, str]) -> bool:
+    """Merge `tags` into the entry's. False if there is no such entry."""
+    return state.patch("models", family, suffix, run_name, "tags", body=tags)
 
 
 def _download_s3_uri(uri: str, dest_dir: str | Path | None) -> Path:
@@ -222,8 +228,8 @@ def save_model(
     requirements: ModelRequirements | None = None,
     config: dict[str, str] | None = None,
 ) -> SavedModel:
-    """Upload a weights directory to S3 and register a new MLflow ModelVersion
-    paired with the serve-app that fronts it.
+    """Upload a weights directory to S3 and register it paired with the
+    serve-app that fronts it.
 
     Meant for weights the calling run produced (e.g. a fine-tune): every run
     saves its own copy under its own run_name, so running the same code twice
@@ -238,7 +244,7 @@ def save_model(
     `serve_app` is the `cortexgrid.serve.ingress` class that will front these
     weights.
     Its code is bundled and its import path, bundle URL, and pip list are
-    stored as tags on the ModelVersion so `deploy_model` can bind it later
+    stored as tags on the registry entry so `deploy_model` can bind it later
     without the caller holding the class object.
 
     `requirements` is the hardware one replica needs; None stores none, which
@@ -286,8 +292,7 @@ def import_model(
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
 
-    The version is linked to no MLflow run, so deleting a run leaves it in
-    place. Deploy it like any saved model:
+    The entry is linked to no run, so deleting a run leaves it in place. Deploy it like any saved model:
     `deploy_model(family, suffix, IMPORTED)`."""
     return _register_imported(
         source, serve_app, family, suffix, requirements, config
@@ -361,21 +366,16 @@ def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
     """Re-bundle an imported model's serve-app when its fingerprint differs
     from the bundle stored on the version, leaving the weights in place.
 
-    The new bundle is uploaded next to the old one and the version's tags are
+    The new bundle is uploaded next to the old one and the entry's tags are
     pointed at it, so the next `deploy_model` runs the new code. An app that is
     already running keeps the code it started with until it is deployed again;
     the old bundle stays in storage so that app can still restart."""
-    name = f"{family}__{suffix}"
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    version = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{IMPORTED}'"
-    )[0]
+    version = _get_version(family, suffix, IMPORTED)
     serve_bundle = build_bundle(serve_app)
     if metadata_from_tags(version.tags).fingerprint == serve_bundle.fingerprint:
         return
     meta = upload_bundle(serve_bundle, family, suffix, IMPORTED)
-    for key, value in metadata_to_tags(meta).items():
-        client.set_model_version_tag(name, version.version, key, value)
+    _set_tags(family, suffix, IMPORTED, metadata_to_tags(meta))
 
 
 def _set_missing_requirements(
@@ -383,15 +383,10 @@ def _set_missing_requirements(
 ) -> ModelRequirements:
     """Store `requirements` on an imported model whose version has none yet.
     Returns the requirements the version holds afterwards."""
-    name = f"{family}__{suffix}"
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    version = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{IMPORTED}'"
-    )[0]
+    version = _get_version(family, suffix, IMPORTED)
     if has_requirement_tags(version.tags):
         return requirements_from_tags(version.tags)
-    for key, value in requirements_to_tags(requirements).items():
-        client.set_model_version_tag(name, version.version, key, value)
+    _set_tags(family, suffix, IMPORTED, requirements_to_tags(requirements))
     return requirements
 
 
@@ -400,16 +395,10 @@ def _set_missing_config(
 ) -> dict[str, str]:
     """Store `config` on an imported model whose version has none yet. Returns
     the config the version holds afterwards."""
-    name = f"{family}__{suffix}"
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    version = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{IMPORTED}'"
-    )[0]
+    version = _get_version(family, suffix, IMPORTED)
     if _CONFIG_TAG in version.tags:
         return _config_from_tags(version.tags)
-    client.set_model_version_tag(
-        name, version.version, _CONFIG_TAG, _config_to_tag(config)
-    )
+    _set_tags(family, suffix, IMPORTED, {_CONFIG_TAG: _config_to_tag(config)})
     return config
 
 
@@ -423,7 +412,7 @@ def _upload_model(
     requirements: ModelRequirements | None,
     config: dict[str, str] | None,
 ) -> SavedModel:
-    """Register a ModelVersion in "uploading", resolve `weights` to a directory
+    """Register an entry in "uploading", resolve `weights` to a directory
     (calling it when it is a callable), upload the weights and the serve-app
     bundle, and flip it to "ready" (or "upload_failed").
 
@@ -436,10 +425,7 @@ def _upload_model(
         if weights is None
         else f"s3://{get_s3_bucket()}/{prefix}/weights/"
     )
-    name = f"{family}__{suffix}"
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    _ensure_registered_model(client, name)
-    # Register the version up front in the "uploading" phase, before `weights`
+    # Register the entry up front in the "uploading" phase, before `weights`
     # is resolved: the dashboard surfaces the model while it is still being
     # fetched and uploaded, and a concurrent `import_model` sees the import in
     # flight for the whole download instead of starting one of its own. The
@@ -448,39 +434,45 @@ def _upload_model(
     # registration has only its bundle to upload, and passes through the same
     # phases. No requirements and no
     # config leave their tags unset, so a later `import_model` can still store
-    # them.
-    version = client.create_model_version(
-        name=name,
-        source=source,
-        run_id=run_id,
-        tags={
-            "family": family,
-            "suffix": suffix,
-            "run_name": run_name,
-            _LIFECYCLE_TAG: _PHASE_UPLOADING,
-            **(requirements_to_tags(requirements) if requirements is not None else {}),
-            **({_CONFIG_TAG: _config_to_tag(config)} if config is not None else {}),
+    # them. An entry already under the key is replaced: saving twice in one
+    # run leaves the second save.
+    state.put(
+        "models",
+        family,
+        suffix,
+        run_name,
+        body={
+            "run_id": run_id,
+            "source": source,
+            "tags": {
+                "family": family,
+                "suffix": suffix,
+                "run_name": run_name,
+                _LIFECYCLE_TAG: _PHASE_UPLOADING,
+                **(requirements_to_tags(requirements) if requirements is not None else {}),
+                **({_CONFIG_TAG: _config_to_tag(config)} if config is not None else {}),
+            },
         },
     )
     try:
         if weights is not None:
             weights_dir = weights() if callable(weights) else weights
-            client.set_model_version_tag(
-                name, version.version, "size_bytes", str(_dir_size_bytes(weights_dir))
+            _set_tags(
+                family, suffix, run_name, {"size_bytes": str(_dir_size_bytes(weights_dir))}
             )
             s3_util.upload_dir(str(weights_dir), dest_path=f"{prefix}/weights")
         bundle_meta = bundle_class(serve_app, family, suffix, run_name)
-        for key, value in metadata_to_tags(bundle_meta).items():
-            client.set_model_version_tag(name, version.version, key, value)
-        client.set_model_version_tag(
-            name, version.version, _LIFECYCLE_TAG, _PHASE_READY
+        # One write, so the entry reads "ready" only with its bundle tags in place.
+        _set_tags(
+            family,
+            suffix,
+            run_name,
+            {**metadata_to_tags(bundle_meta), _LIFECYCLE_TAG: _PHASE_READY},
         )
     except Exception:
-        client.set_model_version_tag(
-            name, version.version, _LIFECYCLE_TAG, _PHASE_UPLOAD_FAILED
-        )
+        _set_tags(family, suffix, run_name, {_LIFECYCLE_TAG: _PHASE_UPLOAD_FAILED})
         raise
-    return _to_saved_model(client.get_model_version(name, version.version))
+    return _to_saved_model(_get_version(family, suffix, run_name))
 
 
 def load_model(family: str, suffix: str, run_name: str) -> Path:
@@ -494,27 +486,21 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
 
     Raises ValueError for a model registered with `register_model`: it stages
     no weights, so there is none to hand back."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}__{suffix}"
-    versions = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{run_name}'"
-    )
-    if not versions or not versions[0].source:
+    version = _get_version(family, suffix, run_name)
+    if version is None or not version.source:
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    if versions[0].source == NO_WEIGHTS:
+    if version.source == NO_WEIGHTS:
         raise ValueError(
             f"Model {family}/{suffix}/{run_name} was registered without "
             "weights; there is nothing to load"
         )
-    return _download_s3_uri(versions[0].source, None)
+    return _download_s3_uri(version.source, None)
 
 
 def list_models() -> list[SavedModel]:
-    """Return SavedModel records for every ModelVersion in the registry,
-    including versions still uploading or whose upload failed (see
-    `SavedModel.phase`)."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    return [_to_saved_model(v) for v in client.search_model_versions("")]
+    """Return SavedModel records for every entry in the registry, including
+    entries still uploading or whose upload failed (see `SavedModel.phase`)."""
+    return [_to_saved_model(_ModelVersion(**record)) for record in state.get("models")]
 
 
 def model_registry_status(
@@ -524,17 +510,14 @@ def model_registry_status(
     registered (no upload ever started).
 
     The registry lifecycle is owned here: it begins when `save_model` creates
-    the ModelVersion (`phase="uploading"`), becomes `"ready"` once the weights
+    the entry (`phase="uploading"`), becomes `"ready"` once the weights
     and serve bundle finish uploading, `"upload_failed"` if the upload errored,
     or `"broken"` if an upload has stayed in progress past _UPLOAD_DEADLINE
     (the writer is presumed dead). Serving is a separate lifecycle; see
     `cortexgrid.model_serving.model_serving_status`.
     """
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    versions = client.search_model_versions(
-        f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
-    )
-    return _to_saved_model(versions[0]) if versions else None
+    version = _get_version(family, suffix, run_name)
+    return _to_saved_model(version) if version is not None else None
 
 
 def set_model_requirements(
@@ -543,15 +526,8 @@ def set_model_requirements(
     """Replace the hardware requirements stored on a model. Takes effect on
     its next `deploy_model`; a replica already running keeps its placement.
     Raises ValueError if the model was never registered."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}__{suffix}"
-    versions = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{run_name}'"
-    )
-    if not versions:
+    if not _set_tags(family, suffix, run_name, requirements_to_tags(requirements)):
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    for key, value in requirements_to_tags(requirements).items():
-        client.set_model_version_tag(name, versions[0].version, key, value)
 
 
 def model_config(family: str, suffix: str, run_name: str) -> dict[str, str]:
@@ -566,13 +542,10 @@ def model_config(family: str, suffix: str, run_name: str) -> dict[str, str]:
     Read at construction, so a replica keeps the values it started with until
     it is deployed again. Raises ValueError if the model was never
     registered."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    versions = client.search_model_versions(
-        f"name='{family}__{suffix}' and tags.run_name='{run_name}'"
-    )
-    if not versions:
+    version = _get_version(family, suffix, run_name)
+    if version is None:
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    return _config_from_tags(versions[0].tags)
+    return _config_from_tags(version.tags)
 
 
 def set_model_config(
@@ -582,37 +555,20 @@ def set_model_config(
     key left out of `config` is gone. Takes effect on its next `deploy_model`;
     a replica already running keeps the values it read at construction.
     Raises ValueError if the model was never registered."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}__{suffix}"
-    versions = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{run_name}'"
-    )
-    if not versions:
+    if not _set_tags(family, suffix, run_name, {_CONFIG_TAG: _config_to_tag(config)}):
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    client.set_model_version_tag(
-        name, versions[0].version, _CONFIG_TAG, _config_to_tag(config)
-    )
 
 
 def delete_model(family: str, suffix: str, run_name: str) -> None:
-    """Delete the ModelVersion in MLflow, its weights blob, and its serve bundle."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    name = f"{family}__{suffix}"
-    versions = client.search_model_versions(
-        f"name='{name}' and tags.run_name='{run_name}'"
-    )
-    for v in versions:
-        client.delete_model_version(name=v.name, version=v.version)
+    """Delete the registry entry, its weights blob, and its serve bundle."""
+    state.delete("models", family, suffix, run_name)
     s3_util.delete_prefix(f"models/{run_name}/{family}/{suffix}/")
     s3_util.delete_prefix(f"serve-bundles/{run_name}/{family}__{suffix}")
 
 
 def delete_models_for_run(run_id: str) -> None:
-    """Delete every ModelVersion produced by an MLflow run, plus its blobs and serve bundles."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    run = client.get_run(run_id)
-    run_name = run.info.run_name or run_id
-    for v in client.search_model_versions(f"run_id='{run_id}'"):
-        client.delete_model_version(name=v.name, version=v.version)
+    """Delete every registry entry produced by a run, plus its blobs and serve bundles."""
+    run_name = state.get("runs", run_id)["run_name"]
+    state.delete("models", params={"run_id": run_id})
     s3_util.delete_prefix(f"models/{run_name}/")
     s3_util.delete_prefix(f"serve-bundles/{run_name}/")

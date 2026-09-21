@@ -28,7 +28,7 @@ locals {
 # i.e. the Tailscale subnet router up + the advertised route auto-approved by
 # the tailnet ACL `autoApprovers` block (see terraform/platform/README.md).
 # The retry loop absorbs router boot + Tailscale propagation latency, so a
-# cold-start `make head-aws-apply` succeeds in a single pass.
+# cold-start `./cg add head --aws` succeeds in a single pass.
 resource "null_resource" "notes_database" {
   triggers = {
     rds_instance = aws_db_instance.main.id

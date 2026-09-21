@@ -4,10 +4,11 @@ The AWS analog of MinioCredentials + PostgresCredentials: terraform/platform
 provisions S3, RDS and the robolab-dgx IAM user, and this operator publishes
 their coordinates and credentials from `terraform output` to the head secrets
 store: S3_BUCKET_NAME, S3_ENDPOINT_URL, S3_REGION, S3_ACCESS_KEY_ID,
-S3_SECRET_ACCESS_KEY, MLFLOW_BACKEND_STORE_URI and NOTES_DB_URI.
+S3_SECRET_ACCESS_KEY, MLFLOW_BACKEND_STORE_URI, NOTES_DB_URI and
+CORTEXGRID_DB_URI.
 
 Needs terraform on the laptop, AWS credentials that can read the
-terraform/platform state, and the stack applied (`make head-aws-apply`).
+terraform/platform state, and the stack applied (`./cg add head --aws` does both).
 
 Required deps: (none).
 """
@@ -37,6 +38,7 @@ _OUTPUTS = {
     "S3_SECRET_ACCESS_KEY": "s3_secret_access_key",
     "MLFLOW_BACKEND_STORE_URI": "mlflow_backend_store_uri",
     "NOTES_DB_URI": "notes_db_uri",
+    "CORTEXGRID_DB_URI": "cortexgrid_db_uri",
 }
 
 
@@ -47,7 +49,7 @@ class TerraformOutputs(Operator):
         if missing:
             sys.exit(
                 f"Error: terraform/platform outputs missing: {', '.join(missing)}. "
-                f"Apply the stack first (make head-aws-apply)."
+                f"Apply the stack first (./cg add head --aws)."
             )
         log.info("Publishing terraform outputs to the head secrets store...")
         for secret_id, name in _OUTPUTS.items():

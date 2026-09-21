@@ -27,7 +27,7 @@ import cortexgrid
 cortexgrid.init(experiment="weather-forecast")
 ```
 
-That single call reads the service URLs from the head's secrets server at `$CORTEXGRID_HEAD_URL` and connects to all services through them. It also creates (or finds) the named MLflow experiment and starts a new run inside it. If an experiment of that name was deleted (e.g. from the UI), a new experiment is created under the name: MLflow keeps a deleted experiment's name reserved, so the deleted one is renamed to `<name>__deleted__<id>` first (`delete_experiment` does that rename at deletion). Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
+That single call reads the service URLs from the head's secrets server at `$CORTEXGRID_HEAD_URL` and connects to all services through them. It also creates (or finds) the named experiment and starts a new run inside it. Experiments and runs are cortexgrid's own records, kept by the jobs control plane; each maps onto an MLflow experiment and run, which exist so MLflow can display the run's metrics. MLflow never frees the name of a deleted experiment, so an experiment re-created under the name of a deleted one gets its MLflow experiment under `<name>__<8 hex>`. Omit `experiment=` to auto-generate a unique name like `funky-koval-12`.
 
 **One experiment per binary run.** `cortexgrid.init()` may only be called once per process. Every subsequent `cortexgrid.log_metric`, `cortexgrid.log_artifact`, checkpoint, and `cortexgrid.remote()` submission is scoped to that experiment+run. Remote jobs dispatched by the control plane inherit the experiment+run via the pickled payload, so their logging flows into the same MLflow run as the parent binary.
 
@@ -52,7 +52,7 @@ No run-scoping context manager — `init()` starts the run, and every subsequent
 
 #### Checkpointing and resuming
 
-Inside a cortexgrid job, `cortexgrid.checkpoint()` returns an attribute-based checkpoint object that persists to MLflow artifacts when its `with` block exits. On job restart (either manual retry or `retry=True`), `cortexgrid.resume()` returns the last checkpoint for the same job ID, or `None` if there isn't one.
+Inside a cortexgrid job, `cortexgrid.checkpoint()` returns an attribute-based checkpoint object that persists to S3, with its manifest recorded by the jobs control plane, when its `with` block exits. On job restart (either manual retry or `retry=True`), `cortexgrid.resume()` returns the last checkpoint for the same job ID, or `None` if there isn't one.
 
 ```python
 ckpt = cortexgrid.resume()
@@ -83,7 +83,7 @@ job = cortexgrid.remote(train_step, batch, num_gpus=1, retry=True)
 print(f"Submitted: {job.job_id}")
 ```
 
-`cortexgrid.remote` submits a job *request* (a pickled payload plus a `JobLifecycle` record) to MLflow and returns a `JobFuture` immediately. It does not wait for the job to run or finish — use the UI at `http://<DGX_IP>:8000`, `job.status()`, or poll `cortexgrid.list_experiment_run_jobs(run_id)`, to observe status.
+`cortexgrid.remote` submits a job *request* (a pickled payload plus a `JobLifecycle` record) to the jobs control plane and returns a `JobFuture` immediately. It does not wait for the job to run or finish — use the UI at `http://<DGX_IP>:8000`, `job.status()`, or poll `cortexgrid.list_experiment_run_jobs(run_id)`, to observe status.
 
 ##### Blocking on the result
 
@@ -135,7 +135,7 @@ The driver cloudpickles the outcome to `job/{job_id}/result.pkl`, beside the pay
 
 Waiting on a `retry=True` job raises `ValueError`: retries are unbounded by design (see below), so the wait would have no end. Fire-and-forget submission is the form training uses — submit, then watch the UI.
 
-A separate service — the **jobs control plane** — polls MLflow for pending job requests, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
+A separate service — the **jobs control plane** — keeps cortexgrid's records (experiments, runs, jobs, the model registry, deployments) in Postgres and serves them over HTTP. Its poll loop reads the jobs it still has to act on, matches them against the set of Ray submissions the cluster already has, and submits anything missing. It is also responsible for retrying failed jobs and honouring user-requested stops.
 
 Each submission captures the code and dependencies the entry function needs automatically ([_bundle.py](https://github.com/robodatalab/cortexgrid/blob/main/cortexgrid/_bundle.py)):
 - `bundle(entry)` traces the import graph from the function's source file, resolving each import the way the interpreter does (via `sys.path`). The standard library is excluded (it ships with the interpreter)
@@ -154,7 +154,7 @@ Pass `retry=True` and the control plane will resubmit the job whenever Ray repor
 cortexgrid.stop_experiment_run_jobs(run_id)   # stops every job in the run
 ```
 
-`stop_experiment_run_jobs` never touches Ray directly. It only flips `stop_requested` on each job's lifecycle record in MLflow. The control plane observes the flag on its next poll and calls `ray.stop_job` for any attempt that has reached Ray. For jobs that have not yet been submitted, the same flag short-circuits the submission path inside the worker.
+`stop_experiment_run_jobs` never touches Ray directly. It only flips `stop_requested` on each job's lifecycle record, which the control plane keeps. The control plane observes the flag on its next poll and calls `ray.stop_job` for any attempt that has reached Ray. For jobs that have not yet been submitted, the same flag short-circuits the submission path inside the worker.
 
 #### Object storage (S3/MinIO)
 
@@ -214,12 +214,12 @@ Anything else the serve-app has to know about the model - which model a provider
 
 | Function | Description |
 |----------|-------------|
-| `cortexgrid.init(experiment=None)` | Configure connections + start a new MLflow run inside the named experiment. One call per binary. |
+| `cortexgrid.init(experiment=None)` | Configure connections + start a new run inside the named experiment. One call per binary. |
 | `cortexgrid.log_metric(key, value, step)` | Log a metric |
 | `cortexgrid.log_metrics(metrics, step)` | Log multiple metrics |
 | `cortexgrid.log_params(params)` | Log parameters |
 | `cortexgrid.log_artifact(path, artifact_path)` | Log a file as an artifact |
-| `cortexgrid.checkpoint()` | Context manager returning an attribute-based checkpoint saved to MLflow on exit |
+| `cortexgrid.checkpoint()` | Context manager returning an attribute-based checkpoint saved on exit |
 | `cortexgrid.resume()` | Load the latest checkpoint for the current job, or `None` |
 | `cortexgrid.remote(fn, *args, num_gpus=0, num_cpus=1, retry=False, **kwargs)` | Submit a function to the jobs control plane; returns a `JobFuture` |
 | `JobFuture.status()` / `.done()` / `.result(timeout=None)` | Live status of a submitted job, and its function's return value (blocking) |
@@ -241,9 +241,10 @@ The DGX Spark runs the following services as k8s workloads managed by Argo CD (s
 | Service | Port | Purpose |
 |---------|------|---------|
 | Ray | 8265 | Dashboard + job submission (NodePort 30265) |
-| MLflow | 5000 | Experiment tracking, model registry |
+| Jobs control plane | 8000 | cortexgrid's records (experiments, runs, jobs, model registry, deployments); schedules jobs on Ray (NodePort 30700) |
+| MLflow | 5000 | Metrics and params of each run |
 | MinIO | 9000/9001 | S3-compatible artifact storage |
-| PostgreSQL | 5432 | MLflow metadata backend |
+| PostgreSQL | 5432 | `cortexgrid` database (the control plane's records), MLflow metadata, UI notes |
 | Prometheus | 9090 | Metrics collection |
 | Grafana | 3000 | Dashboards (GPU, jobs, system) |
 

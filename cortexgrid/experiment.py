@@ -1,16 +1,22 @@
+"""cortexgrid's experiments and runs.
+
+cortexgrid keeps its own record of each experiment and run with the jobs
+control plane. Each maps onto an MLflow experiment and run, which exist only
+so MLflow can display the run's metrics and params; the run id is MLflow's."""
+
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
-from pathlib import Path
 
-from cortexgrid import s3_util
+from cortexgrid import s3_util, state
 from cortexgrid.infra import get_mlflow_tracking_uri
-from cortexgrid.jobs import stop_experiment_run_jobs
+from cortexgrid.jobs import list_experiment_run_jobs, stop_experiment_run_jobs
 from cortexgrid.ray_util import list_ray_jobs_with_submission_id, stop_ray_job
 from cortexgrid.model_storage import delete_models_for_run
 from haikunator import Haikunator  # type: ignore
-from mlflow.entities import Experiment as MlflowExperiment
+from mlflow.exceptions import MlflowException
 from mlflow.tracking import MlflowClient
 
 
@@ -24,12 +30,11 @@ class Experiment:
     run_id: str
 
     def run_name(self) -> str:
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        return client.get_run(self.run_id).info.run_name or self.run_id
+        return state.get("runs", self.run_id)["run_name"]
 
     @classmethod
     def init(cls, name: str | None = None) -> "Experiment":
-        """Create a new MLflow experiment+run. Once per process."""
+        """Create a new run, in a new or existing experiment. Once per process."""
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
@@ -57,7 +62,7 @@ class Experiment:
 
     @classmethod
     def from_experiment(cls, experiment_name: str, run_id: str) -> "Experiment":
-        """Bind to an existing MLflow experiment+run. Once per process."""
+        """Bind to an existing experiment+run. Once per process."""
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
@@ -85,12 +90,7 @@ class Experiment:
 
     def get_jobs(self) -> list[str]:
         """Return cortexgrid job IDs submitted against this experiment+run."""
-        client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-        return [
-            Path(f.path).name
-            for f in client.list_artifacts(self.run_id, path="job")
-            if f.is_dir
-        ]
+        return [job.job_id for job in list_experiment_run_jobs(self.run_id)]
 
     @classmethod
     def get_instance(cls) -> "Experiment":
@@ -123,64 +123,59 @@ def _try_create_experiment_and_run(
         experiment = name_gen.haikunate(token_length=2, token_chars="0123456789")
 
     client = MlflowClient(tracking_uri=mlflow_tracking_uri)
-    # get_experiment_by_name also returns deleted experiments. A deleted one
-    # cannot take new runs, so a fresh experiment is created under its name.
-    experiment_obj = client.get_experiment_by_name(name=experiment)
-    if experiment_obj is not None and experiment_obj.lifecycle_stage != "active":
-        _release_deleted_experiment_name(client, experiment_obj)
-        experiment_obj = None
-    if experiment_obj:
-        experiment_id = experiment_obj.experiment_id
-    else:
-        experiment_id = client.create_experiment(name=experiment)
+    record = state.get("experiments", experiment)
+    if record is None:
+        # A concurrent init of the same new experiment may win the insert; the
+        # record returned is the winner's, and its MLflow experiment is used.
+        record = state.put(
+            "experiments",
+            experiment,
+            body={"mlflow_experiment_id": _create_mlflow_experiment(client, experiment)},
+        )
 
     run_name = name_gen.haikunate(token_length=2, token_chars="0123456789")
-    run = client.create_run(experiment_id=experiment_id, run_name=run_name)
-
+    run = client.create_run(
+        experiment_id=record["mlflow_experiment_id"], run_name=run_name
+    )
+    state.put(
+        "runs",
+        run.info.run_id,
+        body={"run_name": run_name, "experiment_name": experiment},
+    )
     return (experiment, run.info.run_id)
 
 
-def _deleted_experiment_name(name: str, experiment_id: str) -> str:
-    """The name a deleted experiment is moved to, freeing `name` for reuse.
-    Unique because experiment ids are."""
-    return f"{name}__deleted__{experiment_id}"
+def _create_mlflow_experiment(client: MlflowClient, name: str) -> str:
+    """Create the MLflow experiment an experiment's runs log their metrics to.
 
-
-def _release_deleted_experiment_name(
-    client: MlflowClient, experiment: MlflowExperiment
-) -> None:
-    """Move a deleted experiment off its name, so a new experiment can take it.
-
-    MLflow keeps a deleted experiment's name reserved (experiment names are
-    unique across every lifecycle stage) and refuses to rename a deleted
-    experiment, so it is restored only for the rename and deleted again."""
-    log.info(
-        "Experiment %r (id %s) is deleted; renaming it to release the name",
-        experiment.name,
-        experiment.experiment_id,
-    )
-    client.restore_experiment(experiment.experiment_id)
-    client.rename_experiment(
-        experiment.experiment_id,
-        _deleted_experiment_name(experiment.name, experiment.experiment_id),
-    )
-    client.delete_experiment(experiment.experiment_id)
+    MLflow reserves a name forever, deleted experiments included, so a name it
+    still holds from an earlier experiment gets a unique suffix. Nothing looks
+    an MLflow experiment up by name: cortexgrid's record keeps its id."""
+    try:
+        return client.create_experiment(name=name)
+    except MlflowException as exc:
+        if exc.error_code != "RESOURCE_ALREADY_EXISTS":
+            raise
+        return client.create_experiment(name=f"{name}__{uuid.uuid4().hex[:8]}")
 
 
 def delete_run(run_id: str) -> None:
-    """Soft-delete a run in MLflow, cancel its Ray attempts, and wipe its
-    S3 job packages so it cannot be relaunched or re-read.
+    """Delete a run: cancel its Ray attempts, wipe its S3 job packages and
+    models, soft-delete its MLflow run, and drop cortexgrid's record of it
+    (its jobs, results and checkpoints go with it).
 
     stop_experiment_run_jobs runs first so the control plane stops spawning
-    fresh Ray attempts for retry=True jobs before we tear the run down."""
+    fresh Ray attempts for retry=True jobs before we tear the run down.
+
+    Idempotent: a run cortexgrid has no record of is treated as success."""
     log.info("delete_run(%s): start", run_id)
+    if state.get("runs", run_id) is None:
+        log.info("delete_run(%s): early-exit, run not found", run_id)
+        return
     stop_experiment_run_jobs(run_id)
     log.info("delete_run(%s): stop_experiment_run_jobs done", run_id)
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    job_ids = [
-        Path(f.path).name for f in client.list_artifacts(run_id, path="job") if f.is_dir
-    ]
-    log.info("delete_run(%s): %d job artifact(s) to clean", run_id, len(job_ids))
+    job_ids = [job.job_id for job in list_experiment_run_jobs(run_id)]
+    log.info("delete_run(%s): %d job(s) to clean", run_id, len(job_ids))
     all_submissions = list_ray_jobs_with_submission_id()
     for job_id in job_ids:
         prefix = f"{run_id}-{job_id}-"
@@ -189,75 +184,55 @@ def delete_run(run_id: str) -> None:
                 stop_ray_job(sid)
         s3_util.delete_prefix(f"job/{job_id}/")
     delete_models_for_run(run_id)
-    client.delete_run(run_id)
+    MlflowClient(tracking_uri=get_mlflow_tracking_uri()).delete_run(run_id)
+    state.delete("runs", run_id)
     log.info("delete_run(%s): done", run_id)
 
 
 def list_run_ids_in_experiment(name: str) -> list[str]:
-    """Return the run IDs of every active run in the named experiment."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    exp = client.get_experiment_by_name(name)
-    if exp is None:
-        return []
+    """Return the run IDs of every run in the named experiment."""
     return [
-        r.info.run_id for r in client.search_runs(experiment_ids=[exp.experiment_id])
+        run["run_id"] for run in state.get("runs", params={"experiment_name": name})
     ]
 
 
 def delete_experiment(name: str) -> None:
-    """Soft-delete every run in the experiment, then the experiment itself.
+    """Delete every run in the experiment, then the experiment itself.
 
-    The experiment is renamed (`<name>__deleted__<id>`) before it is deleted:
-    MLflow keeps a deleted experiment's name reserved, and the rename frees it
-    so `Experiment.init(name)` can create a new experiment under it.
+    Its MLflow experiment is soft-deleted and keeps its name: MLflow never
+    frees one, so `Experiment.init(name)` gives a new experiment of the same
+    name an MLflow experiment under a suffixed name instead.
 
-    Idempotent: already-deleted experiments are treated as success."""
+    Idempotent: an experiment cortexgrid has no record of is treated as
+    success."""
     log.info("delete_experiment(%r): start", name)
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    exp = client.get_experiment_by_name(name)
-    if exp is None:
+    record = state.get("experiments", name)
+    if record is None:
         log.info("delete_experiment(%r): early-exit, experiment not found", name)
         return
-    if exp.lifecycle_stage != "active":
-        log.info(
-            "delete_experiment(%r): early-exit, lifecycle=%s", name, exp.lifecycle_stage
-        )
-        return
-    runs = list(client.search_runs(experiment_ids=[exp.experiment_id]))
-    log.info("delete_experiment(%r): %d active run(s) to delete", name, len(runs))
-    for run in runs:
-        delete_run(run.info.run_id)
-    client.rename_experiment(
-        exp.experiment_id, _deleted_experiment_name(name, exp.experiment_id)
-    )
-    client.delete_experiment(exp.experiment_id)
+    run_ids = list_run_ids_in_experiment(name)
+    log.info("delete_experiment(%r): %d run(s) to delete", name, len(run_ids))
+    for run_id in run_ids:
+        delete_run(run_id)
+    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
+    client.delete_experiment(record["mlflow_experiment_id"])
+    state.delete("experiments", name)
     log.info("delete_experiment(%r): done", name)
 
 
 def list_experiments() -> list[Experiment]:
-    """Map MLflow experiment names to their run IDs."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    result: list[Experiment] = []
-    for exp in client.search_experiments():
-        runs = client.search_runs(experiment_ids=[exp.experiment_id])
-        for run in runs:
-            result.append(Experiment(exp.name, run_id=run.info.run_id))
-    return result
+    """Every run cortexgrid knows of, as (experiment_name, run_id) pairs."""
+    return [
+        Experiment(run["experiment_name"], run_id=run["run_id"])
+        for run in state.get("runs")
+    ]
 
 
 def get_experiment_by_run_name(run_name: str) -> Experiment:
     """Resolve a run by its haikunator name back to its (experiment_name, run_id) pair."""
-    client = MlflowClient(tracking_uri=get_mlflow_tracking_uri())
-    experiment_ids = [e.experiment_id for e in client.search_experiments()]
-    if not experiment_ids:
-        raise ValueError(f"No run named {run_name!r}")
-    runs = client.search_runs(
-        experiment_ids=experiment_ids,
-        filter_string=f"attributes.run_name = '{run_name}'",
-        max_results=1,
-    )
+    runs = state.get("runs", params={"run_name": run_name})
     if not runs:
         raise ValueError(f"No run named {run_name!r}")
-    run = runs[0]
-    exp = client.get_experiment(run.info.experiment_id)
-    return Experiment(experiment_name=exp.name, run_id=run.info.run_id)
+    return Experiment(
+        experiment_name=runs[0]["experiment_name"], run_id=runs[0]["run_id"]
+    )

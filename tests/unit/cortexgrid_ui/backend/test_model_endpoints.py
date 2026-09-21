@@ -15,35 +15,14 @@ from cortexgrid_ui.backend.models.infra_status import PodStatus
 from cortexgrid_ui.backend.streams import models_stream
 from cortexgrid_ui.backend.streams.models_stream import Model
 
-from tests.fakes import (
-    FakeMlflowClient,
-    FakeMlflowExperiment,
-    FakeMlflowModelVersion,
-    FakeMlflowRun,
-    FakeS3,
-)
+from tests.fakes import FakeS3, FakeState
 
 
-def _patched_infra(s3: FakeS3, mlflow: FakeMlflowClient) -> ExitStack:
+def _patched_infra(s3: FakeS3) -> ExitStack:
     stack = ExitStack()
     stack.enter_context(patch("cortexgrid.s3_util.get_s3_client", return_value=s3))
     stack.enter_context(
         patch("cortexgrid.s3_util.get_s3_bucket", return_value="test-bucket")
-    )
-    stack.enter_context(
-        patch("cortexgrid.model_storage.MlflowClient", return_value=mlflow)
-    )
-    stack.enter_context(
-        patch("cortexgrid.model_storage.get_mlflow_tracking_uri", return_value="")
-    )
-    stack.enter_context(
-        patch("cortexgrid.model_storage.get_s3_bucket", return_value="test-bucket")
-    )
-    stack.enter_context(
-        patch("cortexgrid.experiment.MlflowClient", return_value=mlflow)
-    )
-    stack.enter_context(
-        patch("cortexgrid.experiment.get_mlflow_tracking_uri", return_value="")
     )
     return stack
 
@@ -68,18 +47,13 @@ def _make_model(
     )
 
 
-def _make_version(family: str, suffix: str, run_name: str) -> FakeMlflowModelVersion:
-    return FakeMlflowModelVersion(
-        name=f"{family}__{suffix}",
-        version="1",
+def _register(state: FakeState, family: str, suffix: str, run_name: str) -> None:
+    state.seed_model(
+        family,
+        suffix,
+        run_name,
         source=f"s3://test-bucket/models/{run_name}/{family}/{suffix}/weights/",
-        run_id=f"run-{run_name}",
-        tags={
-            "family": family,
-            "suffix": suffix,
-            "run_name": run_name,
-            "size_bytes": "100",
-        },
+        tags={"size_bytes": "100"},
     )
 
 
@@ -97,22 +71,21 @@ def _reset_models_stream() -> None:
 class TestDeleteModelEndpoint(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.state = FakeState().install(self)
         _reset_models_stream()
         self.addCleanup(_reset_models_stream)
 
-    def test_delete_single_version_removes_from_mlflow_and_cache(self) -> None:
+    def test_delete_single_version_removes_from_registry_and_cache(self) -> None:
         s3 = FakeS3()
         s3.objects["models/boogey-46/Qwen2/instruct/weights/x"] = b"a"
-        mlflow = FakeMlflowClient().seed(
-            model_versions=[_make_version("Qwen2", "instruct", "boogey-46")]
-        )
+        _register(self.state, "Qwen2", "instruct", "boogey-46")
         _seed_models_cache([_make_model("Qwen2", "instruct", "boogey-46")])
 
-        with _patched_infra(s3, mlflow):
+        with _patched_infra(s3):
             response = self.client.delete("/api/models/Qwen2/instruct/boogey-46")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(mlflow.model_versions, [])
+        self.assertEqual(self.state.models, {})
         self.assertEqual(
             [k for k in s3.objects if k.startswith("models/boogey-46/")], []
         )
@@ -123,12 +96,8 @@ class TestDeleteModelEndpoint(unittest.TestCase):
 
     def test_delete_single_version_does_not_affect_other_versions(self) -> None:
         s3 = FakeS3()
-        mlflow = FakeMlflowClient().seed(
-            model_versions=[
-                _make_version("Qwen2", "instruct", "boogey-46"),
-                _make_version("DeepSeek3", "chat", "rocky-99"),
-            ]
-        )
+        _register(self.state, "Qwen2", "instruct", "boogey-46")
+        _register(self.state, "DeepSeek3", "chat", "rocky-99")
         _seed_models_cache(
             [
                 _make_model("Qwen2", "instruct", "boogey-46"),
@@ -136,21 +105,16 @@ class TestDeleteModelEndpoint(unittest.TestCase):
             ]
         )
 
-        with _patched_infra(s3, mlflow):
+        with _patched_infra(s3):
             self.client.delete("/api/models/Qwen2/instruct/boogey-46")
 
-        remaining = [v.tags["family"] for v in mlflow.model_versions]
-        self.assertEqual(remaining, ["DeepSeek3"])
+        self.assertEqual(list(self.state.models), [("DeepSeek3", "chat", "rocky-99")])
 
     def test_delete_family_removes_every_version_in_family(self) -> None:
         s3 = FakeS3()
-        mlflow = FakeMlflowClient().seed(
-            model_versions=[
-                _make_version("Qwen2", "instruct", "boogey-46"),
-                _make_version("Qwen2", "chat", "rocky-99"),
-                _make_version("DeepSeek3", "chat", "snake-12"),
-            ]
-        )
+        _register(self.state, "Qwen2", "instruct", "boogey-46")
+        _register(self.state, "Qwen2", "chat", "rocky-99")
+        _register(self.state, "DeepSeek3", "chat", "snake-12")
         _seed_models_cache(
             [
                 _make_model("Qwen2", "instruct", "boogey-46"),
@@ -159,11 +123,11 @@ class TestDeleteModelEndpoint(unittest.TestCase):
             ]
         )
 
-        with _patched_infra(s3, mlflow):
+        with _patched_infra(s3):
             response = self.client.delete("/api/models/Qwen2")
 
         self.assertEqual(response.status_code, 200)
-        remaining_families = sorted(v.tags["family"] for v in mlflow.model_versions)
+        remaining_families = sorted(family for family, _, _ in self.state.models)
         self.assertEqual(remaining_families, ["DeepSeek3"])
         cache_after = models_stream.models_cache.get(models_stream.META_TOPIC)
         self.assertNotIn("Qwen2/instruct/boogey-46", cache_after)
@@ -175,22 +139,23 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         self.client = TestClient(app)
         _reset_models_stream()
         self.addCleanup(_reset_models_stream)
-        self.mlflow = FakeMlflowClient().seed(
-            model_versions=[_make_version("Qwen2", "instruct", "boogey-46")]
-        )
+        self.state = FakeState().install(self)
+        _register(self.state, "Qwen2", "instruct", "boogey-46")
+
+    def _tags(self) -> dict[str, str]:
+        return self.state.models[("Qwen2", "instruct", "boogey-46")]["tags"]
 
     def _put(self, body: dict[str, float], path: str = "") -> Any:
-        with _patched_infra(FakeS3(), self.mlflow):
-            return self.client.put(
-                path or "/api/models/Qwen2/instruct/boogey-46/requirements",
-                json=body,
-            )
+        return self.client.put(
+            path or "/api/models/Qwen2/instruct/boogey-46/requirements",
+            json=body,
+        )
 
     def test_stores_the_requirements_on_the_model(self) -> None:
         response = self._put({"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0})
 
         self.assertEqual(response.status_code, 200)
-        tags = self.mlflow.model_versions[0].tags
+        tags = self._tags()
         self.assertEqual(
             (tags["num_gpus"], tags["ram_gb"], tags["vram_gb"]),
             ("1.0", "16.0", "24.0"),
@@ -201,7 +166,7 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         response = self._put({"num_gpus": 0.25, "ram_gb": 4.0, "vram_gb": 6.0})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.mlflow.model_versions[0].tags["num_gpus"], "0.25")
+        self.assertEqual(self._tags()["num_gpus"], "0.25")
 
     def test_pushes_the_edit_into_the_models_stream(self) -> None:
         _seed_models_cache([_make_model("Qwen2", "instruct", "boogey-46")])
@@ -218,7 +183,7 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         response = self._put({"num_gpus": 0, "ram_gb": 0.0, "vram_gb": 24.0})
 
         self.assertEqual(response.status_code, 400)
-        self.assertNotIn("vram_gb", self.mlflow.model_versions[0].tags)
+        self.assertNotIn("vram_gb", self._tags())
 
     def test_returns_404_for_a_model_that_is_not_registered(self) -> None:
         response = self._put(
@@ -234,23 +199,24 @@ class TestModelConfigEndpoint(unittest.TestCase):
         self.client = TestClient(app)
         _reset_models_stream()
         self.addCleanup(_reset_models_stream)
-        self.mlflow = FakeMlflowClient().seed(
-            model_versions=[_make_version("Qwen2", "instruct", "boogey-46")]
-        )
+        self.state = FakeState().install(self)
+        _register(self.state, "Qwen2", "instruct", "boogey-46")
+
+    def _tags(self) -> dict[str, str]:
+        return self.state.models[("Qwen2", "instruct", "boogey-46")]["tags"]
 
     def _put(self, config: dict[str, str], path: str = "") -> Any:
-        with _patched_infra(FakeS3(), self.mlflow):
-            return self.client.put(
-                path or "/api/models/Qwen2/instruct/boogey-46/config",
-                json={"config": config},
-            )
+        return self.client.put(
+            path or "/api/models/Qwen2/instruct/boogey-46/config",
+            json={"config": config},
+        )
 
     def test_stores_the_config_on_the_model(self) -> None:
         response = self._put({"model": "claude-opus-5"})
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            json.loads(self.mlflow.model_versions[0].tags["config"]),
+            json.loads(self._tags()["config"]),
             {"model": "claude-opus-5"},
         )
 
@@ -270,7 +236,7 @@ class TestModelConfigEndpoint(unittest.TestCase):
         self._put({"model": "claude-opus-5"})
 
         self.assertEqual(
-            json.loads(self.mlflow.model_versions[0].tags["config"]),
+            json.loads(self._tags()["config"]),
             {"model": "claude-opus-5"},
         )
 
@@ -278,7 +244,7 @@ class TestModelConfigEndpoint(unittest.TestCase):
         response = self._put({" ": "x"})
 
         self.assertEqual(response.status_code, 400)
-        self.assertNotIn("config", self.mlflow.model_versions[0].tags)
+        self.assertNotIn("config", self._tags())
 
     def test_returns_404_for_a_model_that_is_not_registered(self) -> None:
         response = self._put(
@@ -292,22 +258,13 @@ class TestModelConfigEndpoint(unittest.TestCase):
 class TestRunByNameEndpoint(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.state = FakeState().install(self)
+        self.state.seed_experiment("alpha")
 
     def test_returns_matching_experiment_and_run_id(self) -> None:
-        mlflow = FakeMlflowClient().seed(
-            experiments=[
-                FakeMlflowExperiment(experiment_id="e1", name="alpha"),
-                FakeMlflowExperiment(experiment_id="e2", name="beta"),
-            ],
-            runs=[
-                FakeMlflowRun(
-                    run_id="run-7", run_name="boogey-46", experiment_id="e2"
-                ),
-            ],
-        )
+        self.state.seed_run("run-7", "boogey-46", experiment_name="beta")
 
-        with _patched_infra(FakeS3(), mlflow):
-            response = self.client.get("/api/runs/by-name/boogey-46")
+        response = self.client.get("/api/runs/by-name/boogey-46")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -320,13 +277,9 @@ class TestRunByNameEndpoint(unittest.TestCase):
         )
 
     def test_returns_404_when_no_run_with_that_name(self) -> None:
-        mlflow = FakeMlflowClient().seed(
-            experiments=[FakeMlflowExperiment(experiment_id="e1", name="alpha")],
-            runs=[],
-        )
+        self.state.seed_run("run-7", "boogey-46", experiment_name="alpha")
 
-        with _patched_infra(FakeS3(), mlflow):
-            response = self.client.get("/api/runs/by-name/missing-run")
+        response = self.client.get("/api/runs/by-name/missing-run")
 
         self.assertEqual(response.status_code, 404)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import tarfile
@@ -7,7 +8,6 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import cloudpickle  # type: ignore
@@ -25,9 +25,11 @@ from cortexgrid.jobs import (
     LifecycleEvent,
     Payload,
     list_experiment_run_jobs,
+    list_open_jobs,
     stop_experiment_run_jobs,
     wait_for_job_result,
 )
+from tests.fakes import FakeState
 
 
 EXPERIMENT_NAME = "exp"
@@ -53,38 +55,6 @@ def _make_experiment() -> Experiment:
     return Experiment(experiment_name=EXPERIMENT_NAME, run_id=RUN_ID)
 
 
-class FakeMLflow:
-    """Fake MlflowClient backed by a real temp directory."""
-
-    def __init__(self) -> None:
-        self.root = Path(tempfile.mkdtemp())
-
-    def log_artifact(
-        self, run_id: str, local_path: str, artifact_path: str = ""
-    ) -> None:
-        dest = self.root / artifact_path
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_path, dest / Path(local_path).name)
-
-    def log_artifacts(
-        self, run_id: str, local_dir: str, artifact_path: str = ""
-    ) -> None:
-        dest = self.root / artifact_path
-        shutil.copytree(local_dir, str(dest), dirs_exist_ok=True)
-
-    def download_artifacts(self, run_id: str, path: str) -> str:
-        return str(self.root / path)
-
-    def list_artifacts(self, run_id: str, path: str = "") -> list:
-        target = self.root / path
-        if not target.exists():
-            return []
-        return [
-            SimpleNamespace(path=f"{path}/{d.name}", is_dir=d.is_dir())
-            for d in target.iterdir()
-        ]
-
-
 class FakeS3:
     """Fake s3_util backed by a temp directory."""
 
@@ -106,9 +76,9 @@ class FakeS3:
         return local_path
 
 
-def _extract_uploaded_project(fake_mlflow: FakeMLflow, fake_s3: FakeS3, job_id: str) -> Path:
-    """Read the job's manifest from FakeMLflow, extract its tarball from FakeS3."""
-    manifest = json.loads((fake_mlflow.root / "job" / job_id / "manifest.json").read_text())
+def _extract_uploaded_project(fake_state: FakeState, fake_s3: FakeS3, job_id: str) -> Path:
+    """Read the job's manifest from FakeState, extract its tarball from FakeS3."""
+    manifest = fake_state.manifests[(RUN_ID, job_id)]
     bucket, _, key = manifest["code_tarball_uri"].removeprefix("s3://").partition("/")
     extract_dir = Path(tempfile.mkdtemp())
     with tarfile.open(fake_s3.root / bucket / key, "r:gz") as tar:
@@ -119,15 +89,11 @@ def _extract_uploaded_project(fake_mlflow: FakeMLflow, fake_s3: FakeS3, job_id: 
 class TestRemote(unittest.TestCase):
     def setUp(self) -> None:
         clear_instance()
-        self.fake_mlflow = FakeMLflow()
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
         self.fake_s3 = FakeS3()
 
         patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
             patch("cortexgrid.jobs.s3_util", self.fake_s3),
             # Bundling is exercised in test_bundle; pin it here so the job path
             # is tested in isolation, without tracing all of torch/mlflow.
@@ -159,18 +125,16 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None).job_id
 
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        project_root = _extract_uploaded_project(self.fake_state, self.fake_s3, job_id)
         self.assertTrue((project_root / "payload.pkl").exists())
-        self.assertTrue(
-            (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").exists()
-        )
+        self.assertIn((RUN_ID, job_id), self.fake_state.jobs)
 
     def test_remote_uploads_project_code(self) -> None:
         set_instance(_make_experiment())
 
         job_id = cortexgrid.remote(lambda: None).job_id
 
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        project_root = _extract_uploaded_project(self.fake_state, self.fake_s3, job_id)
         self.assertTrue(
             (project_root / "tests" / "unit" / "cortexgrid" / "test_jobs.py").is_file()
         )
@@ -191,7 +155,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None).job_id
 
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        project_root = _extract_uploaded_project(self.fake_state, self.fake_s3, job_id)
         self.assertFalse((project_root / "requirements.txt").exists())
 
     def test_initial_lifecycle_is_pending(self) -> None:
@@ -199,8 +163,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None).job_id
 
-        raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
-        lifecycle = JobLifecycle.from_json(raw)
+        lifecycle = JobLifecycle.from_dict(self.fake_state.jobs[(RUN_ID, job_id)])
         self.assertFalse(lifecycle.stop_requested)
         self.assertEqual(lifecycle.history, [])
         self.assertFalse(lifecycle.retry)
@@ -210,8 +173,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None, retry=True).job_id
 
-        raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
-        lifecycle = JobLifecycle.from_json(raw)
+        lifecycle = JobLifecycle.from_dict(self.fake_state.jobs[(RUN_ID, job_id)])
         self.assertTrue(lifecycle.retry)
 
     def test_lifecycle_carries_pip_requirements_the_worker_lacks(self) -> None:
@@ -226,8 +188,8 @@ class TestRemote(unittest.TestCase):
         ):
             job_id = cortexgrid.remote(lambda: None).job_id
 
-        raw = (self.fake_mlflow.root / "job" / job_id / "lifecycle.json").read_text()
-        self.assertEqual(JobLifecycle.from_json(raw).pip_requirements, ["tqdm==4.67.3"])
+        lifecycle = JobLifecycle.from_dict(self.fake_state.jobs[(RUN_ID, job_id)])
+        self.assertEqual(lifecycle.pip_requirements, ["tqdm==4.67.3"])
 
     def test_lifecycle_saved_without_pip_requirements_loads_with_none(self) -> None:
         # Lifecycles written before pip requirements existed lack the field.
@@ -240,7 +202,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None).job_id
 
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        project_root = _extract_uploaded_project(self.fake_state, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
         self.assertIsNotNone(payload.fn)
         self.assertEqual(payload.experiment_name, EXPERIMENT_NAME)
@@ -251,7 +213,7 @@ class TestRemote(unittest.TestCase):
 
         job_id = cortexgrid.remote(lambda: None, num_gpus=2, num_cpus=4).job_id
 
-        project_root = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, job_id)
+        project_root = _extract_uploaded_project(self.fake_state, self.fake_s3, job_id)
         payload: Payload = cloudpickle.loads((project_root / "payload.pkl").read_bytes())
         self.assertEqual(payload.num_gpus, 2)
         self.assertEqual(payload.num_cpus, 4)
@@ -259,7 +221,8 @@ class TestRemote(unittest.TestCase):
 
 class TestPayloadSaveLoad(unittest.TestCase):
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
         self.fake_s3 = FakeS3()
         self.project_dir = Path(tempfile.mkdtemp())
         (self.project_dir / "pyproject.toml").write_text("[project]\nname='test'\n")
@@ -267,17 +230,9 @@ class TestPayloadSaveLoad(unittest.TestCase):
         (self.project_dir / "data").mkdir()
         (self.project_dir / "data" / "config.yaml").write_text("lr: 0.001")
 
-        patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-            patch("cortexgrid.jobs.s3_util", self.fake_s3),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        patcher = patch("cortexgrid.jobs.s3_util", self.fake_s3)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.addCleanup(shutil.rmtree, str(self.project_dir), True)
 
     def _make_payload(self, job_id: str = "job-1") -> Payload:
@@ -296,7 +251,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
+        project = _extract_uploaded_project(self.fake_state, self.fake_s3, "job-1")
         self.assertTrue((project / "payload.pkl").exists())
 
     def test_save_creates_project_code_root_dir(self) -> None:
@@ -304,7 +259,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
+        project = _extract_uploaded_project(self.fake_state, self.fake_s3, "job-1")
         self.assertTrue(project.is_dir())
 
     def test_save_copies_project_files(self) -> None:
@@ -312,7 +267,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
+        project = _extract_uploaded_project(self.fake_state, self.fake_s3, "job-1")
         self.assertTrue((project / "pyproject.toml").exists())
         self.assertTrue((project / "train.py").exists())
         self.assertTrue((project / "data" / "config.yaml").exists())
@@ -322,7 +277,7 @@ class TestPayloadSaveLoad(unittest.TestCase):
 
         payload.save_to_mlflow()
 
-        project = _extract_uploaded_project(self.fake_mlflow, self.fake_s3, "job-1")
+        project = _extract_uploaded_project(self.fake_state, self.fake_s3, "job-1")
         self.assertEqual((project / "train.py").read_text(), "import torch")
         self.assertEqual((project / "data" / "config.yaml").read_text(), "lr: 0.001")
 
@@ -407,17 +362,8 @@ class TestGetJobStatus(unittest.TestCase):
 
 class TestListExperimentRunJobs(unittest.TestCase):
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
-        patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
 
     def test_list_experiment_run_jobs_returns_all_jobs(self) -> None:
         for job_id in ("j1", "j2"):
@@ -437,14 +383,16 @@ class TestListExperimentRunJobs(unittest.TestCase):
             run_id=RUN_ID,
             job_id="j1",
         ).save_to_mlflow()
-        # create a job dir without a lifecycle.json
-        (self.fake_mlflow.root / "job" / "j2").mkdir(parents=True, exist_ok=True)
+        # a job whose payload is recorded but whose lifecycle is not, yet
+        self.fake_state.manifests[(RUN_ID, "j2")] = {
+            "code_tarball_uri": "s3://canonical/job/j2/project_code_root.tar.gz"
+        }
 
         result = list_experiment_run_jobs(RUN_ID)
 
         self.assertEqual([j.job_id for j in result], ["j1"])
 
-    def test_event_error_round_trips_through_mlflow(self) -> None:
+    def test_event_error_round_trips_through_save_and_load(self) -> None:
         """An event with an error message survives save+load."""
         saved = JobLifecycle(
             experiment_name=EXPERIMENT_NAME,
@@ -514,17 +462,8 @@ class TestStopExperimentRunJobs(unittest.TestCase):
     """stop_experiment_run_jobs is a pure latch-flipper: it never calls Ray."""
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
-        patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
 
     def _save_job(
         self,
@@ -558,16 +497,14 @@ class TestStopExperimentRunJobs(unittest.TestCase):
 
     def test_does_not_rewrite_already_requested_job(self) -> None:
         self._save_job("j3", stop_requested=True)
-        # Capture the original mtime-equivalent by snapshotting the file.
-        original = (self.fake_mlflow.root / "job" / "j3" / "lifecycle.json").read_text()
+        original = copy.deepcopy(self.fake_state.jobs[(RUN_ID, "j3")])
 
         stop_experiment_run_jobs(RUN_ID)
 
         loaded = self._loaded("j3")
         self.assertTrue(loaded.stop_requested)
-        # File content unchanged — we short-circuited before save_to_mlflow.
-        after = (self.fake_mlflow.root / "job" / "j3" / "lifecycle.json").read_text()
-        self.assertEqual(original, after)
+        # Record unchanged — the latch was already set.
+        self.assertEqual(self.fake_state.jobs[(RUN_ID, "j3")], original)
 
     def test_mixed_jobs_all_get_flipped_except_already_requested(self) -> None:
         self._save_job("pending")
@@ -580,9 +517,80 @@ class TestStopExperimentRunJobs(unittest.TestCase):
         self.assertTrue(self._loaded("running").stop_requested)
         self.assertTrue(self._loaded("requested").stop_requested)
 
+    def test_latch_survives_a_later_save_that_missed_the_stop(self) -> None:
+        # The control plane records a new history on a lifecycle it loaded
+        # before the stop was requested; the stop must not be lost.
+        lifecycle = JobLifecycle(
+            experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="j1"
+        )
+        lifecycle.save_to_mlflow()
+        stop_experiment_run_jobs(RUN_ID)
+        lifecycle.history.append(
+            LifecycleEvent(
+                attempt=0, state="running", start="2026-04-15T10:00:00+00:00"
+            )
+        )
 
-if __name__ == "__main__":
-    unittest.main()
+        lifecycle.save_to_mlflow()
+
+        loaded = self._loaded("j1")
+        self.assertTrue(loaded.stop_requested)
+        self.assertEqual([e.state for e in loaded.history], ["running"])
+
+
+class TestListOpenJobs(unittest.TestCase):
+    """The jobs the control plane still has to act on, across every run."""
+
+    def setUp(self) -> None:
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
+        self.fake_state.seed_run("run-2", experiment_name=EXPERIMENT_NAME)
+
+    def _save_job(
+        self,
+        job_id: str,
+        *states: str,
+        retry: bool = False,
+        run_id: str = RUN_ID,
+    ) -> None:
+        JobLifecycle(
+            experiment_name=EXPERIMENT_NAME,
+            run_id=run_id,
+            job_id=job_id,
+            retry=retry,
+            history=[
+                LifecycleEvent(
+                    attempt=0, state=state, start="2026-04-15T10:00:00+00:00"
+                )
+                for state in states
+            ],
+        ).save_to_mlflow()
+
+    def test_leaves_out_jobs_that_are_done_for_good(self) -> None:
+        self._save_job("unsubmitted")
+        self._save_job("running", "pending", "running")
+        self._save_job("failed-will-retry", "running", "failed", retry=True)
+        self._save_job("finished", "running", "finished")
+        self._save_job("stopped", "running", "stopped")
+        self._save_job("failed", "running", "failed")
+
+        result = list_open_jobs()
+
+        self.assertEqual(
+            sorted(j.job_id for j in result),
+            ["failed-will-retry", "running", "unsubmitted"],
+        )
+
+    def test_spans_every_run(self) -> None:
+        self._save_job("j1", "running")
+        self._save_job("j2", "running", run_id="run-2")
+
+        result = list_open_jobs()
+
+        self.assertEqual(
+            sorted((j.run_id, j.job_id) for j in result),
+            [(RUN_ID, "j1"), ("run-2", "j2")],
+        )
 
 
 def _payload(job_id: str = "job-1") -> Payload:
@@ -606,19 +614,10 @@ class TestJobResult(unittest.TestCase):
     turns that back into a value or an exception."""
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
-        patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
 
-    def test_value_round_trips_through_mlflow(self) -> None:
+    def test_value_round_trips(self) -> None:
         JobResult.from_value(_payload(), {"loss": 0.5}).save_to_mlflow()
 
         loaded = JobResult.load_from_mlflow(RUN_ID, "job-1")
@@ -628,9 +627,7 @@ class TestJobResult(unittest.TestCase):
     def test_result_lands_beside_the_payload(self) -> None:
         JobResult.from_value(_payload(), 1).save_to_mlflow()
 
-        self.assertTrue(
-            (self.fake_mlflow.root / "job" / "job-1" / "result.pkl").exists()
-        )
+        self.assertIn((RUN_ID, "job-1"), self.fake_state.results)
 
     def test_none_return_value_round_trips(self) -> None:
         JobResult.from_value(_payload(), None).save_to_mlflow()
@@ -700,13 +697,9 @@ class TestWaitForJobResult(unittest.TestCase):
     hands back whatever the driver recorded."""
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
         patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
             patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[]),
             patch("cortexgrid.jobs.time.sleep"),
         ]
@@ -821,18 +814,13 @@ class TestJobFuture(unittest.TestCase):
     """The handle `remote` returns: identity now, status and result on demand."""
 
     def setUp(self) -> None:
-        self.fake_mlflow = FakeMLflow()
-        patchers = [
-            patch("cortexgrid.jobs.MlflowClient", return_value=self.fake_mlflow),
-            patch(
-                "cortexgrid.jobs.get_mlflow_tracking_uri",
-                return_value="http://test:5000",
-            ),
-            patch("cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[]),
-        ]
-        for p in patchers:
-            p.start()
-            self.addCleanup(p.stop)
+        self.fake_state = FakeState().install(self)
+        self.fake_state.seed_run(RUN_ID, experiment_name=EXPERIMENT_NAME)
+        patcher = patch(
+            "cortexgrid.ray_util.list_ray_jobs_with_submission_id", return_value=[]
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
         JobLifecycle(
             experiment_name=EXPERIMENT_NAME, run_id=RUN_ID, job_id="job-1"
         ).save_to_mlflow()
@@ -867,3 +855,7 @@ class TestJobFuture(unittest.TestCase):
             "cortexgrid.jobs.get_ray_job_status", return_value=JobStatus.FINISHED
         ):
             self.assertEqual(self.future.result(), "done")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jobs-control-plane
+  labels:
+    {{- include "cortexgrid.labels" . | nindent 4 }}
+    app: jobs-control-plane
+spec:
+  # NodePort so laptops on the tailnet reach the state API at the same URL as
+  # pods do (JOBS_CONTROL_PLANE_URI, published by the seed's ControlPlaneDetails).
+  type: NodePort
+  selector:
+    app: jobs-control-plane
+  ports:
+    - name: http
+      port: {{ .Values.services.jobsControlPlane.port }}
+      targetPort: {{ .Values.services.jobsControlPlane.port }}
+      nodePort: {{ .Values.services.jobsControlPlane.nodePort }}

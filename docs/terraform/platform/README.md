@@ -25,7 +25,7 @@ k3s; an EKS cluster may slot in later, in the same VPC.
 
 ## Bootstrap
 
-`make head-aws-apply` is single-pass. The notes-database provisioner has a
+`./cg add head --aws` applies the stack in a single pass. The notes-database provisioner has a
 10-minute retry loop that absorbs router boot + Tailscale route propagation,
 so cold-start and incremental applies behave the same.
 

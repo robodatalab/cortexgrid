@@ -1,8 +1,8 @@
 """Deployments stream.
 
-Single pinned topic: every Ray Serve application whose name matches the
-cortexgrid `<family>__<suffix>__<run_name>` scheme, surfaced as the
-existing `cortexgrid.model_serving.Deployment` dataclass. Items are
+Single pinned topic: every model `deploy_model` put on Ray Serve, from its
+deployment record, surfaced as the existing
+`cortexgrid.model_serving.Deployment` dataclass. Items are
 keyed by `<family>/<suffix>/<run_name>` so the UI can join them against
 `models_stream` by the same id.
 """
