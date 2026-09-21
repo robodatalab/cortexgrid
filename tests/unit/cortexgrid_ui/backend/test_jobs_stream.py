@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from cortexgrid.experiment import Experiment
 from cortexgrid.jobs import JobLifecycle
+from cortexgrid.model_serving import Deployment
 
 from cortexgrid_ui.backend.streams import jobs_stream
 
@@ -24,22 +25,43 @@ def _job(run_id: str, job_id: str, experiment_name: str = "alpha") -> JobLifecyc
     )
 
 
+def _deployment(
+    family: str, suffix: str, run_name: str, phase: str
+) -> Deployment:
+    return Deployment(
+        family=family,
+        suffix=suffix,
+        run_name=run_name,
+        url=f"http://serve/r/{family}/{suffix}/{run_name}",
+        phase=phase,
+    )
+
+
 @contextmanager
 def _cluster(
     experiments: list[Experiment],
     jobs_by_run: dict[str, list[JobLifecycle]] | Exception,
     ray_submission_ids: list[str],
     ray_statuses: dict[str, str] | None = None,
+    deployments: list[Deployment] | Exception | None = None,
 ) -> Iterator[None]:
-    """Stand in for the three sources the stream reads."""
+    """Stand in for the four sources the stream reads."""
 
     def list_jobs(run_id: str) -> list[JobLifecycle]:
         if isinstance(jobs_by_run, Exception):
             raise jobs_by_run
         return jobs_by_run.get(run_id, [])
 
+    def list_deployments() -> list[Deployment]:
+        if isinstance(deployments, Exception):
+            raise deployments
+        return deployments or []
+
     statuses = ray_statuses or {}
     with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(jobs_stream, "list_deployed_models", list_deployments)
+        )
         stack.enter_context(
             patch.object(jobs_stream, "list_experiments", return_value=experiments)
         )
@@ -75,6 +97,7 @@ class TestPollJobs(unittest.TestCase):
 
         self.assertEqual(list(rows), ["run-1/j1"])
         row = rows["run-1/j1"]
+        self.assertEqual(row.kind, "job")
         self.assertEqual(row.job_id, "j1")
         self.assertEqual(row.experiment_name, "alpha")
         self.assertEqual(row.run_id, "run-1")
@@ -191,6 +214,53 @@ class TestPollJobs(unittest.TestCase):
                 rows = jobs_stream.poll_jobs(None)
 
         self.assertEqual(list(rows), ["run-2/j3"])
+
+
+class TestPollDeployments(unittest.TestCase):
+    def test_a_row_per_deployment_listed_with_the_jobs(self) -> None:
+        with _cluster(
+            experiments=[_experiment("alpha", "run-1", "alpha-run")],
+            jobs_by_run={"run-1": [_job("run-1", "j1")]},
+            ray_submission_ids=[],
+            deployments=[_deployment("FLUX.2-klein", "4B", "imported", "deploying")],
+        ):
+            rows = jobs_stream.poll_jobs(None)
+
+        self.assertEqual(
+            sorted(rows), ["deployment/FLUX.2-klein/4B/imported", "run-1/j1"]
+        )
+        row = rows["deployment/FLUX.2-klein/4B/imported"]
+        self.assertEqual(row.kind, "deployment")
+        self.assertEqual(row.job_id, "FLUX.2-klein/4B")
+        self.assertEqual(row.run_name, "imported")
+        self.assertEqual(row.experiment_name, "")
+        self.assertEqual(row.run_id, "")
+
+    def test_status_is_the_serving_phase(self) -> None:
+        with _cluster(
+            experiments=[],
+            jobs_by_run={},
+            ray_submission_ids=[],
+            deployments=[
+                _deployment("fam", "a", "imported", "running"),
+                _deployment("fam", "b", "imported", "unhealthy"),
+            ],
+        ):
+            rows = jobs_stream.poll_jobs(None)
+
+        self.assertEqual(rows["deployment/fam/a/imported"].status, "running")
+        self.assertEqual(rows["deployment/fam/b/imported"].status, "unhealthy")
+
+    def test_deployments_that_cannot_be_listed_do_not_lose_the_jobs(self) -> None:
+        with _cluster(
+            experiments=[_experiment("alpha", "run-1", "alpha-run")],
+            jobs_by_run={"run-1": [_job("run-1", "j1")]},
+            ray_submission_ids=[],
+            deployments=RuntimeError("serve controller unavailable"),
+        ):
+            rows = jobs_stream.poll_jobs(None)
+
+        self.assertEqual(list(rows), ["run-1/j1"])
 
 
 if __name__ == "__main__":

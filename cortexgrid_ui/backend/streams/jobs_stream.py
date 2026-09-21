@@ -9,15 +9,22 @@ come from ``list_experiments()`` for the (experiment, run) pairs and
 the reader of the ``job/<job_id>/lifecycle.json`` artifacts. Ray is asked
 once per sweep for its submission ids, and only to give a row that
 already exists its status; it never contributes a row.
+
+Model deployments are listed alongside them. A deployment is a Ray Serve
+app, not a Ray job, so it has no lifecycle record: each app
+``list_deployed_models()`` returns is a row of kind ``deployment``, whose
+status is the app's serving phase.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 from cortexgrid.experiment import list_experiments
 from cortexgrid.jobs import list_experiment_run_jobs
+from cortexgrid.model_serving import Deployment, list_deployed_models
 from cortexgrid.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
@@ -33,12 +40,19 @@ ExperimentName = str
 RunId = str
 JobId = str
 RowId = str
+RowKind = Literal["job", "deployment"]
 JOBS_TOPIC: None = None
 
 
 @dataclass
 class JobRow:
+    """A deployment row belongs to no experiment: ``experiment_name`` and
+    ``run_id`` are empty, ``job_id`` is ``<family>/<suffix>`` and
+    ``run_name`` is the model's run, so ``<job_id>/<run_name>`` is its
+    deployments-stream id."""
+
     id: RowId
+    kind: RowKind
     job_id: JobId
     status: str
     experiment_name: ExperimentName
@@ -49,6 +63,11 @@ class JobRow:
 def row_id(run_id: RunId, job_id: JobId) -> RowId:
     """Job ids are unique within a run, so the pair identifies a row."""
     return f"{run_id}/{job_id}"
+
+
+def deployment_row_id(family: str, suffix: str, run_name: str) -> RowId:
+    """Prefixed so it can never collide with a ``<run_id>/<job_id>`` row."""
+    return f"deployment/{family}/{suffix}/{run_name}"
 
 
 def _status(job, all_ray_submission_ids: list[str]) -> str:
@@ -78,13 +97,36 @@ def poll_jobs(_: None) -> dict[RowId, JobRow]:
         for job in jobs:
             rows[row_id(run_id, job.job_id)] = JobRow(
                 id=row_id(run_id, job.job_id),
+                kind="job",
                 job_id=job.job_id,
                 status=_status(job, all_ray_submission_ids),
                 experiment_name=experiment.experiment_name,
                 run_id=run_id,
                 run_name=run_name,
             )
+    try:
+        deployments = list_deployed_models()
+    except Exception:
+        log.exception("Listing deployments failed")
+        deployments = []
+    for deployment in deployments:
+        row = _deployment_row(deployment)
+        rows[row.id] = row
     return rows
+
+
+def _deployment_row(deployment: Deployment) -> JobRow:
+    return JobRow(
+        id=deployment_row_id(
+            deployment.family, deployment.suffix, deployment.run_name
+        ),
+        kind="deployment",
+        job_id=f"{deployment.family}/{deployment.suffix}",
+        status=deployment.phase,
+        experiment_name="",
+        run_id="",
+        run_name=deployment.run_name,
+    )
 
 
 cache: KeyedCache[None, RowId, JobRow] = KeyedCache()
