@@ -299,7 +299,7 @@ class TestDeploymentMessagesEndpoint(unittest.TestCase):
             }
         }
         with patch(
-            "cortexgrid.model_serving.get_serve_details", return_value=details
+            "cortexgrid.model_serving.status.get_serve_details", return_value=details
         ):
             response = self.client.get(
                 "/api/deployments/Qwen2/instruct/boogey-46/messages"

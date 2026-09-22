@@ -19,10 +19,6 @@ from cortexgrid.model_serving import (
     ModelDeployFailed,
     ModelRequirements,
     ServeBundle,
-    _build_application_spec,
-    _load_deploy_metadata,
-    _phase,
-    _placement_options,
     vram_tiers,
     build_bundle,
     bundle_class,
@@ -38,6 +34,10 @@ from cortexgrid.model_serving import (
     undeploy_model,
     wait_for_model_serving,
 )
+from cortexgrid.model_serving.application_spec import build_application_spec
+from cortexgrid.model_serving.placement import _placement_options
+from cortexgrid.model_serving.registry_tags import load_deploy_metadata
+from cortexgrid.model_serving.status import _phase
 
 from tests.fakes import FakeState
 
@@ -128,19 +128,23 @@ class TestModelServing(unittest.TestCase):
         _seed_saved_model(self.records, "Qwen2", "instruct", "boogey-46")
         patches = [
             patch(
-                "cortexgrid.model_serving.get_serve_details",
+                "cortexgrid.model_serving.lifecycle.get_serve_details",
                 side_effect=self.state.get_details,
             ),
             patch(
-                "cortexgrid.model_serving.put_serve_applications",
+                "cortexgrid.model_serving.status.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch(
+                "cortexgrid.model_serving.lifecycle.put_serve_applications",
                 side_effect=self.state.put,
             ),
             patch(
-                "cortexgrid.model_serving.get_ray_serve_uri",
+                "cortexgrid.model_serving.lifecycle.get_ray_serve_uri",
                 return_value="http://ray:30000",
             ),
             patch(
-                "cortexgrid.model_serving.vram_tiers",
+                "cortexgrid.model_serving.lifecycle.vram_tiers",
                 return_value=_TIERS,
             ),
         ]
@@ -148,8 +152,8 @@ class TestModelServing(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         build_spec = patch(
-            "cortexgrid.model_serving._build_application_spec",
-            wraps=_build_application_spec,
+            "cortexgrid.model_serving.lifecycle.build_application_spec",
+            wraps=build_application_spec,
         )
         self.build_spec = build_spec.start()
         self.addCleanup(build_spec.stop)
@@ -243,7 +247,7 @@ class TestModelServing(unittest.TestCase):
         self.state.status = "DEPLOY_FAILED"
         self.state.message = "replica died on import"
 
-        with patch("cortexgrid.model_serving.time.sleep"):
+        with patch("cortexgrid.model_serving.lifecycle.time.sleep"):
             with self.assertRaises(ModelDeployFailed) as ctx:
                 deploy_model("Qwen2", "instruct", "boogey-46", wait=True)
 
@@ -261,7 +265,7 @@ class TestModelServing(unittest.TestCase):
             self.state.put(applications)
 
         with patch(
-            "cortexgrid.model_serving.put_serve_applications", side_effect=put
+            "cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
@@ -286,12 +290,12 @@ class TestModelServing(unittest.TestCase):
             self.state.put(applications)
 
         with (
-            patch("cortexgrid.model_serving.time.sleep"),
+            patch("cortexgrid.model_serving.lifecycle.time.sleep"),
             patch(
-                "cortexgrid.model_serving.get_serve_details", side_effect=get_details
+                "cortexgrid.model_serving.lifecycle.get_serve_details", side_effect=get_details
             ),
             patch(
-                "cortexgrid.model_serving.put_serve_applications", side_effect=put
+                "cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put
             ),
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
@@ -304,7 +308,7 @@ class TestModelServing(unittest.TestCase):
         self.state.status = "DELETING"
 
         with (
-            patch("cortexgrid.model_serving.time.sleep"),
+            patch("cortexgrid.model_serving.lifecycle.time.sleep"),
             self.assertRaises(TimeoutError),
         ):
             deploy_model("Qwen2", "instruct", "boogey-46", timeout=0.05)
@@ -324,7 +328,7 @@ class TestModelServing(unittest.TestCase):
             self.state.put(applications)
 
         with patch(
-            "cortexgrid.model_serving.put_serve_applications", side_effect=put
+            "cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
@@ -340,7 +344,7 @@ class TestModelServing(unittest.TestCase):
         puts: list[list[str]] = []
 
         with patch(
-            "cortexgrid.model_serving.put_serve_applications",
+            "cortexgrid.model_serving.lifecycle.put_serve_applications",
             side_effect=lambda apps: puts.append([a["name"] for a in apps]),
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
@@ -358,7 +362,7 @@ class TestModelServing(unittest.TestCase):
         puts: list[list[str]] = []
 
         with patch(
-            "cortexgrid.model_serving.put_serve_applications",
+            "cortexgrid.model_serving.lifecycle.put_serve_applications",
             side_effect=lambda apps: puts.append([a["name"] for a in apps]),
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
@@ -371,9 +375,9 @@ class TestModelServing(unittest.TestCase):
         deploy_model("Qwen2", "instruct", "boogey-46")
 
         with (
-            patch("cortexgrid.model_serving.vram_tiers") as tiers,
-            patch("cortexgrid.model_serving.get_serve_details") as details,
-            patch("cortexgrid.model_serving.put_serve_applications") as put,
+            patch("cortexgrid.model_serving.lifecycle.vram_tiers") as tiers,
+            patch("cortexgrid.model_serving.lifecycle.get_serve_details") as details,
+            patch("cortexgrid.model_serving.lifecycle.put_serve_applications") as put,
         ):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
@@ -419,7 +423,7 @@ class TestModelServing(unittest.TestCase):
             puts.append([a["name"] for a in applications])
             self.state.put(applications)
 
-        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+        with patch("cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(puts, [[name]])
@@ -437,7 +441,7 @@ class TestModelServing(unittest.TestCase):
             puts.append([a["name"] for a in applications])
             self.state.put(applications)
 
-        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+        with patch("cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put):
             deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=2)
 
         self.assertEqual(puts, [[name]])
@@ -458,7 +462,7 @@ class TestModelServing(unittest.TestCase):
             # Ray starts the app afresh.
             self.state.status = "DEPLOYING"
 
-        with patch("cortexgrid.model_serving.put_serve_applications", side_effect=put):
+        with patch("cortexgrid.model_serving.lifecycle.put_serve_applications", side_effect=put):
             deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual(puts, [[], [name]])
@@ -474,10 +478,10 @@ class TestWaitForModelServing(unittest.TestCase):
         }
         patches = [
             patch(
-                "cortexgrid.model_serving.get_serve_details",
+                "cortexgrid.model_serving.lifecycle.get_serve_details",
                 side_effect=self.state.get_details,
             ),
-            patch("cortexgrid.model_serving.time.sleep"),
+            patch("cortexgrid.model_serving.lifecycle.time.sleep"),
         ]
         for p in patches:
             p.start()
@@ -513,7 +517,7 @@ class TestWaitForModelServing(unittest.TestCase):
             return self.state.get_details()
 
         with patch(
-            "cortexgrid.model_serving.get_serve_details", side_effect=get_details
+            "cortexgrid.model_serving.lifecycle.get_serve_details", side_effect=get_details
         ):
             wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
 
@@ -549,7 +553,7 @@ class TestWaitForModelServing(unittest.TestCase):
 
         with (
             patch(
-                "cortexgrid.model_serving.get_serve_details", side_effect=get_details
+                "cortexgrid.model_serving.lifecycle.get_serve_details", side_effect=get_details
             ),
             self.assertRaises(ModelDeployFailed),
         ):
@@ -565,19 +569,23 @@ class TestModelServingStatus(unittest.TestCase):
         _seed_saved_model(self.records, "fam", "suf", "run")
         patches = [
             patch(
-                "cortexgrid.model_serving.get_serve_details",
+                "cortexgrid.model_serving.lifecycle.get_serve_details",
                 side_effect=self.state.get_details,
             ),
             patch(
-                "cortexgrid.model_serving.put_serve_applications",
+                "cortexgrid.model_serving.status.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch(
+                "cortexgrid.model_serving.lifecycle.put_serve_applications",
                 side_effect=self.state.put,
             ),
             patch(
-                "cortexgrid.model_serving.get_ray_serve_uri",
+                "cortexgrid.model_serving.lifecycle.get_ray_serve_uri",
                 return_value="http://ray:30000",
             ),
             patch(
-                "cortexgrid.model_serving.vram_tiers",
+                "cortexgrid.model_serving.lifecycle.vram_tiers",
                 return_value=_TIERS,
             ),
         ]
@@ -647,7 +655,7 @@ class TestModelServingStatus(unittest.TestCase):
 class TestModelServingMessages(unittest.TestCase):
     def _messages(self, applications: dict[str, Any]) -> list[tuple[str, str, str]]:
         with patch(
-            "cortexgrid.model_serving.get_serve_details",
+            "cortexgrid.model_serving.status.get_serve_details",
             return_value={"applications": applications},
         ):
             return [
@@ -712,12 +720,12 @@ class TestServeDependencies(unittest.TestCase):
             tp_deps={"tqdm": "4.67.3", "ray": "2.55.1"},
         )
         with (
-            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
             patch(
-                "cortexgrid.model_serving.worker_provides",
+                "cortexgrid.model_serving.serve_bundle.worker_provides",
                 return_value=frozenset({"ray"}),
             ),
-            patch("cortexgrid.model_serving.upload", return_value="s3://b/x.zip"),
+            patch("cortexgrid.model_serving.serve_bundle.upload", return_value="s3://b/x.zip"),
         ):
             meta = bundle_class(_ServeApp, "fam", "suf", "run")
 
@@ -725,7 +733,7 @@ class TestServeDependencies(unittest.TestCase):
 
     def test_bundle_class_rejects_a_class_wrapped_by_ray_ingress(self) -> None:
         with (
-            patch("cortexgrid.model_serving.bundle") as bundle,
+            patch("cortexgrid.model_serving.serve_bundle.bundle") as bundle,
             self.assertRaisesRegex(ValueError, "cortexgrid.serve.ingress"),
         ):
             bundle_class(_RayIngressServeApp, "fam", "suf", "run")
@@ -742,8 +750,8 @@ class TestServeDependencies(unittest.TestCase):
 
         desc = BundleDesc(local_files={Path(__file__).resolve()}, tp_deps={})
         with (
-            patch("cortexgrid.model_serving.bundle", return_value=desc),
-            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.serve_bundle.upload", side_effect=fake_upload),
         ):
             bundle_class(_ServeApp, "Qwen2.5-0.5B", "Instruct", "run")
 
@@ -760,8 +768,8 @@ class TestServeDependencies(unittest.TestCase):
 
         desc = BundleDesc(local_files={Path(__file__).resolve()}, tp_deps={})
         with (
-            patch("cortexgrid.model_serving.bundle", return_value=desc),
-            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.serve_bundle.upload", side_effect=fake_upload),
         ):
             meta = bundle_class(_ServeApp, "fam", "suf", "run")
 
@@ -772,9 +780,9 @@ class TestServeDependencies(unittest.TestCase):
 
     def _build(self, desc: BundleDesc) -> ServeBundle:
         with (
-            patch("cortexgrid.model_serving.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
             patch(
-                "cortexgrid.model_serving.worker_provides",
+                "cortexgrid.model_serving.serve_bundle.worker_provides",
                 return_value=frozenset(),
             ),
         ):
@@ -833,8 +841,8 @@ class TestServeDependencies(unittest.TestCase):
             local_files={package / "__init__.py", package / "app.py"}, tp_deps={}
         )
         with (
-            patch("cortexgrid.model_serving.bundle", return_value=desc),
-            patch("cortexgrid.model_serving.upload", side_effect=fake_upload),
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
+            patch("cortexgrid.model_serving.serve_bundle.upload", side_effect=fake_upload),
         ):
             bundle_class(_ServeApp, "fam", "suf", "run")
 
@@ -852,7 +860,7 @@ class TestServeDependencies(unittest.TestCase):
             pip_requirements=["tqdm==4.67.3"],
         )
 
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
         )
 
@@ -863,14 +871,14 @@ class TestServeDependencies(unittest.TestCase):
 
     def test_spec_without_pip_requirements_has_no_pip_key(self) -> None:
         # A pip key, even an empty one, makes Ray build a virtualenv.
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(spec["runtime_env"], {"working_dir": _FAKE_META.bundle_url})
 
     def test_spec_requests_the_requirements_from_ray(self) -> None:
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
@@ -891,7 +899,7 @@ class TestServeDependencies(unittest.TestCase):
         )
 
     def test_spec_without_requirements_requests_no_resources(self) -> None:
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
@@ -902,7 +910,7 @@ class TestServeDependencies(unittest.TestCase):
     ) -> tuple[BundleMetadata, ModelRequirements]:
         records = FakeState().install(self)
         records.seed_model("fam", "suf", "run", "s3://bucket/weights", tags)
-        return _load_deploy_metadata("fam", "suf", "run")
+        return load_deploy_metadata("fam", "suf", "run")
 
     def test_bundle_metadata_round_trips_through_tags(self) -> None:
         meta = BundleMetadata(
@@ -956,7 +964,7 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
         return json.loads(json.dumps(restored.model_dump(exclude_unset=True)))
 
     def test_gpu_spec_survives_the_round_trip_unchanged(self) -> None:
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
@@ -969,7 +977,7 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
             pip_requirements=["tqdm==4.67.3"],
         )
 
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
         )
 
@@ -986,7 +994,7 @@ class TestReplicaPlacements(unittest.TestCase):
         _seed_deployment(records, "fam", "suf", "run")
         details = {"applications": {"fam__suf__run": app} if app else {}}
         with patch(
-            "cortexgrid.model_serving.get_serve_details", return_value=details
+            "cortexgrid.model_serving.status.get_serve_details", return_value=details
         ):
             observe_deployments()
         return model_replica_placements("fam", "suf", "run")
@@ -1060,7 +1068,7 @@ class TestObserveDeployments(unittest.TestCase):
 
     def _observe(self, applications: dict[str, Any]) -> dict[str, Any]:
         with patch(
-            "cortexgrid.model_serving.get_serve_details",
+            "cortexgrid.model_serving.status.get_serve_details",
             return_value={"applications": applications},
         ):
             observe_deployments()
@@ -1177,7 +1185,7 @@ class TestVramTiers(unittest.TestCase):
     """`vram_tiers` reduces the cluster's nodes to the distinct GPU sizes."""
 
     def _tiers(self, nodes: list[dict[str, Any]]) -> list[int]:
-        with patch("cortexgrid.model_serving.get_ray_nodes", return_value=nodes):
+        with patch("cortexgrid.model_serving.placement.get_ray_nodes", return_value=nodes):
             return vram_tiers()
 
     @staticmethod
@@ -1244,7 +1252,7 @@ class TestModelRequirements(unittest.TestCase):
         self.assertEqual(requirements_from_tags({"num_gpus": "1"}).num_gpus, 1.0)
 
     def test_a_share_is_requested_from_ray_as_it_was_stored(self) -> None:
-        spec = _build_application_spec(
+        spec = build_application_spec(
             "fam",
             "suf",
             "run",

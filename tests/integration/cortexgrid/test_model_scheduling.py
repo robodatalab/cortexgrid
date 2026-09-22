@@ -7,7 +7,9 @@ from pathlib import Path
 import requests
 
 import cortexgrid
-from cortexgrid.model_serving import _VRAM_LABEL, _phase, app_name
+from cortexgrid.model_serving import app_name
+from cortexgrid.model_serving.placement import _VRAM_LABEL
+from cortexgrid.model_serving.status import _phase
 from cortexgrid.ray_util import get_ray_nodes, get_serve_details
 
 from tests.integration.cortexgrid._ray_run import experiment_name

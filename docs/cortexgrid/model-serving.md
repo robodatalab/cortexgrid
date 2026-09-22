@@ -3,7 +3,7 @@
 cortexgrid has two model-related surfaces, and they own strictly different things:
 
 - **Model registry** ([cortexgrid.model_storage](../../cortexgrid/model_storage.py)) - persists a trained model's *weights* to S3 as an opaque directory, with a registry entry kept by the jobs control plane,, addressable as `(family, suffix, run_name)`. At save time it also bundles the *serve-app* class (its code and every dependency, as source) that will front those weights, so the cluster can deploy it later without the caller holding the class.
-- **Model serving** ([cortexgrid.model_serving](../../cortexgrid/model_serving.py)) - schedules the serve-app as a Ray Serve application and returns its URL. cortexgrid imposes no request/response contract; the serve-app owns its own routes, request schemas, streaming, and timeouts.
+- **Model serving** ([cortexgrid.model_serving](../../cortexgrid/model_serving/)) - schedules the serve-app as a Ray Serve application and returns its URL. cortexgrid imposes no request/response contract; the serve-app owns its own routes, request schemas, streaming, and timeouts.
 
 Both speak the same `(family, suffix, run_name)` triple. A model with no weights of ours - one behind a provider's API - goes through the same two surfaces, registering its serve-app alone; see [Serving a hosted-API model](#serving-a-hosted-api-model).
 
