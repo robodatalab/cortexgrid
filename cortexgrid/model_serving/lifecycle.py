@@ -10,6 +10,7 @@ from cortexgrid.infra import get_ray_serve_uri
 from cortexgrid.model_serving.application_spec import (
     app_name,
     build_application_spec,
+    replica_count_in_spec,
     route_prefix,
 )
 from cortexgrid.model_serving.placement import ModelRequirements, vram_tiers
@@ -41,6 +42,10 @@ class ModelDeployFailed(RuntimeError):
     """A model's Serve app cannot reach RUNNING: the controller reported
     DEPLOY_FAILED, or no app exists for the model. Subclasses RuntimeError, which
     `deploy_model(wait=True)` raised before this type existed."""
+
+
+class ModelNotDeployed(LookupError):
+    pass
 
 
 _SERVING_POLL_INTERVAL_S = 2.0
@@ -268,6 +273,15 @@ def deploy_model(
         url=url,
         phase=observation["phase"],
         bundle_fingerprint=meta.fingerprint,
+    )
+
+
+def redeploy_model(family: str, suffix: str, run_name: str) -> Deployment:
+    record = state.get("deployments", family, suffix, run_name)
+    if record is None:
+        raise ModelNotDeployed(f"{family}/{suffix}/{run_name} is not deployed")
+    return deploy_model(
+        family, suffix, run_name, num_replicas=replica_count_in_spec(record["spec"])
     )
 
 

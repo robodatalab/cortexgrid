@@ -17,6 +17,7 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
     ModelDeployFailed,
+    ModelNotDeployed,
     ModelRequirements,
     ServeBundle,
     vram_tiers,
@@ -30,6 +31,7 @@ from cortexgrid.model_serving import (
     model_serving_messages,
     model_serving_status,
     observe_deployments,
+    redeploy_model,
     requirements_from_tags,
     requirements_to_tags,
     undeploy_model,
@@ -271,6 +273,28 @@ class TestModelServing(unittest.TestCase):
         deploy_model("Qwen2", "instruct", "boogey-46")
 
         self.assertEqual([d.bundle_fingerprint for d in list_deployed_models()], [""])
+
+    def test_redeploy_runs_the_registry_code_on_as_many_replicas_as_before(
+        self,
+    ) -> None:
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_OLD_FINGERPRINT),
+        )
+        deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=3)
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_NEW_FINGERPRINT),
+        )
+
+        redeployed = redeploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(redeployed.bundle_fingerprint, _NEW_FINGERPRINT)
+        self.assertEqual(self._record()["spec"]["args"]["num_replicas"], 3)
+
+    def test_redeploy_of_a_model_that_is_not_deployed_raises(self) -> None:
+        with self.assertRaises(ModelNotDeployed):
+            redeploy_model("Qwen2", "instruct", "boogey-46")
 
     def test_redeploying_same_triple_replaces_prior_spec(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")

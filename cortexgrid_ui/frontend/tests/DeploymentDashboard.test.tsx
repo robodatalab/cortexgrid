@@ -22,6 +22,7 @@ function renderCard(
   handlers: Partial<{
     onStop: (d: Deployment) => void
     onNavigateToModel: (id: string) => void
+    onRedeploy: (d: Deployment) => Promise<void>
   }> = {},
   d: Deployment = deployment,
   bundleUpdate: BundleUpdate | null = null,
@@ -33,6 +34,7 @@ function renderCard(
       bundleUpdate={bundleUpdate}
       onNavigateToModel={handlers.onNavigateToModel ?? vi.fn()}
       onStop={handlers.onStop ?? vi.fn()}
+      onRedeploy={handlers.onRedeploy ?? vi.fn(() => Promise.resolve())}
     />,
   )
 }
@@ -103,6 +105,24 @@ describe('DeploymentDashboard', () => {
     const notice = screen.getByRole('status')
     expect(notice).toHaveTextContent('Update available')
     expect(notice).toHaveTextContent('runs code #aaaaaaa, the registry holds #bbbbbbb')
+  })
+
+  it('redeploys the deployment from its update notice', async () => {
+    const onRedeploy = vi.fn(() => Promise.resolve())
+    renderCard(true, { onRedeploy }, deployment, {
+      deployedFingerprint: DEPLOYED_FINGERPRINT,
+      registeredFingerprint: REGISTERED_FINGERPRINT,
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Redeploy' }))
+    expect(onRedeploy).toHaveBeenCalledWith(deployment)
+  })
+
+  it('offers no redeploy while the registry holds no signed code to run', () => {
+    renderCard(true, {}, { ...deployment, bundle_fingerprint: '' }, {
+      deployedFingerprint: '',
+      registeredFingerprint: '',
+    })
+    expect(screen.queryByRole('button', { name: 'Redeploy' })).toBeNull()
   })
 
   it('warns that code saved before signing may be outdated', () => {

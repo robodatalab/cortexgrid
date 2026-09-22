@@ -57,3 +57,7 @@ def build_application_spec(
 
 def bundle_fingerprint_in_spec(spec: dict[str, Any]) -> str:
     return bundle_fingerprint_from_url(spec["runtime_env"]["working_dir"])
+
+
+def replica_count_in_spec(spec: dict[str, Any]) -> int:
+    return spec["args"]["num_replicas"]

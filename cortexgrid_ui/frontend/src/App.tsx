@@ -273,6 +273,15 @@ function App() {
     }
   }
 
+  async function handleRedeployDeployment(deployment: Deployment) {
+    const res = await fetch(`${deploymentPath(deployment)}/redeploy`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      alert(`Redeploy failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
   async function handleStopDeployment(deployment: Deployment) {
     const res = await fetch(deploymentPath(deployment), { method: 'DELETE' })
     if (!res.ok) {
@@ -370,6 +379,7 @@ function App() {
                       }
                       onNavigateToModel={navigateToModel}
                       onStop={handleStopDeployment}
+                      onRedeploy={handleRedeployDeployment}
                     />
                   ) : (
                     <main className="main" />

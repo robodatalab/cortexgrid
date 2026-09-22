@@ -25,6 +25,7 @@ type Props = {
     bundleUpdate: BundleUpdate | null;
     onNavigateToModel: (id: string) => void;
     onStop: (deployment: Deployment) => void;
+    onRedeploy: (deployment: Deployment) => Promise<void>;
 };
 
 // One Ray Serve controller message for the app or one of its deployments
@@ -134,30 +135,53 @@ function useServingMessages(deployment: Deployment): ServingMessage[] | null {
     return failed && loaded?.key === key ? loaded.messages : null;
 }
 
-function BundleUpdateNotice({ update }: { update: BundleUpdate }) {
+function BundleUpdateNotice({
+    update,
+    onRedeploy,
+}: {
+    update: BundleUpdate;
+    onRedeploy: () => Promise<void>;
+}) {
+    const [redeploying, setRedeploying] = useState(false);
     const registryHoldsSignedCode = update.registeredFingerprint !== "";
+    const redeploy = () => {
+        setRedeploying(true);
+        onRedeploy().finally(() => setRedeploying(false));
+    };
     return (
         <section className="model-dashboard__update" role="status">
-            <div className="model-dashboard__update-title">
-                {registryHoldsSignedCode ? "Update available" : "May be outdated"}
+            <div className="model-dashboard__update-message">
+                <div className="model-dashboard__update-title">
+                    {registryHoldsSignedCode ? "Update available" : "May be outdated"}
+                </div>
+                <p className="model-dashboard__update-text">
+                    {registryHoldsSignedCode ? (
+                        <>
+                            This endpoint runs code{" "}
+                            <code>{shortFingerprint(update.deployedFingerprint)}</code>,
+                            the registry holds{" "}
+                            <code>{shortFingerprint(update.registeredFingerprint)}</code>.
+                            Redeploy the model to run the registry's code.
+                        </>
+                    ) : (
+                        <>
+                            This model's code was saved before code was signed, so
+                            there is no telling whether it is current. Re-import the
+                            model, then redeploy it.
+                        </>
+                    )}
+                </p>
             </div>
-            <p className="model-dashboard__update-text">
-                {registryHoldsSignedCode ? (
-                    <>
-                        This endpoint runs code{" "}
-                        <code>{shortFingerprint(update.deployedFingerprint)}</code>,
-                        the registry holds{" "}
-                        <code>{shortFingerprint(update.registeredFingerprint)}</code>.
-                        Redeploy the model to run the registry's code.
-                    </>
-                ) : (
-                    <>
-                        This model's code was saved before code was signed, so
-                        there is no telling whether it is current. Re-import the
-                        model, then redeploy it.
-                    </>
-                )}
-            </p>
+            {registryHoldsSignedCode && (
+                <button
+                    type="button"
+                    className="btn"
+                    disabled={redeploying}
+                    onClick={redeploy}
+                >
+                    {redeploying ? "Redeploying…" : "Redeploy"}
+                </button>
+            )}
         </section>
     );
 }
@@ -168,6 +192,7 @@ export function DeploymentDashboard({
     bundleUpdate,
     onNavigateToModel,
     onStop,
+    onRedeploy,
 }: Props) {
     const tier = servingTier(deployment.phase);
     const messages = useServingMessages(deployment);
@@ -193,7 +218,12 @@ export function DeploymentDashboard({
                     </button>
                 </div>
             </header>
-            {bundleUpdate !== null && <BundleUpdateNotice update={bundleUpdate} />}
+            {bundleUpdate !== null && (
+                <BundleUpdateNotice
+                    update={bundleUpdate}
+                    onRedeploy={() => onRedeploy(deployment)}
+                />
+            )}
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">
                     <span

@@ -284,10 +284,22 @@
 }
 
 .model-dashboard__update {
+    display: flex;
+    align-items: center;
+    gap: 16px;
     margin-bottom: 24px;
     padding: 12px 16px;
     border-left: 3px solid #1f5fae;
     background: #eaf1fa;
+}
+
+.model-dashboard__update-message {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.model-dashboard__update .btn {
+    flex: 0 0 auto;
 }
 
 .model-dashboard__update-title {

@@ -18,12 +18,14 @@ from cortexgrid.experiment import (
 from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.model_serving import (
+    ModelNotDeployed,
     ModelRequirements,
     ServingMessage,
     app_name,
     deploy_model,
     model_replica_placements,
     model_serving_messages,
+    redeploy_model,
     undeploy_model,
 )
 from cortexgrid.model_storage import (
@@ -290,6 +292,15 @@ def deployments_load() -> dict[str, float]:
 @app.post("/api/deployments/{family}/{suffix}/{run_name}")
 def deployment_create(family: str, suffix: str, run_name: str) -> dict[str, str]:
     deploy_model(family, suffix, run_name)
+    return {"status": "ok"}
+
+
+@app.post("/api/deployments/{family}/{suffix}/{run_name}/redeploy")
+def deployment_redeploy(family: str, suffix: str, run_name: str) -> dict[str, str]:
+    try:
+        redeploy_model(family, suffix, run_name)
+    except ModelNotDeployed as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok"}
 
 

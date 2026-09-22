@@ -28,7 +28,9 @@ for the end-to-end design.
 from cortexgrid.model_serving.application_spec import app_name
 from cortexgrid.model_serving.lifecycle import (
     ModelDeployFailed,
+    ModelNotDeployed,
     deploy_model,
+    redeploy_model,
     undeploy_model,
     wait_for_model_serving,
 )
