@@ -2,6 +2,7 @@
 // visual language as the registry card) but is driven purely by a Deployment.
 import { useEffect, useState } from "react";
 import "./ModelDashboard.css";
+import { DeploymentUsage } from "./DeploymentUsage";
 import { DeviceCard, type PodStatus } from "./DeviceCard";
 import type { Deployment } from "./ModelsTree";
 import { TitledFrame } from "./TitledFrame";
@@ -216,6 +217,7 @@ export function DeploymentDashboard({
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
             </dl>
+            <DeploymentUsage deployment={deployment} />
             <section className="model-dashboard__devices">
                 <h2 className="model-dashboard__section-title">Devices</h2>
                 <p className="model-dashboard__hint">

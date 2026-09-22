@@ -1,20 +1,13 @@
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass, field
 
-import requests  # type: ignore
+from cortexgrid_ui.backend.models.prometheus import query_instant
 
-
-_PROMETHEUS_URL = os.environ.get(
-    "PROMETHEUS_URL",
-    "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
-)
-_PROMETHEUS_QUERY_TIMEOUT_S = 30
 
 _REQUESTS_PER_SECOND_BY_APPLICATION = (
-    "sum by (application) (rate(ray_serve_num_http_requests_total[1m]))"
+    "sum by (application) (rate(ray_serve_num_router_requests_total[1m]))"
 )
 _P99_REQUESTS_PER_SECOND_WHILE_SERVING_BY_APPLICATION = (
     f"quantile_over_time(0.99, (({_REQUESTS_PER_SECOND_BY_APPLICATION}) > 0)[30d:1m])"
@@ -61,13 +54,7 @@ def _load(requests_per_second: float, p99_requests_per_second: float) -> float:
 
 
 def _query_by_application(promql: str) -> dict[str, float]:
-    response = requests.get(
-        f"{_PROMETHEUS_URL}/api/v1/query",
-        params={"query": promql},
-        timeout=_PROMETHEUS_QUERY_TIMEOUT_S,
-    )
-    response.raise_for_status()
     return {
         series["metric"]["application"]: float(series["value"][1])
-        for series in response.json()["data"]["result"]
+        for series in query_instant(promql)
     }

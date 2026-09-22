@@ -1,4 +1,5 @@
 import logging
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -48,6 +49,10 @@ from cortexgrid_ui.backend.models.notes import (
     delete_run_notes_for_run,
 )
 from cortexgrid_ui.backend.models.deployment_load import load_by_application
+from cortexgrid_ui.backend.models.deployment_metrics import (
+    DeploymentMetrics,
+    read_deployment_metrics,
+)
 from cortexgrid_ui.backend.models.infra_status import (
     InfraStatus,
     PodStatus,
@@ -313,6 +318,11 @@ class ReplicaDevice(BaseModel):
     state: str
     node_ip: str | None = None
     device: PodStatus | None = None
+
+
+@app.get("/api/deployments/{family}/{suffix}/{run_name}/metrics")
+def deployment_metrics(family: str, suffix: str, run_name: str) -> DeploymentMetrics:
+    return read_deployment_metrics(app_name(family, suffix, run_name), time.time())
 
 
 @app.get("/api/deployments/{family}/{suffix}/{run_name}/devices")
