@@ -30,8 +30,8 @@ jobs:
             exit 0
           fi
           BRANCH=$(echo "$PR_JSON" | jq -r '.[0].head.ref')
-          RUN=$(gh api "repos/${{ github.repository }}/actions/workflows/on_pull_request.yaml/runs?branch=$BRANCH&per_page=1" -q '.workflow_runs[0].id')
-          if [ -z "$RUN" ]; then
+          RUNS_NEWEST_FIRST=$(gh api "repos/${{ github.repository }}/actions/workflows/on_pull_request.yaml/runs?branch=$BRANCH&per_page=30" -q '.workflow_runs[].id')
+          if [ -z "$RUNS_NEWEST_FIRST" ]; then
             echo "no on_pull_request run for branch $BRANCH, nothing to promote"
             exit 0
           fi
@@ -52,15 +52,18 @@ jobs:
             build_ray
           )
 
-          JOBS=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN/jobs" --paginate)
+          JOBS_NEWEST_RUN_FIRST=$(for run in $RUNS_NEWEST_FIRST; do
+            gh api "repos/${{ github.repository }}/actions/runs/$run/jobs" --paginate -q '.jobs[] | {name, conclusion}'
+          done | jq -s '.')
 
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
 
           for name in "${JOB_KEYS[@]}"; do
-            conclusion=$(echo "$JOBS" | jq -r --arg n "$name" '.jobs[] | select(.name==$n) | .conclusion')
-            if [ -z "$conclusion" ] || [ "$conclusion" = "skipped" ] || [ "$conclusion" = "cancelled" ]; then
+            conclusion=$(echo "$JOBS_NEWEST_RUN_FIRST" | jq -r --arg n "$name" \
+              'map(select(.name == $n and .conclusion != null and .conclusion != "skipped" and .conclusion != "cancelled")) | first | .conclusion // empty')
+            if [ -z "$conclusion" ]; then
               continue
             fi
             if [ "$conclusion" = "success" ]; then

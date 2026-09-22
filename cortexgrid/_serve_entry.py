@@ -27,6 +27,7 @@ from typing import Any
 from ray import serve
 from ray.serve.deployment import Application
 
+from cortexgrid._model_scheduler import model_autoscaling_config
 from cortexgrid.serve import ingress_app
 
 
@@ -74,7 +75,9 @@ def build(args: dict[str, Any]) -> Application:
         # This builder ships in the bundle, frozen at save time, while `args`
         # come from the cortexgrid that deploys it; one older than the bundle
         # sends neither key.
-        num_replicas=args.get("num_replicas", 1),
+        autoscaling_config=model_autoscaling_config(
+            args.get("num_replicas", 1), args.get("ray_actor_options", {})
+        ),
         # Ray 2.32 lowered the default from 100 to 5; keep what serve-apps
         # had on Ray 2.9.
         max_ongoing_requests=_MAX_ONGOING_REQUESTS,

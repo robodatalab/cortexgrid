@@ -23,6 +23,8 @@ export function servingLabel(phase: string): string {
             return "Deploying";
         case "running":
             return "Running";
+        case "paused":
+            return "Paused";
         case "unhealthy":
             return "Unhealthy";
         case "failed":

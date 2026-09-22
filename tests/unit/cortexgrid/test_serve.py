@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from cortexgrid import serve
 from cortexgrid._serve_entry import build
+from cortexgrid._model_scheduler import model_autoscaling_config
 
 
 _APP = object()
@@ -71,7 +72,7 @@ class TestBuild(unittest.TestCase):
             })
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            num_replicas=2,
+            autoscaling_config=model_autoscaling_config(2, actor_options),
             max_ongoing_requests=100,
             ray_actor_options=actor_options,
         )
@@ -81,7 +82,7 @@ class TestBuild(unittest.TestCase):
             build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            num_replicas=1,
+            autoscaling_config=model_autoscaling_config(1, {}),
             max_ongoing_requests=100,
             ray_actor_options={},
         )
