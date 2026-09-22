@@ -107,6 +107,18 @@
     font-size: var(--font-md);
 }
 
+.model-dashboard__deployment--list {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.model-dashboard__deployment-config {
+    color: #666;
+    font-family: var(--mono);
+    font-size: var(--font-sm);
+}
+
 .model-dashboard__deployment-label {
     color: #000;
     font-family: var(--mono);
@@ -281,4 +293,40 @@
     margin-top: 8px;
     font-size: var(--font-sm);
     color: #cb2431;
+}
+
+.model-dashboard__update {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    border-left: 3px solid #1f5fae;
+    background: #eaf1fa;
+}
+
+.model-dashboard__update-message {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.model-dashboard__update .btn {
+    flex: 0 0 auto;
+}
+
+.model-dashboard__update-title {
+    font-size: var(--font-md);
+    font-weight: 600;
+    color: #1f5fae;
+}
+
+.model-dashboard__update-text {
+    margin: 4px 0 0;
+    font-size: var(--font-md);
+    color: #000;
+}
+
+.model-dashboard__update-text code {
+    font-family: var(--mono);
+    font-size: var(--font-sm);
 }

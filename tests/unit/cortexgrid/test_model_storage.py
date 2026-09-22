@@ -10,7 +10,15 @@ from unittest.mock import patch
 
 import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
-from cortexgrid.model_serving import BundleMetadata, ModelRequirements, ServeBundle
+from cortexgrid.model_serving import (
+    BundleMetadata,
+    DeploymentKey,
+    ModelRequirements,
+    ServeBundle,
+    deployment_key,
+    metadata_to_tags,
+)
+from cortexgrid.model_serving.deployment_records import put_deployment_record
 from cortexgrid.model_storage import (
     IMPORTED,
     NO_WEIGHTS,
@@ -889,6 +897,25 @@ class TestListModels(unittest.TestCase):
 
         self.assertEqual(result[0].config, {})
 
+    def test_reports_the_fingerprint_of_the_bundle_the_entry_points_at(self) -> None:
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags=metadata_to_tags(_FAKE_BUNDLE),
+        )
+
+        result = list_models()
+
+        self.assertEqual(result[0].bundle_fingerprint, "code-v1")
+
+    def test_reports_no_fingerprint_for_an_entry_saved_before_fingerprints(
+        self,
+    ) -> None:
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+
+        result = list_models()
+
+        self.assertEqual(result[0].bundle_fingerprint, "")
+
 
 class TestSetModelRequirements(unittest.TestCase):
     def setUp(self) -> None:
@@ -919,6 +946,13 @@ class TestSetModelRequirements(unittest.TestCase):
             )
 
 
+_UNCONFIGURED_DEPLOYMENT = DeploymentKey("Qwen2", "instruct", "boogey-46")
+
+
+def _record_deployment(key: DeploymentKey, config: dict[str, str]) -> None:
+    put_deployment_record(key, {"config": config})
+
+
 class TestModelConfig(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeState().install(self)
@@ -929,21 +963,24 @@ class TestModelConfig(unittest.TestCase):
 
     def test_reads_back_what_was_stored(self) -> None:
         _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+        _record_deployment(_UNCONFIGURED_DEPLOYMENT, {})
 
         set_model_config("Qwen2", "instruct", "boogey-46", _CONFIG)
 
-        self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), _CONFIG)
+        self.assertEqual(model_config(_UNCONFIGURED_DEPLOYMENT), _CONFIG)
 
     def test_reads_empty_config_for_a_model_without_one(self) -> None:
         _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+        _record_deployment(_UNCONFIGURED_DEPLOYMENT, {})
 
-        self.assertEqual(model_config("Qwen2", "instruct", "boogey-46"), {})
+        self.assertEqual(model_config(_UNCONFIGURED_DEPLOYMENT), {})
 
     def test_replaces_the_whole_mapping(self) -> None:
         _seed_model(
             self.state, "Qwen2", "instruct", "r1", "boogey-46",
             tags={"config": json.dumps(_CONFIG)},
         )
+        _record_deployment(_UNCONFIGURED_DEPLOYMENT, {})
 
         set_model_config(
             "Qwen2", "instruct", "boogey-46", {"model": "claude-sonnet-5"}
@@ -951,8 +988,22 @@ class TestModelConfig(unittest.TestCase):
 
         # api_key_secret was left out of the new mapping, so it is gone.
         self.assertEqual(
-            model_config("Qwen2", "instruct", "boogey-46"),
+            model_config(_UNCONFIGURED_DEPLOYMENT),
             {"model": "claude-sonnet-5"},
+        )
+
+    def test_lays_the_deployments_config_over_the_models(self) -> None:
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags={"config": json.dumps({"model": "qwen", "thinking": "true"})},
+        )
+        without_thinking = deployment_key(
+            "Qwen2", "instruct", "boogey-46", {"thinking": "false"}
+        )
+        _record_deployment(without_thinking, {"thinking": "false"})
+
+        self.assertEqual(
+            model_config(without_thinking), {"model": "qwen", "thinking": "false"}
         )
 
     def test_rejects_a_blank_key(self) -> None:
@@ -967,7 +1018,13 @@ class TestModelConfig(unittest.TestCase):
 
     def test_read_raises_when_model_was_never_registered(self) -> None:
         with self.assertRaises(ValueError):
-            model_config("Qwen2", "instruct", "missing")
+            model_config(DeploymentKey("Qwen2", "instruct", "missing"))
+
+    def test_read_raises_when_the_deployment_does_not_exist(self) -> None:
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+
+        with self.assertRaises(ValueError):
+            model_config(_UNCONFIGURED_DEPLOYMENT)
 
 
 class TestModelRegistryStatus(unittest.TestCase):

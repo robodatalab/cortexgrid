@@ -6,13 +6,14 @@ On the cluster replica, `build` imports the serve-app class bundled at
 ingress with the app it was marked with by `cortexgrid.serve.ingress` (again on
 each replica, see `_IngressOnReplica`), wraps it as a Ray Serve deployment
 with the replica count and Ray resource requests `deploy_model` derived from
-the model's requirements, and binds it with the (family, suffix, run_name)
-identifiers.
+the model's requirements, and binds it with its deployment's
+`cortexgrid.DeploymentKey`.
 
 The serve-app owns everything about traffic: its own routes, request schemas,
 streaming, and timeouts. cortexgrid does not interpose a request/response
-contract - it only schedules the app and hands it the identifiers it needs to
-fetch its own weights via `cortexgrid.load_model`.
+contract - it only schedules the app and hands it the key it needs to fetch
+its own weights via `cortexgrid.load_model` and its settings via
+`cortexgrid.model_config`.
 
 The serve-app declares no resources: the hardware a replica needs belongs to
 the model and is stored in the registry (`cortexgrid.ModelRequirements`), and
@@ -28,6 +29,7 @@ from ray import serve
 from ray.serve.deployment import Application
 
 from cortexgrid._model_scheduler import model_autoscaling_config
+from cortexgrid.model_serving.deployment_key import DeploymentKey
 from cortexgrid.serve import ingress_app
 
 
@@ -80,4 +82,11 @@ def build(args: dict[str, Any]) -> Application:
         # had on Ray 2.9.
         max_ongoing_requests=_MAX_ONGOING_REQUESTS,
         ray_actor_options=args.get("ray_actor_options", {}),
-    ).bind(args["family"], args["suffix"], args["run_name"])
+    ).bind(
+        DeploymentKey(
+            args["family"],
+            args["suffix"],
+            args["run_name"],
+            args.get("config_fingerprint", ""),
+        )
+    )

@@ -39,9 +39,12 @@ from typing import Any, Callable
 from cortexgrid import s3_util, state
 from cortexgrid.infra import get_s3_bucket
 from cortexgrid.model_serving import (
+    DeploymentKey,
     ModelRequirements,
     build_bundle,
     bundle_class,
+    bundle_fingerprint_from_tags,
+    deployment_config,
     has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
@@ -109,6 +112,7 @@ class SavedModel:
     phase: str
     # Hardware one replica needs; defaults for versions stored without it.
     requirements: ModelRequirements
+    bundle_fingerprint: str
     # Free-form settings the serve-app reads at construction; empty for
     # versions stored without any.
     config: dict[str, str] = field(default_factory=dict)
@@ -172,6 +176,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         size_bytes=int(version.tags.get("size_bytes", "0")),
         phase=_phase_for(version),
         requirements=requirements_from_tags(version.tags),
+        bundle_fingerprint=bundle_fingerprint_from_tags(version.tags),
         config=_config_from_tags(version.tags),
     )
 
@@ -530,22 +535,25 @@ def set_model_requirements(
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
 
 
-def model_config(family: str, suffix: str, run_name: str) -> dict[str, str]:
-    """The config mapping stored on a model, empty if it has none.
+def model_config(deployment: DeploymentKey) -> dict[str, str]:
+    """The config a deployment's replicas run with: the mapping stored on the
+    model, with the deployment's own config (from `deploy_model`) laid over it.
 
-    Meant for the serve-app to call in `__init__` with the
-    (family, suffix, run_name) it was constructed with: the settings that are
-    not the weights - a provider's model id, an endpoint, the name of a secret
-    to read - travel with the registry entry instead of the bundled code, so
-    changing one is an edit on the model card rather than a re-save.
+    Meant for the serve-app to call in `__init__` with the `DeploymentKey` it
+    was constructed with: the settings that are not the weights - a provider's
+    model id, an endpoint, the name of a secret to read - travel with the
+    registry entry instead of the bundled code, so changing one is an edit on
+    the model card rather than a re-save, and how one deployment serves the
+    model (e.g. with thinking on or off) travels with that deployment.
 
     Read at construction, so a replica keeps the values it started with until
-    it is deployed again. Raises ValueError if the model was never
-    registered."""
+    it is deployed again. Raises ValueError if the model was never registered
+    or the deployment does not exist."""
+    family, suffix, run_name = deployment.family, deployment.suffix, deployment.run_name
     version = _get_version(family, suffix, run_name)
     if version is None:
         raise ValueError(f"No model {family}/{suffix}/{run_name}")
-    return _config_from_tags(version.tags)
+    return {**_config_from_tags(version.tags), **deployment_config(deployment)}
 
 
 def set_model_config(

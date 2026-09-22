@@ -25,8 +25,10 @@ import type {
   ModelSelection,
 } from './components/ModelsTree'
 import { DeploymentsTree } from './components/DeploymentsTree'
+import { useDeploymentLoads } from './deploymentLoad'
+import { pendingBundleUpdates } from './bundleUpdate'
 import type { DeploymentSelection } from './components/DeploymentsTree'
-import { deploymentId } from './ids'
+import { deploymentApiUrl, deploymentId, modelId } from './ids'
 import { ModelDashboard } from './components/ModelDashboard'
 import { DeploymentDashboard } from './components/DeploymentDashboard'
 import { useStreamList } from './useStreamList'
@@ -66,7 +68,7 @@ function App() {
 
   const deploymentsById = useStreamList<Deployment>(
     '/api/deployments/stream',
-    (d) => `${d.family}/${d.suffix}/${d.run_name}`,
+    (d) => deploymentId(d.key),
   )
 
   const selectedExperimentName = selection?.experiment_name ?? null
@@ -170,6 +172,15 @@ function App() {
     [deploymentsById],
   )
 
+  const deploymentLoads = useDeploymentLoads(
+    view === 'models' ? '/api/deployments/load' : null,
+  )
+
+  const bundleUpdates = useMemo(
+    () => pendingBundleUpdates(deployments, modelsById),
+    [deployments, modelsById],
+  )
+
   const selectedModel =
     modelsSelection?.kind === 'model'
       ? (modelsById[modelsSelection.id] ?? null)
@@ -201,8 +212,8 @@ function App() {
     setView('experiments')
   }
 
-  function navigateToModel(modelId: string) {
-    setModelsSelection({ kind: 'model', id: modelId })
+  function navigateToModel(id: string) {
+    setModelsSelection({ kind: 'model', id })
     setView('models')
   }
 
@@ -216,16 +227,16 @@ function App() {
     setView('experiments')
   }
 
-  function deploymentPath(t: {
-    family: string
-    suffix: string
-    run_name: string
-  }): string {
-    return `/api/deployments/${encodeURIComponent(t.family)}/${encodeURIComponent(t.suffix)}/${encodeURIComponent(t.run_name)}`
-  }
-
   async function handleDeploy(model: Model) {
-    const res = await fetch(deploymentPath(model), { method: 'POST' })
+    const unconfiguredDeployment = {
+      family: model.family,
+      suffix: model.suffix,
+      run_name: model.run_name,
+      config_fingerprint: '',
+    }
+    const res = await fetch(deploymentApiUrl(unconfiguredDeployment), {
+      method: 'POST',
+    })
     if (!res.ok) {
       alert(`Deploy failed: HTTP ${res.status}\n${await res.text()}`)
     }
@@ -262,8 +273,19 @@ function App() {
     }
   }
 
+  async function handleRedeployDeployment(deployment: Deployment) {
+    const res = await fetch(deploymentApiUrl(deployment.key, 'redeploy'), {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      alert(`Redeploy failed: HTTP ${res.status}\n${await res.text()}`)
+    }
+  }
+
   async function handleStopDeployment(deployment: Deployment) {
-    const res = await fetch(deploymentPath(deployment), { method: 'DELETE' })
+    const res = await fetch(deploymentApiUrl(deployment.key), {
+      method: 'DELETE',
+    })
     if (!res.ok) {
       alert(`Stop failed: HTTP ${res.status}\n${await res.text()}`)
     }
@@ -321,6 +343,8 @@ function App() {
                     <LayoutPane>
                       <DeploymentsTree
                         deployments={deployments}
+                        loads={deploymentLoads}
+                        bundleUpdates={bundleUpdates}
                         selection={
                           modelsSelection?.kind === 'deployment'
                             ? modelsSelection
@@ -337,7 +361,9 @@ function App() {
                   {selectedModel ? (
                     <ModelDashboard
                       model={selectedModel}
-                      deployment={deploymentsById[selectedModel.id] ?? null}
+                      deployments={deployments.filter(
+                        (d) => modelId(d.key) === selectedModel.id,
+                      )}
                       onNavigateToRun={navigateToRun}
                       onNavigateToDeployment={(id) =>
                         setModelsSelection({ kind: 'deployment', id })
@@ -350,10 +376,14 @@ function App() {
                     <DeploymentDashboard
                       deployment={selectedDeployment}
                       modelInRepository={
-                        modelsById[deploymentId(selectedDeployment)] !== undefined
+                        modelsById[modelId(selectedDeployment.key)] !== undefined
+                      }
+                      bundleUpdate={
+                        bundleUpdates[deploymentId(selectedDeployment.key)] ?? null
                       }
                       onNavigateToModel={navigateToModel}
                       onStop={handleStopDeployment}
+                      onRedeploy={handleRedeployDeployment}
                     />
                   ) : (
                     <main className="main" />

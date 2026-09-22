@@ -30,7 +30,11 @@ _MODEL_COLUMNS = (
     "(extract(epoch FROM created_at) * 1000)::bigint AS creation_timestamp"
 )
 _DEPLOYMENT_COLUMNS = (
-    "family, suffix, run_name, spec, tiers, url, phase, message, replicas"
+    "family, suffix, run_name, config_fingerprint, config, spec, tiers, url, "
+    "phase, message, replicas, replaced_bundle_fingerprint"
+)
+_DEPLOYMENT_KEY_MATCHES = (
+    "family = %s AND suffix = %s AND run_name = %s AND config_fingerprint = %s"
 )
 
 
@@ -295,39 +299,50 @@ def put_deployment(
     family: str,
     suffix: str,
     run_name: str,
+    config_fingerprint: str,
+    config: dict[str, str],
     spec: dict[str, Any],
     tiers: list[int],
     url: str,
     phase: str,
     message: str,
     replicas: list[dict[str, Any]],
+    replaced_bundle_fingerprint: str,
 ) -> None:
     _write(
         f"INSERT INTO deployments ({_DEPLOYMENT_COLUMNS}) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-        "ON CONFLICT (family, suffix, run_name) DO UPDATE SET "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (family, suffix, run_name, config_fingerprint) DO UPDATE SET "
+        "config = EXCLUDED.config, "
         "spec = EXCLUDED.spec, tiers = EXCLUDED.tiers, url = EXCLUDED.url, "
         "phase = EXCLUDED.phase, message = EXCLUDED.message, "
-        "replicas = EXCLUDED.replicas, deployed_at = now()",
+        "replicas = EXCLUDED.replicas, "
+        "replaced_bundle_fingerprint = EXCLUDED.replaced_bundle_fingerprint, "
+        "deployed_at = now()",
         (
             family,
             suffix,
             run_name,
+            config_fingerprint,
+            Jsonb(config),
             Jsonb(spec),
             Jsonb(tiers),
             url,
             phase,
             message,
             Jsonb(replicas),
+            replaced_bundle_fingerprint,
         ),
     )
 
 
-def get_deployment(family: str, suffix: str, run_name: str) -> Row | None:
+def get_deployment(
+    family: str, suffix: str, run_name: str, config_fingerprint: str
+) -> Row | None:
     return _one(
         f"SELECT {_DEPLOYMENT_COLUMNS} FROM deployments "
-        "WHERE family = %s AND suffix = %s AND run_name = %s",
-        (family, suffix, run_name),
+        f"WHERE {_DEPLOYMENT_KEY_MATCHES}",
+        (family, suffix, run_name, config_fingerprint),
     )
 
 
@@ -339,24 +354,38 @@ def observe_deployment(
     family: str,
     suffix: str,
     run_name: str,
+    config_fingerprint: str,
     phase: str,
     message: str,
     replicas: list[dict[str, Any]],
+    replaced_bundle_fingerprint: str,
 ) -> bool:
     """Record what the Serve controller reports for a deployment; False if
     there is no such deployment."""
     return (
         _write(
-            "UPDATE deployments SET phase = %s, message = %s, replicas = %s "
-            "WHERE family = %s AND suffix = %s AND run_name = %s",
-            (phase, message, Jsonb(replicas), family, suffix, run_name),
+            "UPDATE deployments SET phase = %s, message = %s, replicas = %s, "
+            "replaced_bundle_fingerprint = %s "
+            f"WHERE {_DEPLOYMENT_KEY_MATCHES}",
+            (
+                phase,
+                message,
+                Jsonb(replicas),
+                replaced_bundle_fingerprint,
+                family,
+                suffix,
+                run_name,
+                config_fingerprint,
+            ),
         )
         > 0
     )
 
 
-def delete_deployment(family: str, suffix: str, run_name: str) -> None:
+def delete_deployment(
+    family: str, suffix: str, run_name: str, config_fingerprint: str
+) -> None:
     _write(
-        "DELETE FROM deployments WHERE family = %s AND suffix = %s AND run_name = %s",
-        (family, suffix, run_name),
+        f"DELETE FROM deployments WHERE {_DEPLOYMENT_KEY_MATCHES}",
+        (family, suffix, run_name, config_fingerprint),
     )

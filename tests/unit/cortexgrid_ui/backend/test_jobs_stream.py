@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from cortexgrid.experiment import Experiment
 from cortexgrid.jobs import JobLifecycle
-from cortexgrid.model_serving import Deployment
+from cortexgrid.model_serving import Deployment, DeploymentKey
 
 from cortexgrid_ui.backend.streams import jobs_stream
 
@@ -29,11 +29,12 @@ def _deployment(
     family: str, suffix: str, run_name: str, phase: str
 ) -> Deployment:
     return Deployment(
-        family=family,
-        suffix=suffix,
-        run_name=run_name,
+        key=DeploymentKey(family, suffix, run_name),
+        config={},
         url=f"http://serve/r/{family}/{suffix}/{run_name}",
         phase=phase,
+        bundle_fingerprint="",
+        replaced_bundle_fingerprint="",
     )
 
 

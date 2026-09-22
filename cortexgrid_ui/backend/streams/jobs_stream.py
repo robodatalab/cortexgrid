@@ -24,13 +24,14 @@ from typing import Literal
 
 from cortexgrid.experiment import list_experiments
 from cortexgrid.jobs import list_experiment_run_jobs
-from cortexgrid.model_serving import Deployment, list_deployed_models
+from cortexgrid.model_serving import Deployment, DeploymentKey, list_deployed_models
 from cortexgrid.ray_util import (
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
 
 from cortexgrid_ui.backend.streams.config import JOBS_STREAM_POLL_INTERVAL_SEC
+from cortexgrid_ui.backend.streams.deployments_stream import deployment_id
 from cortexgrid_ui.backend.utils.keyed_stream import KeyedCache, Refresher
 
 log = logging.getLogger(__name__)
@@ -65,9 +66,9 @@ def row_id(run_id: RunId, job_id: JobId) -> RowId:
     return f"{run_id}/{job_id}"
 
 
-def deployment_row_id(family: str, suffix: str, run_name: str) -> RowId:
+def deployment_row_id(key: DeploymentKey) -> RowId:
     """Prefixed so it can never collide with a ``<run_id>/<job_id>`` row."""
-    return f"deployment/{family}/{suffix}/{run_name}"
+    return f"deployment/{deployment_id(key)}"
 
 
 def _status(job, all_ray_submission_ids: list[str]) -> str:
@@ -117,15 +118,13 @@ def poll_jobs(_: None) -> dict[RowId, JobRow]:
 
 def _deployment_row(deployment: Deployment) -> JobRow:
     return JobRow(
-        id=deployment_row_id(
-            deployment.family, deployment.suffix, deployment.run_name
-        ),
+        id=deployment_row_id(deployment.key),
         kind="deployment",
-        job_id=f"{deployment.family}/{deployment.suffix}",
+        job_id=f"{deployment.key.family}/{deployment.key.suffix}",
         status=deployment.phase,
         experiment_name="",
         run_id="",
-        run_name=deployment.run_name,
+        run_name=deployment.key.run_name,
     )
 
 

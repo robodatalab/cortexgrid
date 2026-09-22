@@ -6,18 +6,30 @@ import type { Deployment } from '../src/components/ModelsTree'
 
 const deployments: Deployment[] = [
   {
-    family: 'Qwen2',
-    suffix: 'instruct',
-    run_name: 'boogey-46',
+    key: {
+      family: 'Qwen2',
+      suffix: 'instruct',
+      run_name: 'boogey-46',
+      config_fingerprint: '',
+    },
+    config: {},
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
+    bundle_fingerprint: '',
+    replaced_bundle_fingerprint: '',
   },
   {
-    family: 'DeepSeek3',
-    suffix: 'chat',
-    run_name: 'snake-12',
+    key: {
+      family: 'DeepSeek3',
+      suffix: 'chat',
+      run_name: 'snake-12',
+      config_fingerprint: '',
+    },
+    config: {},
     url: 'http://ray/r/DeepSeek3/chat/snake-12',
     phase: 'failed',
+    bundle_fingerprint: '',
+    replaced_bundle_fingerprint: '',
   },
 ]
 
@@ -26,6 +38,8 @@ describe('DeploymentsTree', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
+        loads={{}}
+        bundleUpdates={{}}
         selection={null}
         onSelect={vi.fn()}
       />,
@@ -38,7 +52,14 @@ describe('DeploymentsTree', () => {
 
   it('shows an empty state when there are no deployments', () => {
     render(
-      <DeploymentsTree deployments={[]} selection={null} onSelect={vi.fn()} />,
+      <DeploymentsTree
+        deployments={[]}
+        loads={{}}
+        bundleUpdates={{}}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
     )
     expect(screen.getByText('No deployments')).toBeInTheDocument()
   })
@@ -48,6 +69,8 @@ describe('DeploymentsTree', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
+        loads={{}}
+        bundleUpdates={{}}
         selection={null}
         onSelect={onSelect}
       />,
@@ -57,5 +80,69 @@ describe('DeploymentsTree', () => {
       kind: 'deployment',
       id: 'Qwen2/instruct/boogey-46',
     })
+  })
+
+  it('shows one bar per load level next to each deployment it has a load for', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{ 'Qwen2/instruct/boogey-46': 0.9, 'DeepSeek3/chat/snake-12': 0.1 }}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('img', { name: 'Load: busy' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Load: idle' })).toBeInTheDocument()
+  })
+
+  it('marks the deployments the registry holds newer code for', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{}}
+        bundleUpdates={{
+          'Qwen2/instruct/boogey-46': {
+            deployedFingerprint: 'a'.repeat(64),
+            registeredFingerprint: 'b'.repeat(64),
+          },
+        }}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByText('update')).toHaveLength(1)
+  })
+
+  it('shows the config a deployment was given next to it', () => {
+    render(
+      <DeploymentsTree
+        deployments={[
+          {
+            ...deployments[0],
+            key: { ...deployments[0].key, config_fingerprint: '5f0c1d2e3a4b' },
+            config: { thinking: 'false' },
+          },
+        ]}
+        loads={{}}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('thinking=false')).toBeInTheDocument()
+  })
+
+  it('shows no load bars for a deployment without a load', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{}}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('img', { name: /^Load:/ })).not.toBeInTheDocument()
   })
 })

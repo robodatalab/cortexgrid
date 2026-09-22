@@ -254,7 +254,7 @@ class FakeState:
         self.checkpoints: dict[tuple[str, str], dict[str, Any]] = {}
         self.imported_models: dict[tuple[str, str, str], str] = {}
         self.models: dict[tuple[str, str, str], dict[str, Any]] = {}
-        self.deployments: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.deployments: dict[tuple[str, str, str, str], dict[str, Any]] = {}
         self._clock = 0
 
     def install(self, test: unittest.TestCase) -> "FakeState":
@@ -357,7 +357,9 @@ class FakeState:
             case ("deployments",):
                 return _json(list(self.deployments.values()))
             case ("deployments", family, suffix, run_name):
-                return _json(self.deployments.get((family, suffix, run_name)))
+                return _json(self.deployments.get(
+                    (family, suffix, run_name, params.get("config_fingerprint", ""))
+                ))
         raise NotImplementedError(f"FakeState has no GET /{'/'.join(segments)}")
 
     def get_bytes(self, *segments: str) -> bytes | None:
@@ -366,8 +368,11 @@ class FakeState:
                 return self.results.get((run_id, job_id))
         raise NotImplementedError(f"FakeState has no GET /{'/'.join(segments)}")
 
-    def put(self, *segments: str, body: Any) -> Any:
+    def put(
+        self, *segments: str, body: Any, params: dict[str, str] | None = None
+    ) -> Any:
         body = _json(body)
+        params = params or {}
         match segments:
             case ("experiments", name):
                 if name not in self.experiments:
@@ -413,10 +418,14 @@ class FakeState:
                 }
                 return None
             case ("deployments", family, suffix, run_name):
-                self.deployments[(family, suffix, run_name)] = {
+                config_fingerprint = params.get("config_fingerprint", "")
+                self.deployments[(family, suffix, run_name, config_fingerprint)] = {
                     "family": family,
                     "suffix": suffix,
                     "run_name": run_name,
+                    "config_fingerprint": config_fingerprint,
+                    "config": {},
+                    "replaced_bundle_fingerprint": "",
                     **body,
                 }
                 return None
@@ -430,8 +439,11 @@ class FakeState:
                 return
         raise NotImplementedError(f"FakeState has no PUT /{'/'.join(segments)}")
 
-    def patch(self, *segments: str, body: Any) -> bool:
+    def patch(
+        self, *segments: str, body: Any, params: dict[str, str] | None = None
+    ) -> bool:
         body = _json(body)
+        params = params or {}
         match segments:
             case ("models", family, suffix, run_name, "tags"):
                 model = self.models.get((family, suffix, run_name))
@@ -440,7 +452,9 @@ class FakeState:
                 model["tags"].update(body)
                 return True
             case ("deployments", family, suffix, run_name):
-                deployment = self.deployments.get((family, suffix, run_name))
+                deployment = self.deployments.get(
+                    (family, suffix, run_name, params.get("config_fingerprint", ""))
+                )
                 if deployment is None:
                     return False
                 deployment.update(body)
@@ -474,7 +488,10 @@ class FakeState:
                 self.models.pop((family, suffix, run_name), None)
                 return
             case ("deployments", family, suffix, run_name):
-                self.deployments.pop((family, suffix, run_name), None)
+                self.deployments.pop(
+                    (family, suffix, run_name, (params or {}).get("config_fingerprint", "")),
+                    None,
+                )
                 return
         raise NotImplementedError(f"FakeState has no DELETE /{'/'.join(segments)}")
 

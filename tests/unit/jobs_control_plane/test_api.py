@@ -66,9 +66,11 @@ class _FakeDB:
         return True
 
     def get_deployment(
-        self, family: str, suffix: str, run_name: str
+        self, family: str, suffix: str, run_name: str, config_fingerprint: str
     ) -> dict[str, Any] | None:
-        return self.rows.get(("deployments", family, suffix, run_name))
+        return self.rows.get(
+            ("deployments", family, suffix, run_name, config_fingerprint)
+        )
 
 
 class TestStateApi(unittest.TestCase):
@@ -98,6 +100,22 @@ class TestStateApi(unittest.TestCase):
     )
     def test_missing_record_is_404(self, name: str, path: str) -> None:
         self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_deployments_of_one_model_are_told_apart_by_config_fingerprint(
+        self,
+    ) -> None:
+        path = ("deployments", "Qwen3", "8B", "imported")
+        self.db.rows[(*path, "")] = {"config": {}}
+        self.db.rows[(*path, "5f0c1d2e3a4b")] = {"config": {"thinking": "false"}}
+
+        unconfigured = self.client.get("/deployments/Qwen3/8B/imported")
+        without_thinking = self.client.get(
+            "/deployments/Qwen3/8B/imported",
+            params={"config_fingerprint": "5f0c1d2e3a4b"},
+        )
+
+        self.assertEqual(unconfigured.json(), {"config": {}})
+        self.assertEqual(without_thinking.json(), {"config": {"thinking": "false"}})
 
     def test_job_lifecycle_round_trips(self) -> None:
         lifecycle = JobLifecycle(

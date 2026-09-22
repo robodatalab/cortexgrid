@@ -74,9 +74,11 @@ class ObservationBody(BaseModel):
     phase: str
     message: str
     replicas: list[dict[str, Any]]
+    replaced_bundle_fingerprint: str = ""
 
 
 class DeploymentBody(ObservationBody):
+    config: dict[str, str] = {}
     spec: dict[str, Any]
     tiers: list[int]
     url: str
@@ -247,36 +249,58 @@ def list_deployments() -> list[dict[str, Any]]:
 
 @app.put("/deployments/{family}/{suffix}/{run_name}")
 def put_deployment(
-    family: str, suffix: str, run_name: str, body: DeploymentBody
+    family: str,
+    suffix: str,
+    run_name: str,
+    body: DeploymentBody,
+    config_fingerprint: str = "",
 ) -> None:
     db.put_deployment(
         family,
         suffix,
         run_name,
+        config_fingerprint,
+        body.config,
         body.spec,
         body.tiers,
         body.url,
         body.phase,
         body.message,
         body.replicas,
+        body.replaced_bundle_fingerprint,
     )
 
 
 @app.get("/deployments/{family}/{suffix}/{run_name}")
-def get_deployment(family: str, suffix: str, run_name: str) -> dict[str, Any]:
-    return _found(db.get_deployment(family, suffix, run_name))
+def get_deployment(
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
+) -> dict[str, Any]:
+    return _found(db.get_deployment(family, suffix, run_name, config_fingerprint))
 
 
 @app.patch("/deployments/{family}/{suffix}/{run_name}")
 def observe_deployment(
-    family: str, suffix: str, run_name: str, body: ObservationBody
+    family: str,
+    suffix: str,
+    run_name: str,
+    body: ObservationBody,
+    config_fingerprint: str = "",
 ) -> None:
     if not db.observe_deployment(
-        family, suffix, run_name, body.phase, body.message, body.replicas
+        family,
+        suffix,
+        run_name,
+        config_fingerprint,
+        body.phase,
+        body.message,
+        body.replicas,
+        body.replaced_bundle_fingerprint,
     ):
         raise HTTPException(status_code=404)
 
 
 @app.delete("/deployments/{family}/{suffix}/{run_name}")
-def delete_deployment(family: str, suffix: str, run_name: str) -> None:
-    db.delete_deployment(family, suffix, run_name)
+def delete_deployment(
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
+) -> None:
+    db.delete_deployment(family, suffix, run_name, config_fingerprint)

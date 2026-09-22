@@ -219,7 +219,7 @@ class TestPollOnce(unittest.TestCase):
                 "jobs_control_plane.server.stop_ray_job",
                 side_effect=self._stopped.append,
             ),
-            patch("cortexgrid.model_serving.get_serve_details", self._serve_details),
+            patch("cortexgrid.model_serving.status.get_serve_details", self._serve_details),
         ]
         for p in patchers:
             p.start()

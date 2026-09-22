@@ -12,10 +12,13 @@ import {
     servingLabel,
     servingTier,
 } from "../phases";
+import { shortFingerprint } from "../bundleUpdate";
+import { describeDeploymentConfig } from "../deploymentConfig";
+import { deploymentId } from "../ids";
 
 type Props = {
     model: Model;
-    deployment: Deployment | null;
+    deployments: Deployment[];
     onNavigateToRun: (runName: string) => void;
     onNavigateToDeployment: (id: string) => void;
     onDeploy: (model: Model) => void;
@@ -125,16 +128,21 @@ function formatCreatedAt(iso: string): string {
 
 export function ModelDashboard({
     model,
-    deployment,
+    deployments,
     onNavigateToRun,
     onNavigateToDeployment,
     onDeploy,
     onSaveRequirements,
     onSaveConfig,
 }: Props) {
-    const servingTierValue = deployment ? servingTier(deployment.phase) : null;
     const regTier = registryTier(model.phase);
-    const canDeploy = model.phase === "ready" && deployment === null;
+    const hasUnconfiguredDeployment = deployments.some(
+        (d) => d.key.config_fingerprint === "",
+    );
+    const canDeploy = model.phase === "ready" && !hasUnconfiguredDeployment;
+    const deploymentsInOrder = [...deployments].sort((a, b) =>
+        deploymentId(a.key).localeCompare(deploymentId(b.key)),
+    );
     const stored = model.requirements;
     const [draft, setDraft] = useState<Draft>(() => toDraft(stored));
     const [saving, setSaving] = useState(false);
@@ -243,27 +251,40 @@ export function ModelDashboard({
                     </button>
                 </div>
             </header>
-            <section className="model-dashboard__deployment">
-                <div className="model-dashboard__deployment-status">
-                    {servingTierValue && (
-                        <span
-                            className={`model-dashboard__dot model-dashboard__dot--${servingTierValue}`}
-                            aria-label={`Deployment status: ${deployment ? servingLabel(deployment.phase) : "Not deployed"}`}
-                        />
-                    )}
-                    <span className="model-dashboard__deployment-label">
-                        {deployment ? servingLabel(deployment.phase) : "Not deployed"}
-                    </span>
-                    {deployment && (
-                        <button
-                            type="button"
-                            className="model-dashboard__link"
-                            onClick={() => onNavigateToDeployment(model.id)}
+            <section className="model-dashboard__deployment model-dashboard__deployment--list">
+                {deploymentsInOrder.length === 0 ? (
+                    <div className="model-dashboard__deployment-status">
+                        <span className="model-dashboard__deployment-label">
+                            Not deployed
+                        </span>
+                    </div>
+                ) : (
+                    deploymentsInOrder.map((d) => (
+                        <div
+                            key={deploymentId(d.key)}
+                            className="model-dashboard__deployment-status"
                         >
-                            View deployment
-                        </button>
-                    )}
-                </div>
+                            <span
+                                className={`model-dashboard__dot model-dashboard__dot--${servingTier(d.phase)}`}
+                                aria-label={`Deployment status: ${servingLabel(d.phase)}`}
+                            />
+                            <span className="model-dashboard__deployment-label">
+                                {servingLabel(d.phase)}
+                            </span>
+                            <span className="model-dashboard__deployment-config">
+                                {describeDeploymentConfig(d.config) ||
+                                    "the model's own config"}
+                            </span>
+                            <button
+                                type="button"
+                                className="model-dashboard__link"
+                                onClick={() => onNavigateToDeployment(deploymentId(d.key))}
+                            >
+                                View deployment
+                            </button>
+                        </div>
+                    ))
+                )}
             </section>
             <dl className="model-dashboard__fields">
                 <dt>Family</dt>
@@ -282,6 +303,10 @@ export function ModelDashboard({
                 </dd>
                 <dt>Created</dt>
                 <dd>{formatCreatedAt(model.created_at)}</dd>
+                <dt>Code</dt>
+                <dd className="model-dashboard__path" title={model.bundle_fingerprint}>
+                    {shortFingerprint(model.bundle_fingerprint)}
+                </dd>
                 <dt>Size</dt>
                 <dd>{formatSize(model.size_bytes)}</dd>
                 <dt>Storage</dt>

@@ -13,3 +13,21 @@ spec:
   podMetricsEndpoints:
     - port: metrics
       interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: ray-worker
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+  labels:
+    {{- include "cortexgrid.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [ray-worker, ray-worker-cpu]
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 15s

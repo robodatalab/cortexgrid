@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
+
+from ray.serve.config import AutoscalingPolicy
 
 from cortexgrid._model_scheduler import (
     _ClusterOccupancy,
     _ModelScheduler,
     _NodeOccupancy,
     _ReplicaWaitingForRoom,
+    model_autoscaling_config,
 )
 
 
@@ -50,6 +56,23 @@ def _as_seen_by_scheduler(
 
 
 _NO_REPLICA_WAITING = _ClusterOccupancy(nodes=[], replicas_waiting_for_room=[])
+
+_LOAD_POLICY_WITH_CORTEXGRID_MISSING = """
+import importlib.abc
+import sys
+
+class CortexgridIsNotInstalled(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name.split(".")[0] == "cortexgrid":
+            raise ModuleNotFoundError(name)
+
+sys.meta_path.insert(0, CortexgridIsNotInstalled())
+
+import cloudpickle
+
+policy_class = cloudpickle.loads(sys.stdin.buffer.read())
+policy_class()
+"""
 
 
 class TestModelScheduler(unittest.TestCase):
@@ -127,6 +150,20 @@ class TestModelScheduler(unittest.TestCase):
     def test_reads_no_occupancy_while_no_replica_waits(self) -> None:
         self.assertFalse(self._report(_SECOND, has_requests=False))
         self.read_occupancy.assert_not_called()
+
+
+class TestPolicyLoadsInTheServeController(unittest.TestCase):
+    def test_policy_loads_where_cortexgrid_is_not_installed(self) -> None:
+        policy = AutoscalingPolicy(**model_autoscaling_config(1)["policy"])
+        with tempfile.TemporaryDirectory() as directory_without_cortexgrid:
+            loading = subprocess.run(
+                [sys.executable, "-c", _LOAD_POLICY_WITH_CORTEXGRID_MISSING],
+                input=policy.get_serialized_policy_def(),
+                capture_output=True,
+                cwd=directory_without_cortexgrid,
+            )
+
+        self.assertEqual(loading.returncode, 0, loading.stderr.decode())
 
 
 if __name__ == "__main__":

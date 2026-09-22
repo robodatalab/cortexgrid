@@ -2,10 +2,13 @@
 // visual language as the registry card) but is driven purely by a Deployment.
 import { useEffect, useState } from "react";
 import "./ModelDashboard.css";
+import { DeploymentUsage } from "./DeploymentUsage";
 import { DeviceCard, type PodStatus } from "./DeviceCard";
 import type { Deployment } from "./ModelsTree";
 import { TitledFrame } from "./TitledFrame";
-import { deploymentId } from "../ids";
+import { shortFingerprint, type BundleUpdate } from "../bundleUpdate";
+import { describeDeploymentConfig } from "../deploymentConfig";
+import { deploymentApiUrl, modelId, serveApplicationName } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
 // Public ingress hosts on the Tailscale network. Both are also configured in
@@ -20,8 +23,10 @@ type Props = {
     // The registry model may have been deleted while still deployed, so the
     // back-link only renders when the model is actually in the repository.
     modelInRepository: boolean;
+    bundleUpdate: BundleUpdate | null;
     onNavigateToModel: (id: string) => void;
     onStop: (deployment: Deployment) => void;
+    onRedeploy: (deployment: Deployment) => Promise<void>;
 };
 
 // One Ray Serve controller message for the app or one of its deployments
@@ -32,16 +37,14 @@ type ServingMessage = {
     message: string;
 };
 
-function appName(d: Deployment): string {
-    return `${d.family}__${d.suffix}__${d.run_name}`;
-}
-
 function rayDashboardUrl(d: Deployment): string {
-    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(appName(d))}`;
+    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(serveApplicationName(d.key))}`;
 }
 
 function grafanaUrl(d: Deployment): string {
-    const params = new URLSearchParams({ "var-Application": appName(d) });
+    const params = new URLSearchParams({
+        "var-Application": serveApplicationName(d.key),
+    });
     return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
 }
 
@@ -55,16 +58,12 @@ type ReplicaDevice = {
     device: PodStatus | null;
 };
 
-function devicesUrl(d: Deployment): string {
-    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/devices`;
-}
-
 // Which machines the deployment's replicas landed on, repolled while it is
 // live: replicas move as they restart, and a device's health changes under
 // them. Results are tagged with the url they were fetched for, so a response
 // for a deployment the user has navigated away from is never shown.
 function useReplicaDevices(deployment: Deployment): ReplicaDevice[] | null {
-    const url = devicesUrl(deployment);
+    const url = deploymentApiUrl(deployment.key, "devices");
     const [loaded, setLoaded] = useState<{
         url: string;
         devices: ReplicaDevice[];
@@ -94,17 +93,13 @@ function useReplicaDevices(deployment: Deployment): ReplicaDevice[] | null {
     return loaded?.url === url ? loaded.devices : null;
 }
 
-function messagesUrl(d: Deployment): string {
-    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/messages`;
-}
-
 // Ray's explanation of a failed or unhealthy deployment, fetched when the
 // deployment enters an error phase. Results are tagged with the url + phase
 // they were fetched for, so a response for another deployment or an earlier
 // phase is never shown. null until loaded, and for non-error phases.
 function useServingMessages(deployment: Deployment): ServingMessage[] | null {
     const failed = servingTier(deployment.phase) === "error";
-    const url = messagesUrl(deployment);
+    const url = deploymentApiUrl(deployment.key, "messages");
     const key = `${url}:${deployment.phase}`;
     const [loaded, setLoaded] = useState<{
         key: string;
@@ -131,11 +126,86 @@ function useServingMessages(deployment: Deployment): ServingMessage[] | null {
     return failed && loaded?.key === key ? loaded.messages : null;
 }
 
+function BundleUpdateNotice({
+    update,
+    onRedeploy,
+}: {
+    update: BundleUpdate;
+    onRedeploy: () => Promise<void>;
+}) {
+    const [redeploying, setRedeploying] = useState(false);
+    const registryHoldsSignedCode = update.registeredFingerprint !== "";
+    const redeploy = () => {
+        setRedeploying(true);
+        onRedeploy().finally(() => setRedeploying(false));
+    };
+    return (
+        <section className="model-dashboard__update" role="status">
+            <div className="model-dashboard__update-message">
+                <div className="model-dashboard__update-title">
+                    {registryHoldsSignedCode ? "Update available" : "May be outdated"}
+                </div>
+                <p className="model-dashboard__update-text">
+                    {registryHoldsSignedCode ? (
+                        <>
+                            This endpoint runs code{" "}
+                            <code>{shortFingerprint(update.deployedFingerprint)}</code>,
+                            the registry holds{" "}
+                            <code>{shortFingerprint(update.registeredFingerprint)}</code>.
+                            Redeploy the model to run the registry's code.
+                        </>
+                    ) : (
+                        <>
+                            This model's code was saved before code was signed, so
+                            there is no telling whether it is current. Re-import the
+                            model, then redeploy it.
+                        </>
+                    )}
+                </p>
+            </div>
+            {registryHoldsSignedCode && (
+                <button
+                    type="button"
+                    className="btn"
+                    disabled={redeploying}
+                    onClick={redeploy}
+                >
+                    {redeploying ? "Redeploying…" : "Redeploy"}
+                </button>
+            )}
+        </section>
+    );
+}
+
+function RolloutNotice({ deployment }: { deployment: Deployment }) {
+    return (
+        <section className="model-dashboard__update" role="status">
+            <div className="model-dashboard__update-message">
+                <div className="model-dashboard__update-title">Redeploying</div>
+                <p className="model-dashboard__update-text">
+                    This endpoint is moving from code{" "}
+                    <code>{shortFingerprint(deployment.replaced_bundle_fingerprint)}</code>{" "}
+                    to <code>{shortFingerprint(deployment.bundle_fingerprint)}</code>.
+                </p>
+            </div>
+        </section>
+    );
+}
+
+function deployedCode(deployment: Deployment): string {
+    const current = shortFingerprint(deployment.bundle_fingerprint);
+    return deployment.replaced_bundle_fingerprint === ""
+        ? current
+        : `${shortFingerprint(deployment.replaced_bundle_fingerprint)} → ${current}`;
+}
+
 export function DeploymentDashboard({
     deployment,
     modelInRepository,
+    bundleUpdate,
     onNavigateToModel,
     onStop,
+    onRedeploy,
 }: Props) {
     const tier = servingTier(deployment.phase);
     const messages = useServingMessages(deployment);
@@ -145,10 +215,10 @@ export function DeploymentDashboard({
             <header className="model-dashboard__header">
                 <div className="model-dashboard__title-block">
                     <h1 className="model-dashboard__title">
-                        {deployment.family} / {deployment.suffix}
+                        {deployment.key.family} / {deployment.key.suffix}
                     </h1>
                     <div className="model-dashboard__subtitle">
-                        {deployment.run_name}
+                        {deployment.key.run_name}
                     </div>
                 </div>
                 <div className="model-dashboard__actions">
@@ -161,6 +231,15 @@ export function DeploymentDashboard({
                     </button>
                 </div>
             </header>
+            {deployment.replaced_bundle_fingerprint !== "" && (
+                <RolloutNotice deployment={deployment} />
+            )}
+            {bundleUpdate !== null && (
+                <BundleUpdateNotice
+                    update={bundleUpdate}
+                    onRedeploy={() => onRedeploy(deployment)}
+                />
+            )}
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">
                     <span
@@ -198,7 +277,7 @@ export function DeploymentDashboard({
                             type="button"
                             className="model-dashboard__link"
                             onClick={() =>
-                                onNavigateToModel(deploymentId(deployment))
+                                onNavigateToModel(modelId(deployment.key))
                             }
                         >
                             View in repository
@@ -208,14 +287,26 @@ export function DeploymentDashboard({
                     )}
                 </dd>
                 <dt>Family</dt>
-                <dd>{deployment.family}</dd>
+                <dd>{deployment.key.family}</dd>
                 <dt>Variant</dt>
-                <dd>{deployment.suffix}</dd>
+                <dd>{deployment.key.suffix}</dd>
                 <dt>Run</dt>
-                <dd>{deployment.run_name}</dd>
+                <dd>{deployment.key.run_name}</dd>
+                <dt>Config</dt>
+                <dd className="model-dashboard__path">
+                    {describeDeploymentConfig(deployment.config) || "the model's own"}
+                </dd>
+                <dt>Code</dt>
+                <dd
+                    className="model-dashboard__path"
+                    title={deployment.bundle_fingerprint}
+                >
+                    {deployedCode(deployment)}
+                </dd>
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
             </dl>
+            <DeploymentUsage deployment={deployment} />
             <section className="model-dashboard__devices">
                 <h2 className="model-dashboard__section-title">Devices</h2>
                 <p className="model-dashboard__hint">

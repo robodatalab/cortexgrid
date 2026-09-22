@@ -3,25 +3,34 @@ import { Box } from "lucide-react";
 import "./DeploymentsTree.css";
 import { servingTier } from "../phases";
 import { deploymentId } from "../ids";
+import { describeDeploymentConfig } from "../deploymentConfig";
+import type { BundleUpdateByDeploymentId } from "../bundleUpdate";
+import type { LoadByDeploymentId } from "../deploymentLoad";
+import { LoadBars } from "./LoadBars";
 import type { Deployment } from "./ModelsTree";
 
 export type DeploymentSelection = { kind: "deployment"; id: string };
 
 type Props = {
     deployments: Deployment[];
+    loads: LoadByDeploymentId;
+    bundleUpdates: BundleUpdateByDeploymentId;
     selection: DeploymentSelection | null;
     onSelect: (selection: DeploymentSelection) => void;
 };
 
-export function DeploymentsTree({ deployments, selection, onSelect }: Props) {
+export function DeploymentsTree({
+    deployments,
+    loads,
+    bundleUpdates,
+    selection,
+    onSelect,
+}: Props) {
     const sorted = useMemo(
         () =>
-            [...deployments].sort((a, b) => {
-                const f = a.family.localeCompare(b.family);
-                if (f !== 0) return f;
-                const s = a.suffix.localeCompare(b.suffix);
-                return s !== 0 ? s : a.run_name.localeCompare(b.run_name);
-            }),
+            [...deployments].sort((a, b) =>
+                deploymentId(a.key).localeCompare(deploymentId(b.key)),
+            ),
         [deployments],
     );
 
@@ -35,7 +44,8 @@ export function DeploymentsTree({ deployments, selection, onSelect }: Props) {
                     <div className="deployments-tree__status">No deployments</div>
                 )}
                 {sorted.map((d) => {
-                    const id = deploymentId(d);
+                    const id = deploymentId(d.key);
+                    const config = describeDeploymentConfig(d.config);
                     const isSelected = selection?.id === id;
                     const tier = servingTier(d.phase);
                     return (
@@ -50,15 +60,32 @@ export function DeploymentsTree({ deployments, selection, onSelect }: Props) {
                         >
                             <Box size={16} className="deployments-tree__icon" />
                             <span className="deployments-tree__label">
-                                {d.family}/{d.suffix}
+                                {d.key.family}/{d.key.suffix}
                             </span>
                             <span className="deployments-tree__run">
-                                {d.run_name}
+                                {d.key.run_name}
                             </span>
+                            {config !== "" && (
+                                <span
+                                    className="deployments-tree__config"
+                                    title={config}
+                                >
+                                    {config}
+                                </span>
+                            )}
                             <span
                                 className={`deployments-tree__dot deployments-tree__dot--${tier}`}
                                 aria-label={`Deployment status: ${d.phase}`}
                             />
+                            {id in loads && <LoadBars load={loads[id]} />}
+                            {id in bundleUpdates && (
+                                <span
+                                    className="deployments-tree__update"
+                                    title="The registry holds newer code for this model; redeploy it"
+                                >
+                                    update
+                                </span>
+                            )}
                         </div>
                     );
                 })}
