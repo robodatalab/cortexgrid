@@ -6,7 +6,7 @@ from typing import Iterator
 from unittest.mock import patch
 
 from cortexgrid.experiment import Experiment
-from cortexgrid.jobs import JobLifecycle
+from cortexgrid.jobs import JobLifecycle, LifecycleEvent
 from cortexgrid.model_serving import Deployment, DeploymentKey
 
 from cortexgrid_ui.backend.streams import jobs_stream
@@ -19,9 +19,17 @@ def _experiment(name: str, run_id: str, run_name: str) -> Experiment:
     return exp
 
 
-def _job(run_id: str, job_id: str, experiment_name: str = "alpha") -> JobLifecycle:
+def _job(
+    run_id: str,
+    job_id: str,
+    experiment_name: str = "alpha",
+    history: list[LifecycleEvent] | None = None,
+) -> JobLifecycle:
     return JobLifecycle(
-        experiment_name=experiment_name, run_id=run_id, job_id=job_id
+        experiment_name=experiment_name,
+        run_id=run_id,
+        job_id=job_id,
+        history=history or [],
     )
 
 
@@ -215,6 +223,59 @@ class TestPollJobs(unittest.TestCase):
                 rows = jobs_stream.poll_jobs(None)
 
         self.assertEqual(list(rows), ["run-2/j3"])
+
+
+class TestJobTimes(unittest.TestCase):
+    def _row(self, history: list[LifecycleEvent]) -> jobs_stream.JobRow:
+        with _cluster(
+            experiments=[_experiment("alpha", "run-1", "alpha-run")],
+            jobs_by_run={"run-1": [_job("run-1", "j1", history=history)]},
+            ray_submission_ids=[],
+        ):
+            return jobs_stream.poll_jobs(None)["run-1/j1"]
+
+    def test_a_job_never_seen_running_has_no_times(self) -> None:
+        row = self._row([LifecycleEvent(attempt=0, state="pending", start="t0")])
+
+        self.assertIsNone(row.started_at)
+        self.assertIsNone(row.ended_at)
+
+    def test_started_is_when_it_was_first_seen_running(self) -> None:
+        row = self._row(
+            [
+                LifecycleEvent(attempt=0, state="pending", start="t0", end="t1"),
+                LifecycleEvent(attempt=0, state="running", start="t1"),
+            ]
+        )
+
+        self.assertEqual(row.started_at, "t1")
+        self.assertIsNone(row.ended_at)
+
+    def test_ended_is_when_it_was_seen_in_a_terminal_state(self) -> None:
+        row = self._row(
+            [
+                LifecycleEvent(attempt=0, state="pending", start="t0", end="t1"),
+                LifecycleEvent(attempt=0, state="running", start="t1", end="t2"),
+                LifecycleEvent(attempt=0, state="stopped", start="t2"),
+            ]
+        )
+
+        self.assertEqual(row.started_at, "t1")
+        self.assertEqual(row.ended_at, "t2")
+
+    def test_a_retried_job_started_on_its_first_attempt_and_has_not_ended(
+        self,
+    ) -> None:
+        row = self._row(
+            [
+                LifecycleEvent(attempt=0, state="running", start="t1", end="t2"),
+                LifecycleEvent(attempt=0, state="failed", start="t2", end="t3"),
+                LifecycleEvent(attempt=1, state="running", start="t3"),
+            ]
+        )
+
+        self.assertEqual(row.started_at, "t1")
+        self.assertIsNone(row.ended_at)
 
 
 class TestPollDeployments(unittest.TestCase):

@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict
 log = logging.getLogger(__name__)
 
 _JOB_POLL_INTERVAL_S = 5.0
-_TERMINAL_JOB_STATES = (JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED)
+TERMINAL_JOB_STATES = (JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED)
 
 
 class JobFailed(RuntimeError):
@@ -379,7 +379,7 @@ def wait_for_job_result(run_id: str, job_id: str, timeout: float | None = None) 
             )
         ray_job_id = lifecycle.get_ray_job_id()
         status = get_ray_job_status(ray_job_id)
-        if status in _TERMINAL_JOB_STATES:
+        if status in TERMINAL_JOB_STATES:
             try:
                 result = JobResult.load_from_mlflow(run_id, job_id)
             except FileNotFoundError:
@@ -413,7 +413,7 @@ class JobFuture:
 
     def done(self) -> bool:
         """True once Ray reports the job finished, failed or stopped."""
-        return self.status() in _TERMINAL_JOB_STATES
+        return self.status() in TERMINAL_JOB_STATES
 
     def result(self, timeout: float | None = None) -> Any:
         """Block until the job finishes and return its function's value.
