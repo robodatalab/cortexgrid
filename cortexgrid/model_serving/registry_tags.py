@@ -36,8 +36,12 @@ def metadata_from_tags(tags: dict[str, str]) -> BundleMetadata:
         # Absent on models saved before dependencies were pip-installed.
         pip_requirements=json.loads(tags.get(_PIP_REQUIREMENTS_TAG, "[]")),
         # Absent on models saved before bundles were fingerprinted.
-        fingerprint=tags.get(_BUNDLE_FINGERPRINT_TAG, ""),
+        fingerprint=bundle_fingerprint_from_tags(tags),
     )
+
+
+def bundle_fingerprint_from_tags(tags: dict[str, str]) -> str:
+    return tags.get(_BUNDLE_FINGERPRINT_TAG, "")
 
 
 # Registry tag keys for the ModelRequirements.

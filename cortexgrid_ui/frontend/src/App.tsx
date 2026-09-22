@@ -26,6 +26,7 @@ import type {
 } from './components/ModelsTree'
 import { DeploymentsTree } from './components/DeploymentsTree'
 import { useDeploymentLoads } from './deploymentLoad'
+import { pendingBundleUpdates } from './bundleUpdate'
 import type { DeploymentSelection } from './components/DeploymentsTree'
 import { deploymentId } from './ids'
 import { ModelDashboard } from './components/ModelDashboard'
@@ -173,6 +174,11 @@ function App() {
 
   const deploymentLoads = useDeploymentLoads(
     view === 'models' ? '/api/deployments/load' : null,
+  )
+
+  const bundleUpdates = useMemo(
+    () => pendingBundleUpdates(deployments, modelsById),
+    [deployments, modelsById],
   )
 
   const selectedModel =
@@ -327,6 +333,7 @@ function App() {
                       <DeploymentsTree
                         deployments={deployments}
                         loads={deploymentLoads}
+                        bundleUpdates={bundleUpdates}
                         selection={
                           modelsSelection?.kind === 'deployment'
                             ? modelsSelection
@@ -357,6 +364,9 @@ function App() {
                       deployment={selectedDeployment}
                       modelInRepository={
                         modelsById[deploymentId(selectedDeployment)] !== undefined
+                      }
+                      bundleUpdate={
+                        bundleUpdates[deploymentId(selectedDeployment)] ?? null
                       }
                       onNavigateToModel={navigateToModel}
                       onStop={handleStopDeployment}

@@ -26,6 +26,7 @@ export type Model = {
     phase: string;
     requirements: ModelRequirements;
     config: ModelConfig;
+    bundle_fingerprint: string;
 };
 
 export type Deployment = {
@@ -35,6 +36,7 @@ export type Deployment = {
     url: string;
     // Normalized serving lifecycle phase (see ServingStatus).
     phase: string;
+    bundle_fingerprint: string;
 };
 
 export type ModelSelection = { kind: "model"; id: string };

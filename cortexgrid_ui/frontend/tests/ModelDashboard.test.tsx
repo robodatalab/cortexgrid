@@ -31,6 +31,7 @@ function makeModel(
     phase,
     requirements,
     config,
+    bundle_fingerprint: 'b'.repeat(64),
   }
 }
 
@@ -40,6 +41,7 @@ const deployment: Deployment = {
   run_name: 'boogey-46',
   url: 'http://ray/r/Qwen2/instruct/boogey-46',
   phase: 'running',
+  bundle_fingerprint: 'b'.repeat(64),
 }
 
 function renderCard(
@@ -104,6 +106,11 @@ describe('ModelDashboard', () => {
   it('shows the registry phase', () => {
     renderCard(makeModel('uploading'), null)
     expect(screen.getByText('Uploading')).toBeInTheDocument()
+  })
+
+  it('shows the short fingerprint of the code the registry holds', () => {
+    renderCard(makeModel('ready'), null)
+    expect(screen.getByText('#bbbbbbb')).toBeInTheDocument()
   })
 
   it('shows "Not deployed" and no deployment link when undeployed', () => {

@@ -11,6 +11,7 @@ const deployments: Deployment[] = [
     run_name: 'boogey-46',
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
+    bundle_fingerprint: '',
   },
   {
     family: 'DeepSeek3',
@@ -18,6 +19,7 @@ const deployments: Deployment[] = [
     run_name: 'snake-12',
     url: 'http://ray/r/DeepSeek3/chat/snake-12',
     phase: 'failed',
+    bundle_fingerprint: '',
   },
 ]
 
@@ -27,6 +29,7 @@ describe('DeploymentsTree', () => {
       <DeploymentsTree
         deployments={deployments}
         loads={{}}
+        bundleUpdates={{}}
         selection={null}
         onSelect={vi.fn()}
       />,
@@ -39,7 +42,14 @@ describe('DeploymentsTree', () => {
 
   it('shows an empty state when there are no deployments', () => {
     render(
-      <DeploymentsTree deployments={[]} selection={null} onSelect={vi.fn()} />,
+      <DeploymentsTree
+        deployments={[]}
+        loads={{}}
+        bundleUpdates={{}}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
     )
     expect(screen.getByText('No deployments')).toBeInTheDocument()
   })
@@ -50,6 +60,7 @@ describe('DeploymentsTree', () => {
       <DeploymentsTree
         deployments={deployments}
         loads={{}}
+        bundleUpdates={{}}
         selection={null}
         onSelect={onSelect}
       />,
@@ -66,6 +77,7 @@ describe('DeploymentsTree', () => {
       <DeploymentsTree
         deployments={deployments}
         loads={{ 'Qwen2/instruct/boogey-46': 0.9, 'DeepSeek3/chat/snake-12': 0.1 }}
+        bundleUpdates={{}}
         selection={null}
         onSelect={vi.fn()}
       />,
@@ -74,11 +86,30 @@ describe('DeploymentsTree', () => {
     expect(screen.getByRole('img', { name: 'Load: idle' })).toBeInTheDocument()
   })
 
+  it('marks the deployments the registry holds newer code for', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{}}
+        bundleUpdates={{
+          'Qwen2/instruct/boogey-46': {
+            deployedFingerprint: 'a'.repeat(64),
+            registeredFingerprint: 'b'.repeat(64),
+          },
+        }}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getAllByText('update')).toHaveLength(1)
+  })
+
   it('shows no load bars for a deployment without a load', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
         loads={{}}
+        bundleUpdates={{}}
         selection={null}
         onSelect={vi.fn()}
       />,

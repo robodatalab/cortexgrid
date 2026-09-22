@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from cortexgrid.model_serving.placement import ModelRequirements, ray_actor_options
-from cortexgrid.model_serving.serve_bundle import BundleMetadata
+from cortexgrid.model_serving.serve_bundle import (
+    BundleMetadata,
+    bundle_fingerprint_from_url,
+)
 
 
 def app_name(family: str, suffix: str, run_name: str) -> str:
@@ -50,3 +53,7 @@ def build_application_spec(
         },
         "runtime_env": runtime_env,
     }
+
+
+def bundle_fingerprint_in_spec(spec: dict[str, Any]) -> str:
+    return bundle_fingerprint_from_url(spec["runtime_env"]["working_dir"])

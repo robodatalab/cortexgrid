@@ -22,6 +22,7 @@ from cortexgrid.model_serving import (
     vram_tiers,
     build_bundle,
     bundle_class,
+    bundle_fingerprint_from_url,
     deploy_model,
     list_deployed_models,
     metadata_to_tags,
@@ -48,6 +49,17 @@ _FAKE_META = BundleMetadata(
 )
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+_OLD_FINGERPRINT = "a" * 64
+_NEW_FINGERPRINT = "b" * 64
+
+
+def _bundle_with_fingerprint(fingerprint: str) -> BundleMetadata:
+    return BundleMetadata(
+        bundle_url=f"s3://bucket/serve-bundles/boogey-46/Qwen2__instruct/{fingerprint}.zip",
+        class_import_path="stub:Stub",
+        fingerprint=fingerprint,
+    )
 
 # The GPU size classes a cluster reports: a 12 GiB card and a 128 GiB one, the
 # shape the smallest-device placement exists for.
@@ -86,6 +98,7 @@ def _seed_saved_model(
     suffix: str,
     run_name: str,
     requirements: ModelRequirements = _GPU_REQUIREMENTS,
+    bundle: BundleMetadata = _FAKE_META,
 ) -> None:
     """Register the model as `save_model` does: its bundle and requirements as
     tags on the registry entry."""
@@ -94,7 +107,7 @@ def _seed_saved_model(
         suffix,
         run_name,
         "s3://bucket/weights",
-        {**metadata_to_tags(_FAKE_META), **requirements_to_tags(requirements)},
+        {**metadata_to_tags(bundle), **requirements_to_tags(requirements)},
     )
 
 
@@ -229,6 +242,35 @@ class TestModelServing(unittest.TestCase):
 
     def test_list_returns_empty_when_nothing_deployed(self) -> None:
         self.assertEqual(list_deployed_models(), [])
+
+    def test_deployment_runs_its_bundle_until_redeployed_after_a_reimport(
+        self,
+    ) -> None:
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_OLD_FINGERPRINT),
+        )
+        deploy_model("Qwen2", "instruct", "boogey-46")
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_NEW_FINGERPRINT),
+        )
+
+        running_before_redeploy = [d.bundle_fingerprint for d in list_deployed_models()]
+        redeployed = deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(running_before_redeploy, [_OLD_FINGERPRINT])
+        self.assertEqual(redeployed.bundle_fingerprint, _NEW_FINGERPRINT)
+        self.assertEqual(
+            [d.bundle_fingerprint for d in list_deployed_models()], [_NEW_FINGERPRINT]
+        )
+
+    def test_deployment_of_a_bundle_saved_before_fingerprints_has_none(
+        self,
+    ) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual([d.bundle_fingerprint for d in list_deployed_models()], [""])
 
     def test_redeploying_same_triple_replaces_prior_spec(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -777,6 +819,26 @@ class TestServeDependencies(unittest.TestCase):
             dest_paths, [f"serve-bundles/run/fam__suf/{meta.fingerprint}.zip"]
         )
         self.assertEqual(meta.bundle_url, f"s3://b/{dest_paths[0]}")
+
+    def test_bundle_url_gives_back_the_fingerprint_it_was_uploaded_under(
+        self,
+    ) -> None:
+        desc = BundleDesc(local_files={Path(__file__).resolve()}, tp_deps={})
+        with (
+            patch("cortexgrid.model_serving.serve_bundle.bundle", return_value=desc),
+            patch(
+                "cortexgrid.model_serving.serve_bundle.upload",
+                side_effect=lambda local_path, dest_path: f"s3://b/{dest_path}",
+            ),
+        ):
+            meta = bundle_class(_ServeApp, "fam", "suf", "run")
+
+        self.assertEqual(bundle_fingerprint_from_url(meta.bundle_url), meta.fingerprint)
+
+    def test_bundle_url_from_before_fingerprints_gives_none(self) -> None:
+        self.assertEqual(
+            bundle_fingerprint_from_url("s3://b/serve-bundles/run/fam__suf.zip"), ""
+        )
 
     def _build(self, desc: BundleDesc) -> ServeBundle:
         with (

@@ -3,6 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { DeploymentDashboard } from '../src/components/DeploymentDashboard'
 import type { Deployment } from '../src/components/ModelsTree'
+import type { BundleUpdate } from '../src/bundleUpdate'
+
+const DEPLOYED_FINGERPRINT = 'a'.repeat(64)
+const REGISTERED_FINGERPRINT = 'b'.repeat(64)
 
 const deployment: Deployment = {
   family: 'Qwen2',
@@ -10,6 +14,7 @@ const deployment: Deployment = {
   run_name: 'boogey-46',
   url: 'http://ray/r/Qwen2/instruct/boogey-46',
   phase: 'running',
+  bundle_fingerprint: DEPLOYED_FINGERPRINT,
 }
 
 function renderCard(
@@ -19,11 +24,13 @@ function renderCard(
     onNavigateToModel: (id: string) => void
   }> = {},
   d: Deployment = deployment,
+  bundleUpdate: BundleUpdate | null = null,
 ) {
   render(
     <DeploymentDashboard
       deployment={d}
       modelInRepository={modelInRepository}
+      bundleUpdate={bundleUpdate}
       onNavigateToModel={handlers.onNavigateToModel ?? vi.fn()}
       onStop={handlers.onStop ?? vi.fn()}
     />,
@@ -76,6 +83,34 @@ describe('DeploymentDashboard', () => {
   it('shows the serving phase', () => {
     renderCard(true)
     expect(screen.getByText('Running')).toBeInTheDocument()
+  })
+
+  it('shows the short fingerprint of the code it runs', () => {
+    renderCard(true)
+    expect(screen.getByText('#aaaaaaa')).toBeInTheDocument()
+  })
+
+  it('shows no update notice while it runs the registry code', () => {
+    renderCard(true)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('shows which code it runs and which the registry holds when they differ', () => {
+    renderCard(true, {}, deployment, {
+      deployedFingerprint: DEPLOYED_FINGERPRINT,
+      registeredFingerprint: REGISTERED_FINGERPRINT,
+    })
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveTextContent('Update available')
+    expect(notice).toHaveTextContent('runs code #aaaaaaa, the registry holds #bbbbbbb')
+  })
+
+  it('warns that code saved before signing may be outdated', () => {
+    renderCard(true, {}, { ...deployment, bundle_fingerprint: '' }, {
+      deployedFingerprint: '',
+      registeredFingerprint: '',
+    })
+    expect(screen.getByRole('status')).toHaveTextContent('May be outdated')
   })
 
   it('invokes onStop with the deployment when Stop is clicked', async () => {

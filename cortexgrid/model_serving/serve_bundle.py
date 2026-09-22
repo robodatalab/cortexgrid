@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import logging
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from cortexgrid.s3_util import upload
 
 
 log = logging.getLogger(__name__)
+
+_BUNDLE_FILE_NAME = re.compile(r"(?P<fingerprint>[0-9a-f]{64})\.zip")
 
 
 @dataclass
@@ -132,3 +135,9 @@ def upload_bundle(
         pip_requirements=serve_bundle.pip_requirements,
         fingerprint=serve_bundle.fingerprint,
     )
+
+
+def bundle_fingerprint_from_url(bundle_url: str) -> str:
+    bundle_file_name = bundle_url.rsplit("/", 1)[-1]
+    match = _BUNDLE_FILE_NAME.fullmatch(bundle_file_name)
+    return match["fingerprint"] if match else ""

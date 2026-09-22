@@ -3,6 +3,7 @@ import { Box } from "lucide-react";
 import "./DeploymentsTree.css";
 import { servingTier } from "../phases";
 import { deploymentId } from "../ids";
+import type { BundleUpdateByDeploymentId } from "../bundleUpdate";
 import type { LoadByDeploymentId } from "../deploymentLoad";
 import { LoadBars } from "./LoadBars";
 import type { Deployment } from "./ModelsTree";
@@ -12,6 +13,7 @@ export type DeploymentSelection = { kind: "deployment"; id: string };
 type Props = {
     deployments: Deployment[];
     loads: LoadByDeploymentId;
+    bundleUpdates: BundleUpdateByDeploymentId;
     selection: DeploymentSelection | null;
     onSelect: (selection: DeploymentSelection) => void;
 };
@@ -19,6 +21,7 @@ type Props = {
 export function DeploymentsTree({
     deployments,
     loads,
+    bundleUpdates,
     selection,
     onSelect,
 }: Props) {
@@ -68,6 +71,14 @@ export function DeploymentsTree({
                                 aria-label={`Deployment status: ${d.phase}`}
                             />
                             {id in loads && <LoadBars load={loads[id]} />}
+                            {id in bundleUpdates && (
+                                <span
+                                    className="deployments-tree__update"
+                                    title="The registry holds newer code for this model; redeploy it"
+                                >
+                                    update
+                                </span>
+                            )}
                         </div>
                     );
                 })}

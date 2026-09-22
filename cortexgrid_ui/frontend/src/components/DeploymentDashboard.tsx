@@ -6,6 +6,7 @@ import { DeploymentUsage } from "./DeploymentUsage";
 import { DeviceCard, type PodStatus } from "./DeviceCard";
 import type { Deployment } from "./ModelsTree";
 import { TitledFrame } from "./TitledFrame";
+import { shortFingerprint, type BundleUpdate } from "../bundleUpdate";
 import { deploymentId } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
@@ -21,6 +22,7 @@ type Props = {
     // The registry model may have been deleted while still deployed, so the
     // back-link only renders when the model is actually in the repository.
     modelInRepository: boolean;
+    bundleUpdate: BundleUpdate | null;
     onNavigateToModel: (id: string) => void;
     onStop: (deployment: Deployment) => void;
 };
@@ -132,9 +134,38 @@ function useServingMessages(deployment: Deployment): ServingMessage[] | null {
     return failed && loaded?.key === key ? loaded.messages : null;
 }
 
+function BundleUpdateNotice({ update }: { update: BundleUpdate }) {
+    const registryHoldsSignedCode = update.registeredFingerprint !== "";
+    return (
+        <section className="model-dashboard__update" role="status">
+            <div className="model-dashboard__update-title">
+                {registryHoldsSignedCode ? "Update available" : "May be outdated"}
+            </div>
+            <p className="model-dashboard__update-text">
+                {registryHoldsSignedCode ? (
+                    <>
+                        This endpoint runs code{" "}
+                        <code>{shortFingerprint(update.deployedFingerprint)}</code>,
+                        the registry holds{" "}
+                        <code>{shortFingerprint(update.registeredFingerprint)}</code>.
+                        Redeploy the model to run the registry's code.
+                    </>
+                ) : (
+                    <>
+                        This model's code was saved before code was signed, so
+                        there is no telling whether it is current. Re-import the
+                        model, then redeploy it.
+                    </>
+                )}
+            </p>
+        </section>
+    );
+}
+
 export function DeploymentDashboard({
     deployment,
     modelInRepository,
+    bundleUpdate,
     onNavigateToModel,
     onStop,
 }: Props) {
@@ -162,6 +193,7 @@ export function DeploymentDashboard({
                     </button>
                 </div>
             </header>
+            {bundleUpdate !== null && <BundleUpdateNotice update={bundleUpdate} />}
             <section className="model-dashboard__deployment">
                 <div className="model-dashboard__deployment-status">
                     <span
@@ -214,6 +246,13 @@ export function DeploymentDashboard({
                 <dd>{deployment.suffix}</dd>
                 <dt>Run</dt>
                 <dd>{deployment.run_name}</dd>
+                <dt>Code</dt>
+                <dd
+                    className="model-dashboard__path"
+                    title={deployment.bundle_fingerprint}
+                >
+                    {shortFingerprint(deployment.bundle_fingerprint)}
+                </dd>
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
             </dl>

@@ -35,6 +35,7 @@ class Model:
     phase: str
     # Hardware one replica needs; the dashboard shows it and can edit it.
     requirements: ModelRequirements
+    bundle_fingerprint: str
     # Free-form settings the serve-app reads at construction; the dashboard
     # shows them and can edit them.
     config: dict[str, str] = field(default_factory=dict)
@@ -58,6 +59,7 @@ def poll_models(_: None) -> dict[ModelId, Model]:
             size_bytes=m.size_bytes,
             phase=m.phase,
             requirements=m.requirements,
+            bundle_fingerprint=m.bundle_fingerprint,
             config=m.config,
         )
     return out

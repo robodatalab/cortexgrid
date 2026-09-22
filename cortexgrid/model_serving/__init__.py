@@ -34,6 +34,7 @@ from cortexgrid.model_serving.lifecycle import (
 )
 from cortexgrid.model_serving.placement import ModelRequirements, vram_tiers
 from cortexgrid.model_serving.registry_tags import (
+    bundle_fingerprint_from_tags,
     has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
@@ -45,6 +46,7 @@ from cortexgrid.model_serving.serve_bundle import (
     ServeBundle,
     build_bundle,
     bundle_class,
+    bundle_fingerprint_from_url,
     upload_bundle,
 )
 from cortexgrid.model_serving.status import (

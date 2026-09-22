@@ -41,6 +41,7 @@ from cortexgrid.infra import get_s3_bucket
 from cortexgrid.model_serving import (
     ModelRequirements,
     build_bundle,
+    bundle_fingerprint_from_tags,
     bundle_class,
     has_requirement_tags,
     metadata_from_tags,
@@ -109,6 +110,7 @@ class SavedModel:
     phase: str
     # Hardware one replica needs; defaults for versions stored without it.
     requirements: ModelRequirements
+    bundle_fingerprint: str
     # Free-form settings the serve-app reads at construction; empty for
     # versions stored without any.
     config: dict[str, str] = field(default_factory=dict)
@@ -172,6 +174,7 @@ def _to_saved_model(version: Any) -> SavedModel:
         size_bytes=int(version.tags.get("size_bytes", "0")),
         phase=_phase_for(version),
         requirements=requirements_from_tags(version.tags),
+        bundle_fingerprint=bundle_fingerprint_from_tags(version.tags),
         config=_config_from_tags(version.tags),
     )
 

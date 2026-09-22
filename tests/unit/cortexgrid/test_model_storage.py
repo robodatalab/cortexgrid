@@ -10,7 +10,12 @@ from unittest.mock import patch
 
 import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
-from cortexgrid.model_serving import BundleMetadata, ModelRequirements, ServeBundle
+from cortexgrid.model_serving import (
+    BundleMetadata,
+    ModelRequirements,
+    ServeBundle,
+    metadata_to_tags,
+)
 from cortexgrid.model_storage import (
     IMPORTED,
     NO_WEIGHTS,
@@ -888,6 +893,25 @@ class TestListModels(unittest.TestCase):
         result = list_models()
 
         self.assertEqual(result[0].config, {})
+
+    def test_reports_the_fingerprint_of_the_bundle_the_entry_points_at(self) -> None:
+        _seed_model(
+            self.state, "Qwen2", "instruct", "r1", "boogey-46",
+            tags=metadata_to_tags(_FAKE_BUNDLE),
+        )
+
+        result = list_models()
+
+        self.assertEqual(result[0].bundle_fingerprint, "code-v1")
+
+    def test_reports_no_fingerprint_for_an_entry_saved_before_fingerprints(
+        self,
+    ) -> None:
+        _seed_model(self.state, "Qwen2", "instruct", "r1", "boogey-46")
+
+        result = list_models()
+
+        self.assertEqual(result[0].bundle_fingerprint, "")
 
 
 class TestSetModelRequirements(unittest.TestCase):

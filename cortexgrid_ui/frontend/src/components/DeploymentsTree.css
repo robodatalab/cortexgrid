@@ -92,3 +92,13 @@
 .deployments-tree__dot--error {
     background: #cb2431;
 }
+
+.deployments-tree__update {
+    flex: 0 0 auto;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: #1f5fae;
+    color: #fff;
+    font-size: var(--font-sm);
+    line-height: 16px;
+}

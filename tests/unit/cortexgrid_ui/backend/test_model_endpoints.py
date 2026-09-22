@@ -44,6 +44,7 @@ def _make_model(
         size_bytes=100,
         phase="ready",
         requirements=requirements or ModelRequirements(),
+        bundle_fingerprint="",
     )
 
 

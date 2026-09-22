@@ -1,3 +1,9 @@
+.deployment-usage {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e5e5;
+}
+
 .deployment-usage__grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

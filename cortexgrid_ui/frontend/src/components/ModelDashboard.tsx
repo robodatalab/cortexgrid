@@ -12,6 +12,7 @@ import {
     servingLabel,
     servingTier,
 } from "../phases";
+import { shortFingerprint } from "../bundleUpdate";
 
 type Props = {
     model: Model;
@@ -282,6 +283,10 @@ export function ModelDashboard({
                 </dd>
                 <dt>Created</dt>
                 <dd>{formatCreatedAt(model.created_at)}</dd>
+                <dt>Code</dt>
+                <dd className="model-dashboard__path" title={model.bundle_fingerprint}>
+                    {shortFingerprint(model.bundle_fingerprint)}
+                </dd>
                 <dt>Size</dt>
                 <dd>{formatSize(model.size_bytes)}</dd>
                 <dt>Storage</dt>

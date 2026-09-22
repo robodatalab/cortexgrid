@@ -7,7 +7,10 @@ from typing import Any
 from ray.serve.schema import ApplicationStatus, ReplicaState
 
 from cortexgrid import state
-from cortexgrid.model_serving.application_spec import app_name
+from cortexgrid.model_serving.application_spec import (
+    app_name,
+    bundle_fingerprint_in_spec,
+)
 from cortexgrid.ray_util import get_serve_details
 
 
@@ -44,6 +47,7 @@ class Deployment:
     run_name: str
     url: str
     phase: str
+    bundle_fingerprint: str
 
 
 def list_deployed_models() -> list[Deployment]:
@@ -56,6 +60,7 @@ def list_deployed_models() -> list[Deployment]:
             run_name=record["run_name"],
             url=record["url"],
             phase=record["phase"],
+            bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
         )
         for record in state.get("deployments")
         if record["phase"] != _PHASE_NOT_DEPLOYED

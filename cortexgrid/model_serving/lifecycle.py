@@ -231,6 +231,7 @@ def deploy_model(
             run_name=run_name,
             url=record["url"],
             phase=phase,
+            bundle_fingerprint=meta.fingerprint,
         )
     # Read afresh on every deploy that reaches Ray: the tiers are what the
     # model is placed against, so a GPU joining or leaving the cluster has to
@@ -266,6 +267,7 @@ def deploy_model(
         run_name=run_name,
         url=url,
         phase=observation["phase"],
+        bundle_fingerprint=meta.fingerprint,
     )
 
 

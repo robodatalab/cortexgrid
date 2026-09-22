@@ -34,6 +34,7 @@ def _deployment(
         run_name=run_name,
         url=f"http://serve/r/{family}/{suffix}/{run_name}",
         phase=phase,
+        bundle_fingerprint="",
     )
 
 

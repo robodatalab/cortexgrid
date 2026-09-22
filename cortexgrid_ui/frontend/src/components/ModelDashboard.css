@@ -282,3 +282,27 @@
     font-size: var(--font-sm);
     color: #cb2431;
 }
+
+.model-dashboard__update {
+    margin-bottom: 24px;
+    padding: 12px 16px;
+    border-left: 3px solid #1f5fae;
+    background: #eaf1fa;
+}
+
+.model-dashboard__update-title {
+    font-size: var(--font-md);
+    font-weight: 600;
+    color: #1f5fae;
+}
+
+.model-dashboard__update-text {
+    margin: 4px 0 0;
+    font-size: var(--font-md);
+    color: #000;
+}
+
+.model-dashboard__update-text code {
+    font-family: var(--mono);
+    font-size: var(--font-sm);
+}
