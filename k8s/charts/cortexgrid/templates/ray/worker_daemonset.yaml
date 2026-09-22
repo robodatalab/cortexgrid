@@ -98,6 +98,7 @@ spec:
               [ "$vram_mib" -gt 0 ] || { echo "could not determine GPU memory" >&2; exit 1; }
               exec ray start \
                 --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }} \
+                --metrics-export-port=8080 \
                 --num-gpus=1 \
                 --resources="{\"vram_mib\": $vram_mib}" \
                 --labels="vram_mib=$vram_mib" \
@@ -107,6 +108,7 @@ spec:
             - ray
             - start
             - --address={{ $.Values.services.ray.headHost }}:{{ $.Values.services.ray.headPort }}
+            - --metrics-export-port=8080
             - --num-gpus=0
             - --block
           {{- end }}
@@ -145,6 +147,9 @@ spec:
             # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
+          ports:
+            - name: metrics
+              containerPort: 8080
           livenessProbe:
             exec:
               command: ["ray", "status"]
