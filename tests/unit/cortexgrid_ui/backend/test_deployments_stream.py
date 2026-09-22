@@ -24,6 +24,7 @@ class TestPollDeployments(unittest.TestCase):
             url="http://ray/r/Qwen2/instruct/boogey-46",
             phase="running",
             bundle_fingerprint="",
+            replaced_bundle_fingerprint="",
         )
         with patch(
             "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -43,6 +44,7 @@ class TestPollDeployments(unittest.TestCase):
                 url="http://ray/r/Qwen2/instruct/boogey-46",
                 phase="running",
                 bundle_fingerprint="",
+                replaced_bundle_fingerprint="",
             ),
             Deployment(
                 family="DeepSeek3",
@@ -51,6 +53,7 @@ class TestPollDeployments(unittest.TestCase):
                 url="http://ray/r/DeepSeek3/chat/snake-12",
                 phase="failed",
                 bundle_fingerprint="",
+                replaced_bundle_fingerprint="",
             ),
         ]
         with patch(

@@ -131,6 +131,7 @@ def _seed_deployment(
             # An app with no message is recorded with its raw status.
             "message": "RUNNING",
             "replicas": [],
+            "replaced_bundle_fingerprint": "",
             **fields,
         },
     )
@@ -295,6 +296,61 @@ class TestModelServing(unittest.TestCase):
     def test_redeploy_of_a_model_that_is_not_deployed_raises(self) -> None:
         with self.assertRaises(ModelNotDeployed):
             redeploy_model("Qwen2", "instruct", "boogey-46")
+
+    def _deploy_bundle(self, fingerprint: str) -> None:
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(fingerprint),
+        )
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+    def _replaced_bundle_fingerprints(self) -> list[str]:
+        return [d.replaced_bundle_fingerprint for d in list_deployed_models()]
+
+    def test_redeploy_with_new_code_records_the_code_it_replaces(self) -> None:
+        self._deploy_bundle(_OLD_FINGERPRINT)
+        self.state.status = "DEPLOYING"
+
+        self._deploy_bundle(_NEW_FINGERPRINT)
+
+        self.assertEqual(self._replaced_bundle_fingerprints(), [_OLD_FINGERPRINT])
+
+    def test_replaced_code_is_kept_while_the_new_code_is_deploying(self) -> None:
+        self._deploy_bundle(_OLD_FINGERPRINT)
+        self.state.status = "DEPLOYING"
+        self._deploy_bundle(_NEW_FINGERPRINT)
+
+        observe_deployments()
+
+        self.assertEqual(self._replaced_bundle_fingerprints(), [_OLD_FINGERPRINT])
+
+    def test_replaced_code_is_forgotten_once_the_new_code_runs(self) -> None:
+        self._deploy_bundle(_OLD_FINGERPRINT)
+        self.state.status = "DEPLOYING"
+        self._deploy_bundle(_NEW_FINGERPRINT)
+        self.state.status = "RUNNING"
+
+        observe_deployments()
+
+        self.assertEqual(self._replaced_bundle_fingerprints(), [""])
+
+    def test_redeploy_during_a_rollout_keeps_the_code_the_rollout_started_from(
+        self,
+    ) -> None:
+        self._deploy_bundle(_OLD_FINGERPRINT)
+        self.state.status = "DEPLOYING"
+        self._deploy_bundle(_NEW_FINGERPRINT)
+
+        self._deploy_bundle("c" * 64)
+
+        self.assertEqual(self._replaced_bundle_fingerprints(), [_OLD_FINGERPRINT])
+
+    def test_first_deploy_replaces_no_code(self) -> None:
+        self.state.status = "DEPLOYING"
+
+        self._deploy_bundle(_NEW_FINGERPRINT)
+
+        self.assertEqual(self._replaced_bundle_fingerprints(), [""])
 
     def test_redeploying_same_triple_replaces_prior_spec(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")

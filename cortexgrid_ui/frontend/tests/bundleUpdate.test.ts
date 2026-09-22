@@ -13,6 +13,7 @@ function deploymentRunning(bundleFingerprint: string): Deployment {
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
     bundle_fingerprint: bundleFingerprint,
+    replaced_bundle_fingerprint: '',
   }
 }
 

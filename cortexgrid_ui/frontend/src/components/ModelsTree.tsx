@@ -37,6 +37,7 @@ export type Deployment = {
     // Normalized serving lifecycle phase (see ServingStatus).
     phase: string;
     bundle_fingerprint: string;
+    replaced_bundle_fingerprint: string;
 };
 
 export type ModelSelection = { kind: "model"; id: string };

@@ -108,5 +108,9 @@ CREATE TABLE IF NOT EXISTS deployments (
   message     TEXT NOT NULL DEFAULT '',
   replicas    JSONB NOT NULL DEFAULT '[]',
   deployed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  replaced_bundle_fingerprint TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (family, suffix, run_name)
 );
+
+ALTER TABLE deployments
+  ADD COLUMN IF NOT EXISTS replaced_bundle_fingerprint TEXT NOT NULL DEFAULT '';

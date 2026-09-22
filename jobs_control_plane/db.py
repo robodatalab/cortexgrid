@@ -30,7 +30,8 @@ _MODEL_COLUMNS = (
     "(extract(epoch FROM created_at) * 1000)::bigint AS creation_timestamp"
 )
 _DEPLOYMENT_COLUMNS = (
-    "family, suffix, run_name, spec, tiers, url, phase, message, replicas"
+    "family, suffix, run_name, spec, tiers, url, phase, message, replicas, "
+    "replaced_bundle_fingerprint"
 )
 
 
@@ -301,14 +302,17 @@ def put_deployment(
     phase: str,
     message: str,
     replicas: list[dict[str, Any]],
+    replaced_bundle_fingerprint: str,
 ) -> None:
     _write(
         f"INSERT INTO deployments ({_DEPLOYMENT_COLUMNS}) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (family, suffix, run_name) DO UPDATE SET "
         "spec = EXCLUDED.spec, tiers = EXCLUDED.tiers, url = EXCLUDED.url, "
         "phase = EXCLUDED.phase, message = EXCLUDED.message, "
-        "replicas = EXCLUDED.replicas, deployed_at = now()",
+        "replicas = EXCLUDED.replicas, "
+        "replaced_bundle_fingerprint = EXCLUDED.replaced_bundle_fingerprint, "
+        "deployed_at = now()",
         (
             family,
             suffix,
@@ -319,6 +323,7 @@ def put_deployment(
             phase,
             message,
             Jsonb(replicas),
+            replaced_bundle_fingerprint,
         ),
     )
 
@@ -342,14 +347,24 @@ def observe_deployment(
     phase: str,
     message: str,
     replicas: list[dict[str, Any]],
+    replaced_bundle_fingerprint: str,
 ) -> bool:
     """Record what the Serve controller reports for a deployment; False if
     there is no such deployment."""
     return (
         _write(
-            "UPDATE deployments SET phase = %s, message = %s, replicas = %s "
+            "UPDATE deployments SET phase = %s, message = %s, replicas = %s, "
+            "replaced_bundle_fingerprint = %s "
             "WHERE family = %s AND suffix = %s AND run_name = %s",
-            (phase, message, Jsonb(replicas), family, suffix, run_name),
+            (
+                phase,
+                message,
+                Jsonb(replicas),
+                replaced_bundle_fingerprint,
+                family,
+                suffix,
+                run_name,
+            ),
         )
         > 0
     )

@@ -15,6 +15,7 @@ const deployment: Deployment = {
   url: 'http://ray/r/Qwen2/instruct/boogey-46',
   phase: 'running',
   bundle_fingerprint: DEPLOYED_FINGERPRINT,
+  replaced_bundle_fingerprint: '',
 }
 
 function renderCard(
@@ -105,6 +106,18 @@ describe('DeploymentDashboard', () => {
     const notice = screen.getByRole('status')
     expect(notice).toHaveTextContent('Update available')
     expect(notice).toHaveTextContent('runs code #aaaaaaa, the registry holds #bbbbbbb')
+  })
+
+  it('shows which code it is moving from and to while redeploying', () => {
+    renderCard(true, {}, {
+      ...deployment,
+      phase: 'deploying',
+      replaced_bundle_fingerprint: REGISTERED_FINGERPRINT,
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'moving from code #bbbbbbb to #aaaaaaa',
+    )
+    expect(screen.getByText('#bbbbbbb → #aaaaaaa')).toBeInTheDocument()
   })
 
   it('redeploys the deployment from its update notice', async () => {

@@ -12,6 +12,7 @@ const deployments: Deployment[] = [
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
     bundle_fingerprint: '',
+    replaced_bundle_fingerprint: '',
   },
   {
     family: 'DeepSeek3',
@@ -20,6 +21,7 @@ const deployments: Deployment[] = [
     url: 'http://ray/r/DeepSeek3/chat/snake-12',
     phase: 'failed',
     bundle_fingerprint: '',
+    replaced_bundle_fingerprint: '',
   },
 ]
 

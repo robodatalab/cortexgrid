@@ -10,13 +10,19 @@ from cortexgrid.infra import get_ray_serve_uri
 from cortexgrid.model_serving.application_spec import (
     app_name,
     build_application_spec,
+    bundle_fingerprint_in_spec,
     replica_count_in_spec,
     route_prefix,
 )
 from cortexgrid.model_serving.placement import ModelRequirements, vram_tiers
 from cortexgrid.model_serving.registry_tags import load_deploy_metadata
 from cortexgrid.model_serving.serve_bundle import BundleMetadata
-from cortexgrid.model_serving.status import PHASE_PAUSED, Deployment, observed
+from cortexgrid.model_serving.status import (
+    PHASE_PAUSED,
+    Deployment,
+    observed,
+    replaced_bundle_fingerprint_until_rolled_out,
+)
 from cortexgrid.ray_util import get_serve_details, put_serve_applications
 
 
@@ -179,6 +185,17 @@ def _record_is_current(
     return spec == record["spec"]
 
 
+def _bundle_fingerprint_replaced_by(
+    record: dict[str, Any] | None, meta: BundleMetadata
+) -> str:
+    if record is None or record["phase"] not in _LIVE_PHASES:
+        return ""
+    rollout_origin = record["replaced_bundle_fingerprint"] or bundle_fingerprint_in_spec(
+        record["spec"]
+    )
+    return "" if rollout_origin == meta.fingerprint else rollout_origin
+
+
 def deploy_model(
     family: str,
     suffix: str,
@@ -237,10 +254,12 @@ def deploy_model(
             url=record["url"],
             phase=phase,
             bundle_fingerprint=meta.fingerprint,
+            replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
         )
     # Read afresh on every deploy that reaches Ray: the tiers are what the
     # model is placed against, so a GPU joining or leaving the cluster has to
     # change the spec (and therefore re-PUT it).
+    replaced_bundle_fingerprint = _bundle_fingerprint_replaced_by(record, meta)
     tiers = vram_tiers()
     spec = build_application_spec(
         family, suffix, run_name, meta, requirements, num_replicas, tiers
@@ -259,6 +278,11 @@ def deploy_model(
     app = get_serve_details().get("applications", {}).get(spec["name"], {})
     url = f"{get_ray_serve_uri()}{route_prefix(family, suffix, run_name)}"
     observation = observed(app)
+    observation["replaced_bundle_fingerprint"] = (
+        replaced_bundle_fingerprint_until_rolled_out(
+            replaced_bundle_fingerprint, observation["phase"]
+        )
+    )
     state.put(
         "deployments",
         family,
@@ -273,6 +297,7 @@ def deploy_model(
         url=url,
         phase=observation["phase"],
         bundle_fingerprint=meta.fingerprint,
+        replaced_bundle_fingerprint=observation["replaced_bundle_fingerprint"],
     )
 
 

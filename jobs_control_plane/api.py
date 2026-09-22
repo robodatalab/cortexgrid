@@ -74,6 +74,7 @@ class ObservationBody(BaseModel):
     phase: str
     message: str
     replicas: list[dict[str, Any]]
+    replaced_bundle_fingerprint: str = ""
 
 
 class DeploymentBody(ObservationBody):
@@ -259,6 +260,7 @@ def put_deployment(
         body.phase,
         body.message,
         body.replicas,
+        body.replaced_bundle_fingerprint,
     )
 
 
@@ -272,7 +274,13 @@ def observe_deployment(
     family: str, suffix: str, run_name: str, body: ObservationBody
 ) -> None:
     if not db.observe_deployment(
-        family, suffix, run_name, body.phase, body.message, body.replicas
+        family,
+        suffix,
+        run_name,
+        body.phase,
+        body.message,
+        body.replicas,
+        body.replaced_bundle_fingerprint,
     ):
         raise HTTPException(status_code=404)
 

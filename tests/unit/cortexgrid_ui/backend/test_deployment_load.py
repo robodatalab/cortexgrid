@@ -72,10 +72,10 @@ class TestDeploymentsLoadEndpoint(unittest.TestCase):
             deployments_stream.META_TOPIC,
             {
                 "flux/klein/imported": Deployment(
-                    "flux", "klein", "imported", "http://serve/r/flux/klein/imported", "running", ""
+                    "flux", "klein", "imported", "http://serve/r/flux/klein/imported", "running", "", ""
                 ),
                 "qwen/3b/imported": Deployment(
-                    "qwen", "3b", "imported", "http://serve/r/qwen/3b/imported", "paused", ""
+                    "qwen", "3b", "imported", "http://serve/r/qwen/3b/imported", "paused", "", ""
                 ),
             },
         )

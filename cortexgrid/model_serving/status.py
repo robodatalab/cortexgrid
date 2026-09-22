@@ -16,6 +16,7 @@ from cortexgrid.ray_util import get_serve_details
 
 _PHASE_NOT_DEPLOYED = "not_deployed"
 PHASE_PAUSED = "paused"
+_ROLLED_OUT_PHASES = ("running", PHASE_PAUSED)
 
 # Ray Serve ApplicationStatus -> normalized serving phase. The single source of
 # the serving vocabulary, shared by Deployment, list_deployed_models, and
@@ -48,6 +49,13 @@ class Deployment:
     url: str
     phase: str
     bundle_fingerprint: str
+    replaced_bundle_fingerprint: str
+
+
+def replaced_bundle_fingerprint_until_rolled_out(
+    replaced_bundle_fingerprint: str, phase: str
+) -> str:
+    return "" if phase in _ROLLED_OUT_PHASES else replaced_bundle_fingerprint
 
 
 def list_deployed_models() -> list[Deployment]:
@@ -61,6 +69,7 @@ def list_deployed_models() -> list[Deployment]:
             url=record["url"],
             phase=record["phase"],
             bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
+            replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
         )
         for record in state.get("deployments")
         if record["phase"] != _PHASE_NOT_DEPLOYED
@@ -217,6 +226,11 @@ def observe_deployments() -> None:
     for record in state.get("deployments"):
         family, suffix, run_name = record["family"], record["suffix"], record["run_name"]
         observation = observed(applications.get(app_name(family, suffix, run_name)))
+        observation["replaced_bundle_fingerprint"] = (
+            replaced_bundle_fingerprint_until_rolled_out(
+                record["replaced_bundle_fingerprint"], observation["phase"]
+            )
+        )
         if any(record[key] != value for key, value in observation.items()):
             state.patch("deployments", family, suffix, run_name, body=observation)
 

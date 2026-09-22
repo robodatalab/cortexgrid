@@ -186,6 +186,28 @@ function BundleUpdateNotice({
     );
 }
 
+function RolloutNotice({ deployment }: { deployment: Deployment }) {
+    return (
+        <section className="model-dashboard__update" role="status">
+            <div className="model-dashboard__update-message">
+                <div className="model-dashboard__update-title">Redeploying</div>
+                <p className="model-dashboard__update-text">
+                    This endpoint is moving from code{" "}
+                    <code>{shortFingerprint(deployment.replaced_bundle_fingerprint)}</code>{" "}
+                    to <code>{shortFingerprint(deployment.bundle_fingerprint)}</code>.
+                </p>
+            </div>
+        </section>
+    );
+}
+
+function deployedCode(deployment: Deployment): string {
+    const current = shortFingerprint(deployment.bundle_fingerprint);
+    return deployment.replaced_bundle_fingerprint === ""
+        ? current
+        : `${shortFingerprint(deployment.replaced_bundle_fingerprint)} → ${current}`;
+}
+
 export function DeploymentDashboard({
     deployment,
     modelInRepository,
@@ -218,6 +240,9 @@ export function DeploymentDashboard({
                     </button>
                 </div>
             </header>
+            {deployment.replaced_bundle_fingerprint !== "" && (
+                <RolloutNotice deployment={deployment} />
+            )}
             {bundleUpdate !== null && (
                 <BundleUpdateNotice
                     update={bundleUpdate}
@@ -281,7 +306,7 @@ export function DeploymentDashboard({
                     className="model-dashboard__path"
                     title={deployment.bundle_fingerprint}
                 >
-                    {shortFingerprint(deployment.bundle_fingerprint)}
+                    {deployedCode(deployment)}
                 </dd>
                 <dt>URL</dt>
                 <dd className="model-dashboard__path">{deployment.url}</dd>
