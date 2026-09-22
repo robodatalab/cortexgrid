@@ -15,4 +15,4 @@ helmCharts:
       images:
         mlflow: ghcr.io/robodatalab/mlflow:8cb531ee99b94bdda24a7f246b12aaa79a757790
         ray: ghcr.io/robodatalab/ray-head:354c71e7ee6b20da4b8cda7928decc105f65dc1b
-        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:1734d56671a1bf1f26b7110d07337049874b288d
+        jobsControlPlane: ghcr.io/robodatalab/jobs-control-plane:ceb32fdd6d8ab6ad15a66e13b1a26eb055053c04
