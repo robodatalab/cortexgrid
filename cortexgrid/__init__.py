@@ -101,12 +101,16 @@ from cortexgrid.model_storage import register_model as _register_model_storage
 from cortexgrid.model_storage import save_model as _save_model_storage
 from cortexgrid.model_serving import (
     Deployment,
+    DeploymentConfig,
+    DeploymentKey,
     ModelDeployFailed,
+    ModelNotDeployed,
     ModelRequirements,
     ServingStatus,
     deploy_model,
     list_deployed_models,
     model_serving_status,
+    redeploy_model,
     undeploy_model,
     wait_for_model_serving,
 )
@@ -308,9 +312,13 @@ __all__ = [
     "delete_model",
     # Model serving
     "Deployment",
+    "DeploymentConfig",
+    "DeploymentKey",
     "ModelDeployFailed",
+    "ModelNotDeployed",
     "ServingStatus",
     "deploy_model",
+    "redeploy_model",
     "wait_for_model_serving",
     "model_serving_status",
     "undeploy_model",

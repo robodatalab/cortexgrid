@@ -6,18 +6,26 @@ import type { Deployment } from '../src/components/ModelsTree'
 
 const deployments: Deployment[] = [
   {
-    family: 'Qwen2',
-    suffix: 'instruct',
-    run_name: 'boogey-46',
+    key: {
+      family: 'Qwen2',
+      suffix: 'instruct',
+      run_name: 'boogey-46',
+      config_fingerprint: '',
+    },
+    config: {},
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
     bundle_fingerprint: '',
     replaced_bundle_fingerprint: '',
   },
   {
-    family: 'DeepSeek3',
-    suffix: 'chat',
-    run_name: 'snake-12',
+    key: {
+      family: 'DeepSeek3',
+      suffix: 'chat',
+      run_name: 'snake-12',
+      config_fingerprint: '',
+    },
+    config: {},
     url: 'http://ray/r/DeepSeek3/chat/snake-12',
     phase: 'failed',
     bundle_fingerprint: '',
@@ -104,6 +112,25 @@ describe('DeploymentsTree', () => {
       />,
     )
     expect(screen.getAllByText('update')).toHaveLength(1)
+  })
+
+  it('shows the config a deployment was given next to it', () => {
+    render(
+      <DeploymentsTree
+        deployments={[
+          {
+            ...deployments[0],
+            key: { ...deployments[0].key, config_fingerprint: '5f0c1d2e3a4b' },
+            config: { thinking: 'false' },
+          },
+        ]}
+        loads={{}}
+        bundleUpdates={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('thinking=false')).toBeInTheDocument()
   })
 
   it('shows no load bars for a deployment without a load', () => {

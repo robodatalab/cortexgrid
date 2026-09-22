@@ -1,5 +1,5 @@
 import type { Deployment, Model } from "./components/ModelsTree";
-import { deploymentId } from "./ids";
+import { deploymentId, modelId } from "./ids";
 
 const SHORT_FINGERPRINT_LENGTH = 7;
 
@@ -38,9 +38,11 @@ export function pendingBundleUpdates(
 ): BundleUpdateByDeploymentId {
     const updates: BundleUpdateByDeploymentId = {};
     for (const deployment of deployments) {
-        const id = deploymentId(deployment);
-        const update = pendingBundleUpdate(deployment, modelsById[id]);
-        if (update !== null) updates[id] = update;
+        const update = pendingBundleUpdate(
+            deployment,
+            modelsById[modelId(deployment.key)],
+        );
+        if (update !== null) updates[deploymentId(deployment.key)] = update;
     }
     return updates;
 }

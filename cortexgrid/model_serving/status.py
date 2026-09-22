@@ -6,10 +6,17 @@ from typing import Any
 
 from ray.serve.schema import ApplicationStatus, ReplicaState
 
-from cortexgrid import state
 from cortexgrid.model_serving.application_spec import (
     app_name,
     bundle_fingerprint_in_spec,
+)
+from cortexgrid.model_serving.deployment_key import DeploymentConfig, DeploymentKey
+from cortexgrid.model_serving.deployment_records import (
+    DeploymentRecord,
+    get_deployment_record,
+    key_of_record,
+    list_deployment_records,
+    patch_deployment_record,
 )
 from cortexgrid.ray_util import get_serve_details
 
@@ -43,9 +50,8 @@ class Deployment:
     serving lifecycle phase (see `ServingStatus`); an app that appears in a
     listing always exists, so its phase is never "not_deployed"."""
 
-    family: str
-    suffix: str
-    run_name: str
+    key: DeploymentKey
+    config: DeploymentConfig
     url: str
     phase: str
     bundle_fingerprint: str
@@ -62,18 +68,28 @@ def list_deployed_models() -> list[Deployment]:
     """Return a Deployment for every model `deploy_model` put on Ray Serve
     whose app the control plane last saw existing."""
     return [
-        Deployment(
-            family=record["family"],
-            suffix=record["suffix"],
-            run_name=record["run_name"],
-            url=record["url"],
-            phase=record["phase"],
-            bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
-            replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
-        )
-        for record in state.get("deployments")
+        deployment_of_record(record)
+        for record in list_deployment_records()
         if record["phase"] != _PHASE_NOT_DEPLOYED
     ]
+
+
+def deployment_of_record(record: DeploymentRecord) -> Deployment:
+    return Deployment(
+        key=key_of_record(record),
+        config=record["config"],
+        url=record["url"],
+        phase=record["phase"],
+        bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
+        replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
+    )
+
+
+def deployment_config(key: DeploymentKey) -> DeploymentConfig:
+    record = get_deployment_record(key)
+    if record is None:
+        raise ValueError(f"No deployment {key}")
+    return record["config"]
 
 
 @dataclass
@@ -97,17 +113,13 @@ class ServingStatus:
       - "deleting"      Serve app being torn down (DELETING)
     """
 
-    family: str
-    suffix: str
-    run_name: str
+    key: DeploymentKey
     phase: str
     message: str
     url: str | None
 
 
-def model_serving_status(
-    family: str, suffix: str, run_name: str
-) -> ServingStatus:
+def model_serving_status(key: DeploymentKey) -> ServingStatus:
     """Report the serving lifecycle phase of a model from its deployment
     record, as the control plane last observed it on the Ray Serve controller.
 
@@ -119,15 +131,11 @@ def model_serving_status(
     The registry lifecycle is reported separately by
     `cortexgrid.model_storage.model_registry_status`.
     """
-    record = state.get("deployments", family, suffix, run_name)
+    record = get_deployment_record(key)
     if record is None or record["phase"] == _PHASE_NOT_DEPLOYED:
-        return ServingStatus(
-            family, suffix, run_name, _PHASE_NOT_DEPLOYED, "", None
-        )
+        return ServingStatus(key, _PHASE_NOT_DEPLOYED, "", None)
     return ServingStatus(
-        family=family,
-        suffix=suffix,
-        run_name=run_name,
+        key=key,
         phase=record["phase"],
         message=record["message"],
         url=record["url"],
@@ -149,9 +157,7 @@ class ReplicaPlacement:
     node_ip: str | None
 
 
-def model_replica_placements(
-    family: str, suffix: str, run_name: str
-) -> list[ReplicaPlacement]:
+def model_replica_placements(key: DeploymentKey) -> list[ReplicaPlacement]:
     """Report which worker each of a model's replicas is running on.
 
     This is what the requirements and the size-class preferences actually
@@ -160,7 +166,7 @@ def model_replica_placements(
     last observed it. Empty when no app exists, and while an app is
     `deploying` it fills in as replicas are placed.
     """
-    record = state.get("deployments", family, suffix, run_name)
+    record = get_deployment_record(key)
     if record is None:
         return []
     return [ReplicaPlacement(**replica) for replica in record["replicas"]]
@@ -223,16 +229,16 @@ def observe_deployments() -> None:
     control plane calls this on every poll cycle; only records whose
     observation changed are written."""
     applications = get_serve_details().get("applications", {})
-    for record in state.get("deployments"):
-        family, suffix, run_name = record["family"], record["suffix"], record["run_name"]
-        observation = observed(applications.get(app_name(family, suffix, run_name)))
+    for record in list_deployment_records():
+        key = key_of_record(record)
+        observation = observed(applications.get(app_name(key)))
         observation["replaced_bundle_fingerprint"] = (
             replaced_bundle_fingerprint_until_rolled_out(
                 record["replaced_bundle_fingerprint"], observation["phase"]
             )
         )
-        if any(record[key] != value for key, value in observation.items()):
-            state.patch("deployments", family, suffix, run_name, body=observation)
+        if any(record[field] != value for field, value in observation.items()):
+            patch_deployment_record(key, observation)
 
 
 @dataclass
@@ -252,15 +258,11 @@ class ServingMessage:
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def model_serving_messages(
-    family: str, suffix: str, run_name: str
-) -> list[ServingMessage]:
+def model_serving_messages(key: DeploymentKey) -> list[ServingMessage]:
     """Return the non-empty controller messages for a model's Serve app: the
     app-level message first, then each deployment's. Empty when no app exists.
     This is where Ray explains a DEPLOY_FAILED or UNHEALTHY app."""
-    app = get_serve_details().get("applications", {}).get(
-        app_name(family, suffix, run_name)
-    )
+    app = get_serve_details().get("applications", {}).get(app_name(key))
     if app is None:
         return []
     sources = [("application", app)] + list(app.get("deployments", {}).items())

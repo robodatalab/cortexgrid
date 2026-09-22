@@ -16,6 +16,7 @@ from tests.integration.cortexgrid._ray_run import (
     run,
 )
 from tests.integration.stubs.serving import (
+    OFFSET_PARAM,
     AddConstantServeApp,
     contact_deployment,
     write_weights,
@@ -53,10 +54,12 @@ class TestModelServing(unittest.TestCase):
             response.raise_for_status()
             self.assertEqual(response.json()["result"], 42)
         finally:
-            cortexgrid.undeploy_model(family, suffix, self.run_name)
+            cortexgrid.undeploy_model(
+                cortexgrid.DeploymentKey(family, suffix, self.run_name)
+            )
 
     def _last_deployed_time(self, family: str, suffix: str) -> float:
-        name = app_name(family, suffix, self.run_name)
+        name = app_name(cortexgrid.DeploymentKey(family, suffix, self.run_name))
         return get_serve_details()["applications"][name]["last_deployed_time_s"]
 
     def test_redeploying_an_unchanged_model_leaves_the_serve_app_untouched(
@@ -78,7 +81,25 @@ class TestModelServing(unittest.TestCase):
 
             self.assertEqual(self._last_deployed_time(family, suffix), before)
         finally:
-            cortexgrid.undeploy_model(family, suffix, self.run_name)
+            cortexgrid.undeploy_model(
+                cortexgrid.DeploymentKey(family, suffix, self.run_name)
+            )
+
+    def test_each_config_of_a_model_serves_as_its_own_deployment(self) -> None:
+        family, suffix = "it-deploy-configs", "stub"
+        self._save_stub(family, suffix, constant=1)
+
+        plus_100 = cortexgrid.deploy_model(
+            family, suffix, self.run_name, wait=True, config={OFFSET_PARAM: "100"}
+        )
+        self.addCleanup(cortexgrid.undeploy_model, plus_100.key)
+        plus_200 = cortexgrid.deploy_model(
+            family, suffix, self.run_name, wait=True, config={OFFSET_PARAM: "200"}
+        )
+        self.addCleanup(cortexgrid.undeploy_model, plus_200.key)
+
+        self.assertEqual(_add(plus_100, 1), 102)
+        self.assertEqual(_add(plus_200, 1), 202)
 
     def test_deployed_model_can_be_contacted_from_a_job(self) -> None:
         family, suffix = "it-deploy-from-job", "stub"
@@ -91,8 +112,16 @@ class TestModelServing(unittest.TestCase):
                 family, suffix, self.run_name, 5, 15,
             )
         finally:
-            cortexgrid.undeploy_model(family, suffix, self.run_name)
+            cortexgrid.undeploy_model(
+                cortexgrid.DeploymentKey(family, suffix, self.run_name)
+            )
 
+
+
+def _add(deployed: cortexgrid.Deployment, x: int) -> int:
+    response = requests.post(f"{deployed.url}/add", json={"x": x}, timeout=60)
+    response.raise_for_status()
+    return response.json()["result"]
 
 if __name__ == "__main__":
     unittest.main()

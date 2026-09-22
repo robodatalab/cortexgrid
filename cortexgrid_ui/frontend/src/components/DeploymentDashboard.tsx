@@ -7,7 +7,8 @@ import { DeviceCard, type PodStatus } from "./DeviceCard";
 import type { Deployment } from "./ModelsTree";
 import { TitledFrame } from "./TitledFrame";
 import { shortFingerprint, type BundleUpdate } from "../bundleUpdate";
-import { deploymentId } from "../ids";
+import { describeDeploymentConfig } from "../deploymentConfig";
+import { deploymentApiUrl, modelId, serveApplicationName } from "../ids";
 import { servingLabel, servingTier } from "../phases";
 
 // Public ingress hosts on the Tailscale network. Both are also configured in
@@ -36,16 +37,14 @@ type ServingMessage = {
     message: string;
 };
 
-function appName(d: Deployment): string {
-    return `${d.family}__${d.suffix}__${d.run_name}`;
-}
-
 function rayDashboardUrl(d: Deployment): string {
-    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(appName(d))}`;
+    return `https://${RAY_DASHBOARD_HOST}/#/serve/applications/${encodeURIComponent(serveApplicationName(d.key))}`;
 }
 
 function grafanaUrl(d: Deployment): string {
-    const params = new URLSearchParams({ "var-Application": appName(d) });
+    const params = new URLSearchParams({
+        "var-Application": serveApplicationName(d.key),
+    });
     return `https://${GRAFANA_HOST}/d/${GRAFANA_SERVE_DEPLOYMENT_DASHBOARD_UID}?${params.toString()}`;
 }
 
@@ -59,16 +58,12 @@ type ReplicaDevice = {
     device: PodStatus | null;
 };
 
-function devicesUrl(d: Deployment): string {
-    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/devices`;
-}
-
 // Which machines the deployment's replicas landed on, repolled while it is
 // live: replicas move as they restart, and a device's health changes under
 // them. Results are tagged with the url they were fetched for, so a response
 // for a deployment the user has navigated away from is never shown.
 function useReplicaDevices(deployment: Deployment): ReplicaDevice[] | null {
-    const url = devicesUrl(deployment);
+    const url = deploymentApiUrl(deployment.key, "devices");
     const [loaded, setLoaded] = useState<{
         url: string;
         devices: ReplicaDevice[];
@@ -98,17 +93,13 @@ function useReplicaDevices(deployment: Deployment): ReplicaDevice[] | null {
     return loaded?.url === url ? loaded.devices : null;
 }
 
-function messagesUrl(d: Deployment): string {
-    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/messages`;
-}
-
 // Ray's explanation of a failed or unhealthy deployment, fetched when the
 // deployment enters an error phase. Results are tagged with the url + phase
 // they were fetched for, so a response for another deployment or an earlier
 // phase is never shown. null until loaded, and for non-error phases.
 function useServingMessages(deployment: Deployment): ServingMessage[] | null {
     const failed = servingTier(deployment.phase) === "error";
-    const url = messagesUrl(deployment);
+    const url = deploymentApiUrl(deployment.key, "messages");
     const key = `${url}:${deployment.phase}`;
     const [loaded, setLoaded] = useState<{
         key: string;
@@ -224,10 +215,10 @@ export function DeploymentDashboard({
             <header className="model-dashboard__header">
                 <div className="model-dashboard__title-block">
                     <h1 className="model-dashboard__title">
-                        {deployment.family} / {deployment.suffix}
+                        {deployment.key.family} / {deployment.key.suffix}
                     </h1>
                     <div className="model-dashboard__subtitle">
-                        {deployment.run_name}
+                        {deployment.key.run_name}
                     </div>
                 </div>
                 <div className="model-dashboard__actions">
@@ -286,7 +277,7 @@ export function DeploymentDashboard({
                             type="button"
                             className="model-dashboard__link"
                             onClick={() =>
-                                onNavigateToModel(deploymentId(deployment))
+                                onNavigateToModel(modelId(deployment.key))
                             }
                         >
                             View in repository
@@ -296,11 +287,15 @@ export function DeploymentDashboard({
                     )}
                 </dd>
                 <dt>Family</dt>
-                <dd>{deployment.family}</dd>
+                <dd>{deployment.key.family}</dd>
                 <dt>Variant</dt>
-                <dd>{deployment.suffix}</dd>
+                <dd>{deployment.key.suffix}</dd>
                 <dt>Run</dt>
-                <dd>{deployment.run_name}</dd>
+                <dd>{deployment.key.run_name}</dd>
+                <dt>Config</dt>
+                <dd className="model-dashboard__path">
+                    {describeDeploymentConfig(deployment.config) || "the model's own"}
+                </dd>
                 <dt>Code</dt>
                 <dd
                     className="model-dashboard__path"

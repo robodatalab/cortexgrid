@@ -9,6 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from cortexgrid.model_serving import (
+    DeploymentKey,
     ModelNotDeployed,
     ModelRequirements,
     ReplicaPlacement,
@@ -334,7 +335,22 @@ class TestDeploymentRedeployEndpoint(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        redeploy_model.assert_called_once_with("Qwen2", "instruct", "boogey-46")
+        redeploy_model.assert_called_once_with(
+            DeploymentKey("Qwen2", "instruct", "boogey-46")
+        )
+
+    def test_redeploys_the_deployment_with_the_config_fingerprint_it_names(
+        self,
+    ) -> None:
+        with patch("cortexgrid_ui.backend.main.redeploy_model") as redeploy_model:
+            self.client.post(
+                "/api/deployments/Qwen3/8B/imported/redeploy",
+                params={"config_fingerprint": "5f0c1d2e3a4b"},
+            )
+
+        redeploy_model.assert_called_once_with(
+            DeploymentKey("Qwen3", "8B", "imported", "5f0c1d2e3a4b")
+        )
 
     def test_answers_not_found_for_a_model_that_is_not_deployed(self) -> None:
         with patch(

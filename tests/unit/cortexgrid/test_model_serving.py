@@ -16,6 +16,7 @@ from ray.serve.schema import ServeApplicationSchema, ServeDeploySchema
 from cortexgrid._bundle import BundleDesc
 from cortexgrid.model_serving import (
     BundleMetadata,
+    DeploymentKey,
     ModelDeployFailed,
     ModelNotDeployed,
     ModelRequirements,
@@ -51,6 +52,9 @@ _FAKE_META = BundleMetadata(
 )
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+_QWEN2_DEPLOYMENT = DeploymentKey("Qwen2", "instruct", "boogey-46")
+_FAM_DEPLOYMENT = DeploymentKey("fam", "suf", "run")
 
 _OLD_FINGERPRINT = "a" * 64
 _NEW_FINGERPRINT = "b" * 64
@@ -175,13 +179,17 @@ class TestModelServing(unittest.TestCase):
         self.addCleanup(build_spec.stop)
 
     def _record(self) -> dict[str, Any]:
-        return self.records.deployments[("Qwen2", "instruct", "boogey-46")]
+        return self.records.deployments[("Qwen2", "instruct", "boogey-46", "")]
 
     def test_deploy_builds_the_spec_from_the_stored_requirements(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46", num_replicas=3)
 
         self.build_spec.assert_called_once_with(
-            "Qwen2", "instruct", "boogey-46", _FAKE_META, _GPU_REQUIREMENTS, 3, _TIERS
+            _QWEN2_DEPLOYMENT,
+            _FAKE_META,
+            _GPU_REQUIREMENTS,
+            3,
+            _TIERS,
         )
 
     def test_deploy_runs_one_replica_by_default(self) -> None:
@@ -205,19 +213,19 @@ class TestModelServing(unittest.TestCase):
         listed = list_deployed_models()
 
         self.assertEqual(
-            [(d.family, d.suffix, d.run_name) for d in listed],
+            [(d.key.family, d.key.suffix, d.key.run_name) for d in listed],
             [("Qwen2", "instruct", "boogey-46")],
         )
 
     def test_undeployed_model_disappears_from_listings(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
-        undeploy_model("Qwen2", "instruct", "boogey-46")
+        undeploy_model(_QWEN2_DEPLOYMENT)
 
         self.assertEqual(list_deployed_models(), [])
 
     def test_undeploy_drops_the_deployment_record(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
-        undeploy_model("Qwen2", "instruct", "boogey-46")
+        undeploy_model(_QWEN2_DEPLOYMENT)
 
         self.assertEqual(self.records.deployments, {})
 
@@ -234,7 +242,7 @@ class TestModelServing(unittest.TestCase):
 
         listed = list_deployed_models()
 
-        self.assertEqual([d.family for d in listed], ["Qwen2"])
+        self.assertEqual([d.key.family for d in listed], ["Qwen2"])
 
     def test_model_whose_app_is_gone_is_not_listed(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -288,14 +296,14 @@ class TestModelServing(unittest.TestCase):
             bundle=_bundle_with_fingerprint(_NEW_FINGERPRINT),
         )
 
-        redeployed = redeploy_model("Qwen2", "instruct", "boogey-46")
+        redeployed = redeploy_model(_QWEN2_DEPLOYMENT)
 
         self.assertEqual(redeployed.bundle_fingerprint, _NEW_FINGERPRINT)
         self.assertEqual(self._record()["spec"]["args"]["num_replicas"], 3)
 
     def test_redeploy_of_a_model_that_is_not_deployed_raises(self) -> None:
         with self.assertRaises(ModelNotDeployed):
-            redeploy_model("Qwen2", "instruct", "boogey-46")
+            redeploy_model(_QWEN2_DEPLOYMENT)
 
     def _deploy_bundle(self, fingerprint: str) -> None:
         _seed_saved_model(
@@ -344,6 +352,74 @@ class TestModelServing(unittest.TestCase):
         self._deploy_bundle("c" * 64)
 
         self.assertEqual(self._replaced_bundle_fingerprints(), [_OLD_FINGERPRINT])
+
+    def test_each_config_of_a_model_is_its_own_deployment(self) -> None:
+        thinking = deploy_model(
+            "Qwen2", "instruct", "boogey-46", config={"thinking": "true"}
+        )
+        not_thinking = deploy_model(
+            "Qwen2", "instruct", "boogey-46", config={"thinking": "false"}
+        )
+
+        self.assertNotEqual(thinking.key, not_thinking.key)
+        self.assertNotEqual(thinking.url, not_thinking.url)
+        self.assertEqual(
+            sorted(d.config["thinking"] for d in list_deployed_models()),
+            ["false", "true"],
+        )
+        self.assertEqual(len(self.state.apps), 2)
+
+    def test_a_deployment_without_config_keeps_the_models_app_name_and_route(
+        self,
+    ) -> None:
+        deployment = deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(list(self.state.apps), ["Qwen2__instruct__boogey-46"])
+        self.assertEqual(deployment.url, "http://ray:30000/r/Qwen2/instruct/boogey-46")
+
+    def test_deploying_new_code_updates_only_the_deployment_with_that_config(
+        self,
+    ) -> None:
+        self._deploy_bundle(_OLD_FINGERPRINT)
+        deploy_model("Qwen2", "instruct", "boogey-46", config={"thinking": "true"})
+        deploy_model("Qwen2", "instruct", "boogey-46", config={"thinking": "false"})
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_NEW_FINGERPRINT),
+        )
+
+        deploy_model("Qwen2", "instruct", "boogey-46", config={"thinking": "true"})
+
+        fingerprint_by_thinking = {
+            d.config.get("thinking"): d.bundle_fingerprint
+            for d in list_deployed_models()
+        }
+        self.assertEqual(
+            fingerprint_by_thinking,
+            {None: _OLD_FINGERPRINT, "true": _NEW_FINGERPRINT, "false": _OLD_FINGERPRINT},
+        )
+
+    def test_redeploy_keeps_the_deployments_config(self) -> None:
+        deployment = deploy_model(
+            "Qwen2", "instruct", "boogey-46", config={"thinking": "false"}
+        )
+
+        redeployed = redeploy_model(deployment.key)
+
+        self.assertEqual(redeployed.key, deployment.key)
+        self.assertEqual(redeployed.config, {"thinking": "false"})
+
+    def test_undeploy_removes_only_the_deployment_it_names(self) -> None:
+        thinking = deploy_model(
+            "Qwen2", "instruct", "boogey-46", config={"thinking": "true"}
+        )
+        deploy_model("Qwen2", "instruct", "boogey-46", config={"thinking": "false"})
+
+        undeploy_model(thinking.key)
+
+        self.assertEqual(
+            [d.config for d in list_deployed_models()], [{"thinking": "false"}]
+        )
 
     def test_first_deploy_replaces_no_code(self) -> None:
         self.state.status = "DEPLOYING"
@@ -614,7 +690,7 @@ class TestWaitForModelServing(unittest.TestCase):
         self.state.message = "still booting"
 
         with self.assertRaises(TimeoutError) as ctx:
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=0.05)
 
         self.assertIn("DEPLOYING", str(ctx.exception))
         self.assertIn("still booting", str(ctx.exception))
@@ -623,13 +699,13 @@ class TestWaitForModelServing(unittest.TestCase):
         self.state.status = "UNHEALTHY"
 
         with self.assertRaises(TimeoutError):
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=0.05)
 
     def test_finite_timeout_elapsing_raises_timeout_error(self) -> None:
         self.state.status = "DEPLOYING"
 
         with self.assertRaises(TimeoutError):
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=0.05)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=0.05)
 
     def test_unbounded_timeout_returns_once_status_reaches_running(self) -> None:
         statuses = ["DEPLOYING", "DEPLOYING", "RUNNING"]
@@ -641,7 +717,7 @@ class TestWaitForModelServing(unittest.TestCase):
         with patch(
             "cortexgrid.model_serving.lifecycle.get_serve_details", side_effect=get_details
         ):
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=None)
 
         self.assertEqual(statuses, [])
 
@@ -650,7 +726,7 @@ class TestWaitForModelServing(unittest.TestCase):
         self.state.message = "replica died on import"
 
         with self.assertRaises(ModelDeployFailed) as ctx:
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=None)
 
         self.assertIn("DEPLOY_FAILED", str(ctx.exception))
 
@@ -658,7 +734,7 @@ class TestWaitForModelServing(unittest.TestCase):
         self.state.apps.clear()
 
         with self.assertRaises(ModelDeployFailed) as ctx:
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=None)
 
         self.assertIn("does not exist", str(ctx.exception))
 
@@ -679,7 +755,7 @@ class TestWaitForModelServing(unittest.TestCase):
             ),
             self.assertRaises(ModelDeployFailed),
         ):
-            wait_for_model_serving("Qwen2", "instruct", "boogey-46", timeout=None)
+            wait_for_model_serving(_QWEN2_DEPLOYMENT, timeout=None)
 
         self.assertEqual(polls, 3)
 
@@ -724,7 +800,7 @@ class TestModelServingStatus(unittest.TestCase):
         observe_deployments()
 
     def test_not_deployed_when_no_serve_app(self) -> None:
-        s = model_serving_status("fam", "suf", "run")
+        s = model_serving_status(_FAM_DEPLOYMENT)
         self.assertEqual(s.phase, "not_deployed")
         self.assertIsNone(s.url)
 
@@ -733,44 +809,44 @@ class TestModelServingStatus(unittest.TestCase):
         self.state.apps.clear()
         observe_deployments()
 
-        s = model_serving_status("fam", "suf", "run")
+        s = model_serving_status(_FAM_DEPLOYMENT)
         self.assertEqual(s.phase, "not_deployed")
         self.assertIsNone(s.url)
 
     def test_not_started_is_reported_distinctly(self) -> None:
         self._serve_app("NOT_STARTED")
         self.assertEqual(
-            model_serving_status("fam", "suf", "run").phase, "not_started"
+            model_serving_status(_FAM_DEPLOYMENT).phase, "not_started"
         )
 
     def test_deploying_reflects_controller_status_and_message(self) -> None:
         self._serve_app("DEPLOYING", "pulling weights")
-        s = model_serving_status("fam", "suf", "run")
+        s = model_serving_status(_FAM_DEPLOYMENT)
         self.assertEqual(s.phase, "deploying")
         self.assertEqual(s.message, "pulling weights")
 
     def test_running_carries_the_route_url(self) -> None:
         self._serve_app("RUNNING")
-        s = model_serving_status("fam", "suf", "run")
+        s = model_serving_status(_FAM_DEPLOYMENT)
         self.assertEqual(s.phase, "running")
         self.assertEqual(s.url, "http://ray:30000/r/fam/suf/run")
 
     def test_unhealthy_maps_to_unhealthy(self) -> None:
         self._serve_app("UNHEALTHY")
         self.assertEqual(
-            model_serving_status("fam", "suf", "run").phase, "unhealthy"
+            model_serving_status(_FAM_DEPLOYMENT).phase, "unhealthy"
         )
 
     def test_deleting_maps_to_deleting(self) -> None:
         self._serve_app("DELETING")
         self.assertEqual(
-            model_serving_status("fam", "suf", "run").phase, "deleting"
+            model_serving_status(_FAM_DEPLOYMENT).phase, "deleting"
         )
 
     def test_deploy_failed_maps_to_failed(self) -> None:
         self._serve_app("DEPLOY_FAILED", "oom")
         self.assertEqual(
-            model_serving_status("fam", "suf", "run").phase, "failed"
+            model_serving_status(_FAM_DEPLOYMENT).phase, "failed"
         )
 
 
@@ -782,7 +858,7 @@ class TestModelServingMessages(unittest.TestCase):
         ):
             return [
                 (m.source, m.status, m.message)
-                for m in model_serving_messages("fam", "suf", "run")
+                for m in model_serving_messages(_FAM_DEPLOYMENT)
             ]
 
     def test_empty_when_no_serve_app(self) -> None:
@@ -1003,7 +1079,7 @@ class TestServeDependencies(unittest.TestCase):
         )
 
         spec = build_application_spec(
-            "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
+            _FAM_DEPLOYMENT, meta, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(
@@ -1014,14 +1090,14 @@ class TestServeDependencies(unittest.TestCase):
     def test_spec_without_pip_requirements_has_no_pip_key(self) -> None:
         # A pip key, even an empty one, makes Ray build a virtualenv.
         spec = build_application_spec(
-            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
+            _FAM_DEPLOYMENT, _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(spec["runtime_env"], {"working_dir": _FAKE_META.bundle_url})
 
     def test_spec_requests_the_requirements_from_ray(self) -> None:
         spec = build_application_spec(
-            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
+            _FAM_DEPLOYMENT, _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
         self.assertEqual(spec["args"]["num_replicas"], 2)
@@ -1042,7 +1118,7 @@ class TestServeDependencies(unittest.TestCase):
 
     def test_spec_without_requirements_requests_no_resources(self) -> None:
         spec = build_application_spec(
-            "fam", "suf", "run", _FAKE_META, ModelRequirements(), 1, _TIERS
+            _FAM_DEPLOYMENT, _FAKE_META, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(spec["args"]["ray_actor_options"], {"num_gpus": 0})
@@ -1107,7 +1183,7 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
 
     def test_gpu_spec_survives_the_round_trip_unchanged(self) -> None:
         spec = build_application_spec(
-            "fam", "suf", "run", _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
+            _FAM_DEPLOYMENT, _FAKE_META, _GPU_REQUIREMENTS, 2, _TIERS
         )
 
         self.assertEqual(self._round_trip(spec), spec)
@@ -1120,7 +1196,7 @@ class TestSpecRoundTripsThroughRay(unittest.TestCase):
         )
 
         spec = build_application_spec(
-            "fam", "suf", "run", meta, ModelRequirements(), 1, _TIERS
+            _FAM_DEPLOYMENT, meta, ModelRequirements(), 1, _TIERS
         )
 
         self.assertEqual(self._round_trip(spec), spec)
@@ -1139,7 +1215,7 @@ class TestReplicaPlacements(unittest.TestCase):
             "cortexgrid.model_serving.status.get_serve_details", return_value=details
         ):
             observe_deployments()
-        return model_replica_placements("fam", "suf", "run")
+        return model_replica_placements(_FAM_DEPLOYMENT)
 
     def test_reports_the_worker_each_replica_runs_on(self) -> None:
         placements = self._placements(
@@ -1190,7 +1266,7 @@ class TestReplicaPlacements(unittest.TestCase):
     def test_a_model_never_deployed_has_no_placements(self) -> None:
         FakeState().install(self)
 
-        self.assertEqual(model_replica_placements("fam", "suf", "run"), [])
+        self.assertEqual(model_replica_placements(_FAM_DEPLOYMENT), [])
 
 
 class TestObserveDeployments(unittest.TestCase):
@@ -1214,7 +1290,7 @@ class TestObserveDeployments(unittest.TestCase):
             return_value={"applications": applications},
         ):
             observe_deployments()
-        return self.records.deployments[("fam", "suf", "run")]
+        return self.records.deployments[("fam", "suf", "run", "")]
 
     def test_records_the_phase_and_message_the_controller_reports(self) -> None:
         record = self._observe(
@@ -1395,9 +1471,7 @@ class TestModelRequirements(unittest.TestCase):
 
     def test_a_share_is_requested_from_ray_as_it_was_stored(self) -> None:
         spec = build_application_spec(
-            "fam",
-            "suf",
-            "run",
+            _FAM_DEPLOYMENT,
             _FAKE_META,
             ModelRequirements(num_gpus=0.25, vram_gb=6.0),
             1,

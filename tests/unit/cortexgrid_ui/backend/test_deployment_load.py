@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from cortexgrid.model_serving import Deployment
+from cortexgrid.model_serving import Deployment, DeploymentKey
 from cortexgrid_ui.backend.main import app
 from cortexgrid_ui.backend.models import deployment_load
 from cortexgrid_ui.backend.models.deployment_load import (
@@ -72,10 +72,20 @@ class TestDeploymentsLoadEndpoint(unittest.TestCase):
             deployments_stream.META_TOPIC,
             {
                 "flux/klein/imported": Deployment(
-                    "flux", "klein", "imported", "http://serve/r/flux/klein/imported", "running", "", ""
+                    DeploymentKey("flux", "klein", "imported"),
+                    {},
+                    "http://serve/r/flux/klein/imported",
+                    "running",
+                    "",
+                    "",
                 ),
                 "qwen/3b/imported": Deployment(
-                    "qwen", "3b", "imported", "http://serve/r/qwen/3b/imported", "paused", "", ""
+                    DeploymentKey("qwen", "3b", "imported"),
+                    {},
+                    "http://serve/r/qwen/3b/imported",
+                    "paused",
+                    "",
+                    "",
                 ),
             },
         )

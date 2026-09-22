@@ -75,11 +75,14 @@ class TestModelScheduling(unittest.TestCase):
                 suffix=_SUFFIX,
                 requirements=requirements,
             )
-        self.addCleanup(cortexgrid.undeploy_model, family, _SUFFIX, self.run_name)
+        self.addCleanup(
+            cortexgrid.undeploy_model,
+            cortexgrid.DeploymentKey(family, _SUFFIX, self.run_name),
+        )
         return cortexgrid.deploy_model(family, _SUFFIX, self.run_name, wait=True)
 
     def _phase_of(self, family: str) -> str:
-        name = app_name(family, _SUFFIX, self.run_name)
+        name = app_name(cortexgrid.DeploymentKey(family, _SUFFIX, self.run_name))
         return _phase(get_serve_details()["applications"][name])
 
 

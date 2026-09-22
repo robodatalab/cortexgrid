@@ -9,9 +9,13 @@ const DEPLOYED_FINGERPRINT = 'a'.repeat(64)
 const REGISTERED_FINGERPRINT = 'b'.repeat(64)
 
 const deployment: Deployment = {
-  family: 'Qwen2',
-  suffix: 'instruct',
-  run_name: 'boogey-46',
+  key: {
+    family: 'Qwen2',
+    suffix: 'instruct',
+    run_name: 'boogey-46',
+    config_fingerprint: '',
+  },
+  config: {},
   url: 'http://ray/r/Qwen2/instruct/boogey-46',
   phase: 'running',
   bundle_fingerprint: DEPLOYED_FINGERPRINT,
@@ -193,6 +197,21 @@ describe('DeploymentDashboard', () => {
 
     expect(urlsFetched(fetch)).not.toContain(
       '/api/deployments/Qwen2/instruct/boogey-46/messages',
+    )
+  })
+
+  it('shows the config it was given and reads its devices by its key', async () => {
+    const fetch = stubFetch([])
+    renderCard(true, {}, {
+      ...deployment,
+      key: { ...deployment.key, config_fingerprint: '5f0c1d2e3a4b' },
+      config: { thinking: 'false' },
+    })
+
+    expect(screen.getByText('thinking=false')).toBeInTheDocument()
+    await screen.findByText('Devices')
+    expect(urlsFetched(fetch)).toContain(
+      '/api/deployments/Qwen2/instruct/boogey-46/devices?config_fingerprint=5f0c1d2e3a4b',
     )
   })
 

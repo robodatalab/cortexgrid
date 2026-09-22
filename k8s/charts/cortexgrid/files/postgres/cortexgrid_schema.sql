@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS deployments (
   family      TEXT NOT NULL,
   suffix      TEXT NOT NULL,
   run_name    TEXT NOT NULL,
+  config_fingerprint TEXT NOT NULL DEFAULT '',
+  config      JSONB NOT NULL DEFAULT '{}',
   spec        JSONB NOT NULL,
   tiers       JSONB NOT NULL,
   url         TEXT NOT NULL,
@@ -109,8 +111,14 @@ CREATE TABLE IF NOT EXISTS deployments (
   replicas    JSONB NOT NULL DEFAULT '[]',
   deployed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   replaced_bundle_fingerprint TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (family, suffix, run_name)
+  CONSTRAINT deployments_key PRIMARY KEY (family, suffix, run_name, config_fingerprint)
 );
 
 ALTER TABLE deployments
-  ADD COLUMN IF NOT EXISTS replaced_bundle_fingerprint TEXT NOT NULL DEFAULT '';
+  ADD COLUMN IF NOT EXISTS replaced_bundle_fingerprint TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS config_fingerprint TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS config JSONB NOT NULL DEFAULT '{}',
+  DROP CONSTRAINT IF EXISTS deployments_pkey;
+
+CREATE UNIQUE INDEX IF NOT EXISTS deployments_key
+  ON deployments (family, suffix, run_name, config_fingerprint);

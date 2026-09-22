@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from cortexgrid.model_serving.deployment_key import DeploymentKey
 from cortexgrid.model_serving.placement import ModelRequirements, ray_actor_options
 from cortexgrid.model_serving.serve_bundle import (
     BundleMetadata,
@@ -9,18 +10,23 @@ from cortexgrid.model_serving.serve_bundle import (
 )
 
 
-def app_name(family: str, suffix: str, run_name: str) -> str:
-    return f"{family}__{suffix}__{run_name}"
+def app_name(key: DeploymentKey) -> str:
+    return "__".join(_name_segments(key))
 
 
-def route_prefix(family: str, suffix: str, run_name: str) -> str:
-    return f"/r/{family}/{suffix}/{run_name}"
+def route_prefix(key: DeploymentKey) -> str:
+    return "/r/" + "/".join(_name_segments(key))
+
+
+def _name_segments(key: DeploymentKey) -> list[str]:
+    model_segments = [key.family, key.suffix, key.run_name]
+    if not key.config_fingerprint:
+        return model_segments
+    return [*model_segments, key.config_fingerprint]
 
 
 def build_application_spec(
-    family: str,
-    suffix: str,
-    run_name: str,
+    key: DeploymentKey,
     meta: BundleMetadata,
     requirements: ModelRequirements,
     num_replicas: int,
@@ -36,8 +42,8 @@ def build_application_spec(
     if meta.pip_requirements:
         runtime_env["pip"] = meta.pip_requirements
     return {
-        "name": app_name(family, suffix, run_name),
-        "route_prefix": route_prefix(family, suffix, run_name),
+        "name": app_name(key),
+        "route_prefix": route_prefix(key),
         # Ray Serve REST requires import_path to point at an Application builder
         # (callable returning a bound node) or an already-bound node. A bare
         # Deployment class is rejected, so cortexgrid.deploy_model goes through
@@ -45,9 +51,10 @@ def build_application_spec(
         "import_path": "cortexgrid._serve_entry:build",
         "args": {
             "class_import_path": meta.class_import_path,
-            "family": family,
-            "suffix": suffix,
-            "run_name": run_name,
+            "family": key.family,
+            "suffix": key.suffix,
+            "run_name": key.run_name,
+            "config_fingerprint": key.config_fingerprint,
             "num_replicas": num_replicas,
             "ray_actor_options": ray_actor_options(requirements, tiers),
         },

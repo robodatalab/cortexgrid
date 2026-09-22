@@ -7,9 +7,13 @@ const REGISTERED_FINGERPRINT = 'b'.repeat(64)
 
 function deploymentRunning(bundleFingerprint: string): Deployment {
   return {
-    family: 'Qwen2',
-    suffix: 'instruct',
-    run_name: 'boogey-46',
+    key: {
+      family: 'Qwen2',
+      suffix: 'instruct',
+      run_name: 'boogey-46',
+      config_fingerprint: '',
+    },
+    config: {},
     url: 'http://ray/r/Qwen2/instruct/boogey-46',
     phase: 'running',
     bundle_fingerprint: bundleFingerprint,

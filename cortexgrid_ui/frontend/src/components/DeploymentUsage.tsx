@@ -10,6 +10,7 @@ import {
 } from "recharts";
 import "./DeploymentUsage.css";
 import type { Deployment } from "./ModelsTree";
+import { deploymentApiUrl } from "../ids";
 import {
     formatBytes,
     formatClockTime,
@@ -52,12 +53,8 @@ const SECOND_SERIES_COLOR = "#eb6834";
 const GRID_COLOR = "#e6e6e4";
 const AXIS_TEXT_COLOR = "#52514e";
 
-function metricsUrl(d: Deployment): string {
-    return `/api/deployments/${encodeURIComponent(d.family)}/${encodeURIComponent(d.suffix)}/${encodeURIComponent(d.run_name)}/metrics`;
-}
-
 function useDeploymentMetrics(deployment: Deployment): DeploymentMetrics | null {
-    const url = metricsUrl(deployment);
+    const url = deploymentApiUrl(deployment.key, "metrics");
     const [loaded, setLoaded] = useState<{
         url: string;
         metrics: DeploymentMetrics;

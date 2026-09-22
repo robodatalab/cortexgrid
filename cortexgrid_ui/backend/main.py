@@ -18,6 +18,7 @@ from cortexgrid.experiment import (
 from cortexgrid.infra import get_ray_job_server_uri
 from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.model_serving import (
+    DeploymentKey,
     ModelNotDeployed,
     ModelRequirements,
     ServingMessage,
@@ -281,7 +282,7 @@ def deployments_load() -> dict[str, float]:
     load_by_application_name = load_by_application()
     return {
         deployment_id: load_by_application_name.get(
-            app_name(d.family, d.suffix, d.run_name), 0.0
+            app_name(d.key), 0.0
         )
         for deployment_id, d in deployments_stream.deployments_cache.get(
             deployments_stream.META_TOPIC
@@ -296,25 +297,31 @@ def deployment_create(family: str, suffix: str, run_name: str) -> dict[str, str]
 
 
 @app.post("/api/deployments/{family}/{suffix}/{run_name}/redeploy")
-def deployment_redeploy(family: str, suffix: str, run_name: str) -> dict[str, str]:
+def deployment_redeploy(
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
+) -> dict[str, str]:
     try:
-        redeploy_model(family, suffix, run_name)
+        redeploy_model(DeploymentKey(family, suffix, run_name, config_fingerprint))
     except ModelNotDeployed as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok"}
 
 
 @app.delete("/api/deployments/{family}/{suffix}/{run_name}")
-def deployment_delete(family: str, suffix: str, run_name: str) -> dict[str, str]:
-    undeploy_model(family, suffix, run_name)
+def deployment_delete(
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
+) -> dict[str, str]:
+    undeploy_model(DeploymentKey(family, suffix, run_name, config_fingerprint))
     return {"status": "ok"}
 
 
 @app.get("/api/deployments/{family}/{suffix}/{run_name}/messages")
 def deployment_messages(
-    family: str, suffix: str, run_name: str
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
 ) -> list[ServingMessage]:
-    return model_serving_messages(family, suffix, run_name)
+    return model_serving_messages(
+        DeploymentKey(family, suffix, run_name, config_fingerprint)
+    )
 
 
 class ReplicaDevice(BaseModel):
@@ -332,13 +339,18 @@ class ReplicaDevice(BaseModel):
 
 
 @app.get("/api/deployments/{family}/{suffix}/{run_name}/metrics")
-def deployment_metrics(family: str, suffix: str, run_name: str) -> DeploymentMetrics:
-    return read_deployment_metrics(app_name(family, suffix, run_name), time.time())
+def deployment_metrics(
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
+) -> DeploymentMetrics:
+    return read_deployment_metrics(
+        app_name(DeploymentKey(family, suffix, run_name, config_fingerprint)),
+        time.time(),
+    )
 
 
 @app.get("/api/deployments/{family}/{suffix}/{run_name}/devices")
 def deployment_devices(
-    family: str, suffix: str, run_name: str
+    family: str, suffix: str, run_name: str, config_fingerprint: str = ""
 ) -> list[ReplicaDevice]:
     return [
         ReplicaDevice(
@@ -347,7 +359,9 @@ def deployment_devices(
             node_ip=placement.node_ip,
             device=device_for_ip(placement.node_ip),
         )
-        for placement in model_replica_placements(family, suffix, run_name)
+        for placement in model_replica_placements(
+            DeploymentKey(family, suffix, run_name, config_fingerprint)
+        )
     ]
 
 

@@ -26,6 +26,11 @@ for the end-to-end design.
 """
 
 from cortexgrid.model_serving.application_spec import app_name
+from cortexgrid.model_serving.deployment_key import (
+    DeploymentConfig,
+    DeploymentKey,
+    deployment_key,
+)
 from cortexgrid.model_serving.lifecycle import (
     ModelDeployFailed,
     ModelNotDeployed,
@@ -56,6 +61,7 @@ from cortexgrid.model_serving.status import (
     ReplicaPlacement,
     ServingMessage,
     ServingStatus,
+    deployment_config,
     list_deployed_models,
     model_replica_placements,
     model_serving_messages,

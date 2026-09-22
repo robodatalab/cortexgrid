@@ -46,9 +46,11 @@ def get_bytes(*segments: str) -> bytes | None:
     return response.content
 
 
-def put(*segments: str, body: Any) -> Any:
+def put(*segments: str, body: Any, params: dict[str, str] | None = None) -> Any:
     """Write the record at the path; returns what the control plane answers."""
-    response = _session.put(_url(segments), json=body, timeout=_TIMEOUT_S)
+    response = _session.put(
+        _url(segments), json=body, params=params, timeout=_TIMEOUT_S
+    )
     response.raise_for_status()
     return response.json()
 
@@ -62,9 +64,11 @@ def put_bytes(*segments: str, body: bytes) -> None:
     ).raise_for_status()
 
 
-def patch(*segments: str, body: Any) -> bool:
+def patch(*segments: str, body: Any, params: dict[str, str] | None = None) -> bool:
     """Merge `body` into the record at the path. False when there is none."""
-    response = _session.patch(_url(segments), json=body, timeout=_TIMEOUT_S)
+    response = _session.patch(
+        _url(segments), json=body, params=params, timeout=_TIMEOUT_S
+    )
     if response.status_code == 404:
         return False
     response.raise_for_status()

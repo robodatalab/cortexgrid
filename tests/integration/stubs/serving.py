@@ -26,6 +26,7 @@ from cortexgrid import serve
 
 
 _CONSTANT_FILE = "weights.json"
+OFFSET_PARAM = "offset"
 
 
 def write_weights(d: Path, constant: int) -> None:
@@ -48,8 +49,12 @@ class AddConstantServeApp:
     directory at startup and returns `x + constant` on its own POST /add route.
     Saved without requirements, so it runs on any node, CPU-only included."""
 
-    def __init__(self, family: str, suffix: str, run_name: str) -> None:
-        self._constant = read_constant(cortexgrid.load_model(family, suffix, run_name))
+    def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
+        weights_dir = cortexgrid.load_model(
+            deployment.family, deployment.suffix, deployment.run_name
+        )
+        config = cortexgrid.model_config(deployment)
+        self._constant = read_constant(weights_dir) + int(config.get(OFFSET_PARAM, "0"))
 
     @_app.post("/add")
     async def add(self, body: dict) -> dict:

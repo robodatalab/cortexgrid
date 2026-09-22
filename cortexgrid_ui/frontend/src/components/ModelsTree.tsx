@@ -29,10 +29,16 @@ export type Model = {
     bundle_fingerprint: string;
 };
 
-export type Deployment = {
+export type DeploymentKey = {
     family: string;
     suffix: string;
     run_name: string;
+    config_fingerprint: string;
+};
+
+export type Deployment = {
+    key: DeploymentKey;
+    config: ModelConfig;
     url: string;
     // Normalized serving lifecycle phase (see ServingStatus).
     phase: string;

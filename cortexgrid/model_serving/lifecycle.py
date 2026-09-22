@@ -5,7 +5,6 @@ from typing import Any
 
 from ray.serve.schema import ApplicationStatus
 
-from cortexgrid import state
 from cortexgrid.infra import get_ray_serve_uri
 from cortexgrid.model_serving.application_spec import (
     app_name,
@@ -14,12 +13,25 @@ from cortexgrid.model_serving.application_spec import (
     replica_count_in_spec,
     route_prefix,
 )
+from cortexgrid.model_serving.deployment_key import (
+    DeploymentConfig,
+    DeploymentKey,
+    deployment_key,
+)
+from cortexgrid.model_serving.deployment_records import (
+    DeploymentRecord,
+    delete_deployment_record,
+    get_deployment_record,
+    patch_deployment_record,
+    put_deployment_record,
+)
 from cortexgrid.model_serving.placement import ModelRequirements, vram_tiers
 from cortexgrid.model_serving.registry_tags import load_deploy_metadata
 from cortexgrid.model_serving.serve_bundle import BundleMetadata
 from cortexgrid.model_serving.status import (
     PHASE_PAUSED,
     Deployment,
+    deployment_of_record,
     observed,
     replaced_bundle_fingerprint_until_rolled_out,
 )
@@ -65,9 +77,7 @@ def _past(deadline: float | None) -> bool:
     return deadline is not None and time.monotonic() >= deadline
 
 
-def wait_for_model_serving(
-    family: str, suffix: str, run_name: str, timeout: float | None = None
-) -> None:
+def wait_for_model_serving(key: DeploymentKey, timeout: float | None = None) -> None:
     """Block until the model's Serve app is RUNNING.
 
     Raises ModelDeployFailed on DEPLOY_FAILED, carrying the controller's message,
@@ -78,9 +88,7 @@ def wait_for_model_serving(
     are transient; a DELETING app ends up missing. Exceeding a finite `timeout`
     raises TimeoutError; with `timeout=None` there is no deadline.
     """
-    _wait_for_application_running(
-        app_name(family, suffix, run_name), timeout, _deadline(timeout)
-    )
+    _wait_for_application_running(app_name(key), timeout, _deadline(timeout))
 
 
 def _wait_for_application_running(
@@ -107,7 +115,7 @@ def _wait_for_application_running(
 
 
 def _clear_failed_application(
-    family: str, suffix: str, run_name: str, timeout: float | None, deadline: float | None
+    key: DeploymentKey, timeout: float | None, deadline: float | None
 ) -> None:
     """Remove the model's DEPLOY_FAILED Serve app, and wait until it, or an app
     already DELETING, is gone.
@@ -117,13 +125,13 @@ def _clear_failed_application(
     identical spec over a failed app, or PUTting it back before the controller's
     next tick has processed an undeploy, leaves the failed deployment in place,
     and the app reports DEPLOY_FAILED again without retrying."""
-    name = app_name(family, suffix, run_name)
+    name = app_name(key)
     app = get_serve_details().get("applications", {}).get(name)
     if app is None:
         return
     status = app.get("status")
     if status == ApplicationStatus.DEPLOY_FAILED.value:
-        undeploy_model(family, suffix, run_name)
+        undeploy_model(key)
     elif status != ApplicationStatus.DELETING.value:
         return
     while name in get_serve_details().get("applications", {}):
@@ -160,10 +168,8 @@ _LIVE_PHASES = ("running", "deploying", "not_started", "unhealthy", PHASE_PAUSED
 
 
 def _record_is_current(
-    record: dict[str, Any] | None,
-    family: str,
-    suffix: str,
-    run_name: str,
+    record: DeploymentRecord,
+    key: DeploymentKey,
     meta: BundleMetadata,
     requirements: ModelRequirements,
     num_replicas: int,
@@ -177,16 +183,14 @@ def _record_is_current(
     from the cluster since reaches the spec on the next deploy that changes
     anything else; until then the placement fallback keeps larger new GPUs
     usable (see `_placement_preferences`)."""
-    if record is None or record["phase"] not in _LIVE_PHASES:
+    if record["phase"] not in _LIVE_PHASES:
         return False
-    spec = build_application_spec(
-        family, suffix, run_name, meta, requirements, num_replicas, record["tiers"]
-    )
+    spec = build_application_spec(key, meta, requirements, num_replicas, record["tiers"])
     return spec == record["spec"]
 
 
 def _bundle_fingerprint_replaced_by(
-    record: dict[str, Any] | None, meta: BundleMetadata
+    record: DeploymentRecord | None, meta: BundleMetadata
 ) -> str:
     if record is None or record["phase"] not in _LIVE_PHASES:
         return ""
@@ -196,6 +200,18 @@ def _bundle_fingerprint_replaced_by(
     return "" if rollout_origin == meta.fingerprint else rollout_origin
 
 
+def _observation_of_application(
+    name: str, replaced_bundle_fingerprint: str
+) -> DeploymentRecord:
+    observation = observed(get_serve_details().get("applications", {}).get(name, {}))
+    observation["replaced_bundle_fingerprint"] = (
+        replaced_bundle_fingerprint_until_rolled_out(
+            replaced_bundle_fingerprint, observation["phase"]
+        )
+    )
+    return observation
+
+
 def deploy_model(
     family: str,
     suffix: str,
@@ -203,6 +219,7 @@ def deploy_model(
     num_replicas: int = 1,
     wait: bool = False,
     timeout: float | None = 300.0,
+    config: DeploymentConfig | None = None,
 ) -> Deployment:
     """Schedule a Ray Serve app for a previously-saved model and return a
     handle carrying its base URL. The caller (e.g. model-gateway) builds
@@ -225,8 +242,13 @@ def deploy_model(
     at all (see `_record_is_current`). The call still reports the app's phase,
     and with `wait=True` still blocks until it is RUNNING.
 
-    Records the deployment - the spec it PUT, where the app is served, and its
-    phase - with the jobs control plane.
+    `config` holds this deployment's own settings. A model gets one deployment
+    per distinct config, told apart by the `DeploymentKey` on the returned
+    `Deployment`; its replicas read the config, laid over the model's own, with
+    `model_config`.
+
+    Records the deployment - its config, the spec it PUT, where the app is
+    served, and its phase - with the jobs control plane before waiting.
 
     With `wait=True`, blocks as `wait_for_model_serving` does until the Serve
     controller reports the app RUNNING. `timeout` (default 300) caps the whole
@@ -236,35 +258,29 @@ def deploy_model(
     stuck in DEPLOYING) will hang forever.
     """
     deadline = _deadline(timeout)
+    deployment_config = config or {}
+    key = deployment_key(family, suffix, run_name, deployment_config)
     meta, requirements = load_deploy_metadata(family, suffix, run_name)
-    record = state.get("deployments", family, suffix, run_name)
-    if _record_is_current(
-        record, family, suffix, run_name, meta, requirements, num_replicas
+    record = get_deployment_record(key)
+    if record is not None and _record_is_current(
+        record, key, meta, requirements, num_replicas
     ):
-        phase = record["phase"]
         if wait:
             _wait_for_application_running(record["spec"]["name"], timeout, deadline)
-            phase = observed(
-                get_serve_details().get("applications", {}).get(record["spec"]["name"])
-            )["phase"]
-        return Deployment(
-            family=family,
-            suffix=suffix,
-            run_name=run_name,
-            url=record["url"],
-            phase=phase,
-            bundle_fingerprint=meta.fingerprint,
-            replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
-        )
+            record = {
+                **record,
+                "phase": observed(
+                    get_serve_details().get("applications", {}).get(record["spec"]["name"])
+                )["phase"],
+            }
+        return deployment_of_record(record)
     # Read afresh on every deploy that reaches Ray: the tiers are what the
     # model is placed against, so a GPU joining or leaving the cluster has to
     # change the spec (and therefore re-PUT it).
     replaced_bundle_fingerprint = _bundle_fingerprint_replaced_by(record, meta)
     tiers = vram_tiers()
-    spec = build_application_spec(
-        family, suffix, run_name, meta, requirements, num_replicas, tiers
-    )
-    _clear_failed_application(family, suffix, run_name, timeout, deadline)
+    spec = build_application_spec(key, meta, requirements, num_replicas, tiers)
+    _clear_failed_application(key, timeout, deadline)
     if not _spec_already_deployed(spec):
         existing = [
             a for a in _current_application_specs() if a["name"] != spec["name"]
@@ -273,27 +289,27 @@ def deploy_model(
         # last_deployed_time_s before the PUT returns, so the wait below neither
         # misses the app nor reads a status left by an earlier deploy.
         put_serve_applications([*existing, spec])
+    url = f"{get_ray_serve_uri()}{route_prefix(key)}"
+    observation = _observation_of_application(spec["name"], replaced_bundle_fingerprint)
+    put_deployment_record(
+        key,
+        {
+            "config": deployment_config,
+            "spec": spec,
+            "tiers": tiers,
+            "url": url,
+            **observation,
+        },
+    )
     if wait:
         _wait_for_application_running(spec["name"], timeout, deadline)
-    app = get_serve_details().get("applications", {}).get(spec["name"], {})
-    url = f"{get_ray_serve_uri()}{route_prefix(family, suffix, run_name)}"
-    observation = observed(app)
-    observation["replaced_bundle_fingerprint"] = (
-        replaced_bundle_fingerprint_until_rolled_out(
-            replaced_bundle_fingerprint, observation["phase"]
+        observation = _observation_of_application(
+            spec["name"], replaced_bundle_fingerprint
         )
-    )
-    state.put(
-        "deployments",
-        family,
-        suffix,
-        run_name,
-        body={"spec": spec, "tiers": tiers, "url": url, **observation},
-    )
+        patch_deployment_record(key, observation)
     return Deployment(
-        family=family,
-        suffix=suffix,
-        run_name=run_name,
+        key=key,
+        config=deployment_config,
         url=url,
         phase=observation["phase"],
         bundle_fingerprint=meta.fingerprint,
@@ -301,18 +317,22 @@ def deploy_model(
     )
 
 
-def redeploy_model(family: str, suffix: str, run_name: str) -> Deployment:
-    record = state.get("deployments", family, suffix, run_name)
+def redeploy_model(key: DeploymentKey) -> Deployment:
+    record = get_deployment_record(key)
     if record is None:
-        raise ModelNotDeployed(f"{family}/{suffix}/{run_name} is not deployed")
+        raise ModelNotDeployed(f"{key} is not deployed")
     return deploy_model(
-        family, suffix, run_name, num_replicas=replica_count_in_spec(record["spec"])
+        key.family,
+        key.suffix,
+        key.run_name,
+        num_replicas=replica_count_in_spec(record["spec"]),
+        config=record["config"],
     )
 
 
-def undeploy_model(family: str, suffix: str, run_name: str) -> None:
-    """Tear down the Ray Serve app for this model and drop its deployment record."""
-    name = app_name(family, suffix, run_name)
+def undeploy_model(key: DeploymentKey) -> None:
+    """Tear down the Ray Serve app of this deployment and drop its record."""
+    name = app_name(key)
     remaining = [a for a in _current_application_specs() if a["name"] != name]
     put_serve_applications(remaining)
-    state.delete("deployments", family, suffix, run_name)
+    delete_deployment_record(key)

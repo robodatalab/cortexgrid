@@ -36,9 +36,13 @@ function makeModel(
 }
 
 const deployment: Deployment = {
-  family: 'Qwen2',
-  suffix: 'instruct',
-  run_name: 'boogey-46',
+  key: {
+    family: 'Qwen2',
+    suffix: 'instruct',
+    run_name: 'boogey-46',
+    config_fingerprint: '',
+  },
+  config: {},
   url: 'http://ray/r/Qwen2/instruct/boogey-46',
   phase: 'running',
   bundle_fingerprint: 'b'.repeat(64),
@@ -61,7 +65,7 @@ function renderCard(
   render(
     <ModelDashboard
       model={model}
-      deployment={deploy}
+      deployments={deploy === null ? [] : [deploy]}
       onNavigateToRun={vi.fn()}
       onNavigateToDeployment={handlers.onNavigateToDeployment ?? vi.fn()}
       onDeploy={handlers.onDeploy ?? vi.fn()}
@@ -120,6 +124,44 @@ describe('ModelDashboard', () => {
     expect(
       screen.queryByRole('button', { name: 'View deployment' }),
     ).toBeNull()
+  })
+
+  it('lists each deployment of the model with its config', async () => {
+    const onNavigateToDeployment = vi.fn()
+    const withoutThinking: Deployment = {
+      ...deployment,
+      key: { ...deployment.key, config_fingerprint: '5f0c1d2e3a4b' },
+      config: { thinking: 'false' },
+    }
+    render(
+      <ModelDashboard
+        model={makeModel('ready')}
+        deployments={[deployment, withoutThinking]}
+        onNavigateToRun={vi.fn()}
+        onNavigateToDeployment={onNavigateToDeployment}
+        onDeploy={vi.fn()}
+        onSaveRequirements={vi.fn().mockResolvedValue(undefined)}
+        onSaveConfig={vi.fn().mockResolvedValue(undefined)}
+      />,
+    )
+
+    expect(screen.getByText("the model's own config")).toBeInTheDocument()
+    expect(screen.getByText('thinking=false')).toBeInTheDocument()
+    await userEvent.click(
+      screen.getAllByRole('button', { name: 'View deployment' })[1],
+    )
+    expect(onNavigateToDeployment).toHaveBeenCalledWith(
+      'Qwen2/instruct/boogey-46/5f0c1d2e3a4b',
+    )
+  })
+
+  it('keeps Deploy enabled while only deployments given a config exist', () => {
+    renderCard(makeModel('ready'), {
+      ...deployment,
+      key: { ...deployment.key, config_fingerprint: '5f0c1d2e3a4b' },
+      config: { thinking: 'false' },
+    })
+    expect(screen.getByRole('button', { name: 'Deploy' })).toBeEnabled()
   })
 
   it('links to the deployment by the shared id when deployed', async () => {
