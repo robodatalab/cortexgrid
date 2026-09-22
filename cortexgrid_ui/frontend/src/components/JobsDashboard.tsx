@@ -8,9 +8,11 @@ export type JobRow = {
     experiment_name: string;
     run_id: string;
     run_name: string;
+    started_at: string | null;
+    ended_at: string | null;
 };
 
-type SortKey = "job" | "status" | "experiment" | "run";
+type SortKey = "job" | "status" | "experiment" | "run" | "started" | "ended";
 type SortDir = "asc" | "desc";
 
 // Status order for the Status column: what needs attention first, what is
@@ -31,6 +33,26 @@ function statusRank(status: string): number {
     return rank === -1 ? STATUS_ORDER.length : rank;
 }
 
+function compareTimes(a: string | null, b: string | null): number {
+    if (a === b) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return Date.parse(a) - Date.parse(b);
+}
+
+function formatTimestamp(iso: string | null): string {
+    if (iso === null) return "-";
+    return new Date(iso).toLocaleString([], {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+}
+
 function compare(a: JobRow, b: JobRow, key: SortKey): number {
     switch (key) {
         case "job":
@@ -41,6 +63,10 @@ function compare(a: JobRow, b: JobRow, key: SortKey): number {
             return a.experiment_name.localeCompare(b.experiment_name);
         case "run":
             return a.run_name.localeCompare(b.run_name);
+        case "started":
+            return compareTimes(a.started_at, b.started_at);
+        case "ended":
+            return compareTimes(a.ended_at, b.ended_at);
     }
 }
 
@@ -49,6 +75,8 @@ const COLUMNS: { key: SortKey; label: string }[] = [
     { key: "status", label: "Status" },
     { key: "experiment", label: "Experiment" },
     { key: "run", label: "Run" },
+    { key: "started", label: "Started" },
+    { key: "ended", label: "Ended" },
 ];
 
 type Props = {
@@ -189,6 +217,8 @@ export function JobsDashboard({ jobs: rows, onOpenJob }: Props) {
                                 </td>
                                 <td>{row.experiment_name}</td>
                                 <td title={row.run_id}>{row.run_name}</td>
+                                <td>{formatTimestamp(row.started_at)}</td>
+                                <td>{formatTimestamp(row.ended_at)}</td>
                             </tr>
                         ))}
                     </tbody>

@@ -12,6 +12,8 @@ function job(over: Partial<JobRow> & { job_id: string }): JobRow {
     experiment_name: 'alpha',
     run_id,
     run_name: 'alpha-run',
+    started_at: null,
+    ended_at: null,
     ...over,
   }
 }
@@ -84,6 +86,40 @@ describe('JobsDashboard', () => {
     await user.click(screen.getByRole('button', { name: /sort by run/i }))
 
     expect(jobColumn()).toEqual(['from-alpha', 'from-zulu'])
+  })
+
+  it('shows a dash for a job that has not ended yet', () => {
+    renderTable([job({ job_id: 'still-going', started_at: '2026-09-22T10:00:00+00:00' })])
+
+    const cells = within(screen.getAllByRole('row')[1]).getAllByRole('cell')
+    expect(cells[4].textContent).not.toBe('-')
+    expect(cells[5].textContent).toBe('-')
+  })
+
+  it('sorts by start time, a job that never started last', async () => {
+    const user = userEvent.setup()
+    renderTable([
+      job({ job_id: 'never', started_at: null }),
+      job({ job_id: 'later', started_at: '2026-09-22T11:00:00+00:00' }),
+      job({ job_id: 'earlier', started_at: '2026-09-22T10:00:00+00:00' }),
+    ])
+
+    await user.click(screen.getByRole('button', { name: /sort by started/i }))
+
+    expect(jobColumn()).toEqual(['earlier', 'later', 'never'])
+  })
+
+  it('sorts by end time, a job still going last', async () => {
+    const user = userEvent.setup()
+    renderTable([
+      job({ job_id: 'going', ended_at: null }),
+      job({ job_id: 'later', ended_at: '2026-09-22T11:00:00+00:00' }),
+      job({ job_id: 'earlier', ended_at: '2026-09-22T10:00:00+00:00' }),
+    ])
+
+    await user.click(screen.getByRole('button', { name: /sort by ended/i }))
+
+    expect(jobColumn()).toEqual(['earlier', 'later', 'going'])
   })
 
   it('hides the jobs of a status whose filter is switched off', async () => {

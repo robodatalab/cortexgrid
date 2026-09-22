@@ -23,9 +23,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 from cortexgrid.experiment import list_experiments
-from cortexgrid.jobs import list_experiment_run_jobs
+from cortexgrid.jobs import TERMINAL_JOB_STATES, JobLifecycle, list_experiment_run_jobs
 from cortexgrid.model_serving import Deployment, DeploymentKey, list_deployed_models
 from cortexgrid.ray_util import (
+    JobStatus,
     get_ray_job_status,
     list_ray_jobs_with_submission_id,
 )
@@ -59,6 +60,8 @@ class JobRow:
     experiment_name: ExperimentName
     run_id: RunId
     run_name: str
+    started_at: str | None = None
+    ended_at: str | None = None
 
 
 def row_id(run_id: RunId, job_id: JobId) -> RowId:
@@ -80,6 +83,17 @@ def _status(job, all_ray_submission_ids: list[str]) -> str:
         return get_ray_job_status(job.get_ray_job_id(all_ray_submission_ids)).value
     except Exception:
         return "broken"
+
+
+def _started_at(job: JobLifecycle) -> str | None:
+    return next((e.start for e in job.history if e.state == JobStatus.RUNNING), None)
+
+
+def _ended_at(job: JobLifecycle) -> str | None:
+    last = job.history[-1] if job.history else None
+    if last is None or last.state not in TERMINAL_JOB_STATES:
+        return None
+    return last.start
 
 
 def poll_jobs(_: None) -> dict[RowId, JobRow]:
@@ -104,6 +118,8 @@ def poll_jobs(_: None) -> dict[RowId, JobRow]:
                 experiment_name=experiment.experiment_name,
                 run_id=run_id,
                 run_name=run_name,
+                started_at=_started_at(job),
+                ended_at=_ended_at(job),
             )
     try:
         deployments = list_deployed_models()
