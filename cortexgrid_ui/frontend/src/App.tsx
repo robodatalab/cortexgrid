@@ -25,6 +25,7 @@ import type {
   ModelSelection,
 } from './components/ModelsTree'
 import { DeploymentsTree } from './components/DeploymentsTree'
+import { useDeploymentLoads } from './deploymentLoad'
 import type { DeploymentSelection } from './components/DeploymentsTree'
 import { deploymentId } from './ids'
 import { ModelDashboard } from './components/ModelDashboard'
@@ -168,6 +169,10 @@ function App() {
   const deployments = useMemo(
     () => Object.values(deploymentsById),
     [deploymentsById],
+  )
+
+  const deploymentLoads = useDeploymentLoads(
+    view === 'models' ? '/api/deployments/load' : null,
   )
 
   const selectedModel =
@@ -321,6 +326,7 @@ function App() {
                     <LayoutPane>
                       <DeploymentsTree
                         deployments={deployments}
+                        loads={deploymentLoads}
                         selection={
                           modelsSelection?.kind === 'deployment'
                             ? modelsSelection

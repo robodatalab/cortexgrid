@@ -19,6 +19,7 @@ from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.model_serving import (
     ModelRequirements,
     ServingMessage,
+    app_name,
     deploy_model,
     model_replica_placements,
     model_serving_messages,
@@ -46,6 +47,7 @@ from cortexgrid_ui.backend.models.notes import (
     delete_experiment_notes_for_experiment,
     delete_run_notes_for_run,
 )
+from cortexgrid_ui.backend.models.deployment_load import load_by_application
 from cortexgrid_ui.backend.models.infra_status import (
     InfraStatus,
     PodStatus,
@@ -265,6 +267,19 @@ async def model_config_update(
             replace(cached, config=body.config),
         )
     return {"status": "ok"}
+
+
+@app.get("/api/deployments/load")
+def deployments_load() -> dict[str, float]:
+    load_by_application_name = load_by_application()
+    return {
+        deployment_id: load_by_application_name.get(
+            app_name(d.family, d.suffix, d.run_name), 0.0
+        )
+        for deployment_id, d in deployments_stream.deployments_cache.get(
+            deployments_stream.META_TOPIC
+        ).items()
+    }
 
 
 @app.post("/api/deployments/{family}/{suffix}/{run_name}")

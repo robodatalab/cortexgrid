@@ -26,6 +26,7 @@ describe('DeploymentsTree', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
+        loads={{}}
         selection={null}
         onSelect={vi.fn()}
       />,
@@ -48,6 +49,7 @@ describe('DeploymentsTree', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
+        loads={{}}
         selection={null}
         onSelect={onSelect}
       />,
@@ -57,5 +59,30 @@ describe('DeploymentsTree', () => {
       kind: 'deployment',
       id: 'Qwen2/instruct/boogey-46',
     })
+  })
+
+  it('shows one bar per load level next to each deployment it has a load for', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{ 'Qwen2/instruct/boogey-46': 0.9, 'DeepSeek3/chat/snake-12': 0.1 }}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('img', { name: 'Load: busy' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Load: idle' })).toBeInTheDocument()
+  })
+
+  it('shows no load bars for a deployment without a load', () => {
+    render(
+      <DeploymentsTree
+        deployments={deployments}
+        loads={{}}
+        selection={null}
+        onSelect={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('img', { name: /^Load:/ })).not.toBeInTheDocument()
   })
 })

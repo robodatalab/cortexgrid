@@ -3,17 +3,25 @@ import { Box } from "lucide-react";
 import "./DeploymentsTree.css";
 import { servingTier } from "../phases";
 import { deploymentId } from "../ids";
+import type { LoadByDeploymentId } from "../deploymentLoad";
+import { LoadBars } from "./LoadBars";
 import type { Deployment } from "./ModelsTree";
 
 export type DeploymentSelection = { kind: "deployment"; id: string };
 
 type Props = {
     deployments: Deployment[];
+    loads: LoadByDeploymentId;
     selection: DeploymentSelection | null;
     onSelect: (selection: DeploymentSelection) => void;
 };
 
-export function DeploymentsTree({ deployments, selection, onSelect }: Props) {
+export function DeploymentsTree({
+    deployments,
+    loads,
+    selection,
+    onSelect,
+}: Props) {
     const sorted = useMemo(
         () =>
             [...deployments].sort((a, b) => {
@@ -59,6 +67,7 @@ export function DeploymentsTree({ deployments, selection, onSelect }: Props) {
                                 className={`deployments-tree__dot deployments-tree__dot--${tier}`}
                                 aria-label={`Deployment status: ${d.phase}`}
                             />
+                            {id in loads && <LoadBars load={loads[id]} />}
                         </div>
                     );
                 })}

@@ -7,7 +7,7 @@ from pathlib import Path
 import requests
 
 import cortexgrid
-from cortexgrid.model_serving import _app_name
+from cortexgrid.model_serving import app_name
 from cortexgrid.ray_util import get_serve_details
 
 from tests.integration.cortexgrid._ray_run import (
@@ -56,7 +56,7 @@ class TestModelServing(unittest.TestCase):
             cortexgrid.undeploy_model(family, suffix, self.run_name)
 
     def _last_deployed_time(self, family: str, suffix: str) -> float:
-        name = _app_name(family, suffix, self.run_name)
+        name = app_name(family, suffix, self.run_name)
         return get_serve_details()["applications"][name]["last_deployed_time_s"]
 
     def test_redeploying_an_unchanged_model_leaves_the_serve_app_untouched(

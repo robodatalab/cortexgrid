@@ -1,0 +1,37 @@
+.load-bars {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 12px;
+}
+
+.load-bars__bar {
+    width: 3px;
+    border-radius: 1px;
+    background: #d0d0d0;
+}
+
+.load-bars__bar--1 {
+    height: 4px;
+}
+
+.load-bars__bar--2 {
+    height: 8px;
+}
+
+.load-bars__bar--3 {
+    height: 12px;
+}
+
+.load-bars--idle .load-bars__bar--lit {
+    background: #2ea44f;
+}
+
+.load-bars--moderate .load-bars__bar--lit {
+    background: #d4a017;
+}
+
+.load-bars--busy .load-bars__bar--lit {
+    background: #cb2431;
+}

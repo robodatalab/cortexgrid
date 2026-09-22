@@ -7,7 +7,7 @@ from pathlib import Path
 import requests
 
 import cortexgrid
-from cortexgrid.model_serving import _VRAM_LABEL, _app_name, _phase
+from cortexgrid.model_serving import _VRAM_LABEL, _phase, app_name
 from cortexgrid.ray_util import get_ray_nodes, get_serve_details
 
 from tests.integration.cortexgrid._ray_run import experiment_name
@@ -77,7 +77,7 @@ class TestModelScheduling(unittest.TestCase):
         return cortexgrid.deploy_model(family, _SUFFIX, self.run_name, wait=True)
 
     def _phase_of(self, family: str) -> str:
-        name = _app_name(family, _SUFFIX, self.run_name)
+        name = app_name(family, _SUFFIX, self.run_name)
         return _phase(get_serve_details()["applications"][name])
 
 

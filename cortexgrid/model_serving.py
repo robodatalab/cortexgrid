@@ -68,7 +68,7 @@ class Deployment:
     phase: str
 
 
-def _app_name(family: str, suffix: str, run_name: str) -> str:
+def app_name(family: str, suffix: str, run_name: str) -> str:
     return f"{family}__{suffix}__{run_name}"
 
 
@@ -352,7 +352,7 @@ def _build_application_spec(
     if meta.pip_requirements:
         runtime_env["pip"] = meta.pip_requirements
     return {
-        "name": _app_name(family, suffix, run_name),
+        "name": app_name(family, suffix, run_name),
         "route_prefix": _route_prefix(family, suffix, run_name),
         # Ray Serve REST requires import_path to point at an Application builder
         # (callable returning a bound node) or an already-bound node. A bare
@@ -534,7 +534,7 @@ def wait_for_model_serving(
     raises TimeoutError; with `timeout=None` there is no deadline.
     """
     _wait_for_application_running(
-        _app_name(family, suffix, run_name), timeout, _deadline(timeout)
+        app_name(family, suffix, run_name), timeout, _deadline(timeout)
     )
 
 
@@ -572,7 +572,7 @@ def _clear_failed_application(
     identical spec over a failed app, or PUTting it back before the controller's
     next tick has processed an undeploy, leaves the failed deployment in place,
     and the app reports DEPLOY_FAILED again without retrying."""
-    name = _app_name(family, suffix, run_name)
+    name = app_name(family, suffix, run_name)
     app = get_serve_details().get("applications", {}).get(name)
     if app is None:
         return
@@ -737,7 +737,7 @@ def deploy_model(
 
 def undeploy_model(family: str, suffix: str, run_name: str) -> None:
     """Tear down the Ray Serve app for this model and drop its deployment record."""
-    name = _app_name(family, suffix, run_name)
+    name = app_name(family, suffix, run_name)
     remaining = [a for a in _current_application_specs() if a["name"] != name]
     put_serve_applications(remaining)
     state.delete("deployments", family, suffix, run_name)
@@ -908,7 +908,7 @@ def observe_deployments() -> None:
     applications = get_serve_details().get("applications", {})
     for record in state.get("deployments"):
         family, suffix, run_name = record["family"], record["suffix"], record["run_name"]
-        observed = _observed(applications.get(_app_name(family, suffix, run_name)))
+        observed = _observed(applications.get(app_name(family, suffix, run_name)))
         if any(record[key] != value for key, value in observed.items()):
             state.patch("deployments", family, suffix, run_name, body=observed)
 
@@ -937,7 +937,7 @@ def model_serving_messages(
     app-level message first, then each deployment's. Empty when no app exists.
     This is where Ray explains a DEPLOY_FAILED or UNHEALTHY app."""
     app = get_serve_details().get("applications", {}).get(
-        _app_name(family, suffix, run_name)
+        app_name(family, suffix, run_name)
     )
     if app is None:
         return []
