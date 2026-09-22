@@ -72,7 +72,7 @@ class TestBuild(unittest.TestCase):
             })
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            autoscaling_config=model_autoscaling_config(2, actor_options),
+            autoscaling_config=model_autoscaling_config(2),
             max_ongoing_requests=100,
             ray_actor_options=actor_options,
         )
@@ -82,7 +82,7 @@ class TestBuild(unittest.TestCase):
             build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            autoscaling_config=model_autoscaling_config(1, {}),
+            autoscaling_config=model_autoscaling_config(1),
             max_ongoing_requests=100,
             ray_actor_options={},
         )

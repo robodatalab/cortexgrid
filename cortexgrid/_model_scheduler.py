@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 _RayResources = dict[str, float]
 
 
-_SCHEDULER_ACTOR_NAME = "cortexgrid-model-scheduler"
+_SCHEDULER_PROTOCOL_VERSION = 2
+_SCHEDULER_ACTOR_NAME = f"cortexgrid-model-scheduler-v{_SCHEDULER_PROTOCOL_VERSION}"
 _SCHEDULER_ACTOR_NAMESPACE = "cortexgrid"
 
 _PAUSE_DECISION_INTERVAL_S = 1.0
@@ -27,13 +28,12 @@ _FORGET_MODELS_SILENT_FOR_S = 30.0
 _REQUEST_METRICS_PUSH_INTERVAL_S = 0.5
 _REQUEST_METRICS_AVERAGING_WINDOW_S = 1.0
 
+_SERVE_REPLICA_CLASS_PREFIX = "ServeReplica:"
 _STATE_API_RESULT_LIMIT = 10_000
 _RESOURCE_FLOAT_TOLERANCE = 1e-6
 
 
-def model_autoscaling_config(
-    max_replicas: int, ray_actor_options: dict[str, Any]
-) -> dict[str, Any]:
+def model_autoscaling_config(max_replicas: int) -> dict[str, Any]:
     return {
         "min_replicas": 0,
         "initial_replicas": max_replicas,
@@ -48,47 +48,22 @@ def model_autoscaling_config(
                 f"{ModelAutoscalingPolicy.__module__}:"
                 f"{ModelAutoscalingPolicy.__qualname__}"
             ),
-            "policy_kwargs": {
-                "replica_resources": _resources_requested_by_replica(
-                    ray_actor_options
-                )
-            },
         },
     }
 
 
-def _resources_requested_by_replica(
-    ray_actor_options: dict[str, Any],
-) -> _RayResources:
-    resources = {
-        name: float(amount)
-        for name, amount in ray_actor_options.get("resources", {}).items()
-    }
-    if ray_actor_options.get("num_gpus"):
-        resources["GPU"] = float(ray_actor_options["num_gpus"])
-    if ray_actor_options.get("memory"):
-        resources["memory"] = float(ray_actor_options["memory"])
-    return resources
-
-
 class ModelAutoscalingPolicy:
-    def __init__(self, replica_resources: _RayResources) -> None:
-        self._replica_resources = replica_resources
+    def __init__(self) -> None:
         self._scheduler: ActorProxy[_ModelScheduler] | None = None
         self._pending_pause_answer: Future[bool] | None = None
         self._pause_requested_by_scheduler = False
 
     def __call__(self, context: AutoscalingContext) -> tuple[int, dict[str, Any]]:
         has_requests = context.total_num_requests > 0
-        waiting_for_replica = (
-            has_requests or context.target_num_replicas > 0
-        ) and not context.running_replicas
         if not self._awaiting_pause_answer():
             self._pause_requested_by_scheduler = self._collect_pause_answer()
             self._send_activity_report(
-                context.deployment_id.to_replica_actor_class_name(),
-                has_requests,
-                waiting_for_replica,
+                context.deployment_id.to_replica_actor_class_name(), has_requests
             )
         return self._replica_count(context, has_requests), context.policy_state
 
@@ -115,17 +90,12 @@ class ModelAutoscalingPolicy:
             self._scheduler = None
             return False
 
-    def _send_activity_report(
-        self, replica_class_name: str, has_requests: bool, waiting_for_replica: bool
-    ) -> None:
+    def _send_activity_report(self, replica_class_name: str, has_requests: bool) -> None:
         if self._scheduler is None:
             self._scheduler = _get_or_create_scheduler_actor()
         self._pending_pause_answer = (
             self._scheduler.report_activity_and_check_pause.remote(
-                replica_class_name,
-                self._replica_resources,
-                has_requests,
-                waiting_for_replica,
+                replica_class_name, has_requests
             ).future()
         )
 
@@ -147,10 +117,7 @@ def _get_or_create_scheduler_actor() -> ActorProxy[_ModelScheduler]:
 
 @dataclass
 class _ScheduledModel:
-    replica_resources: _RayResources
     has_requests: bool = False
-    waiting_for_replica: bool = False
-    waiting_since: float = 0.0
     last_request_at: float = 0.0
     last_report_at: float = 0.0
 
@@ -161,48 +128,50 @@ class _NodeOccupancy:
     resources_held_by_model: dict[str, _RayResources] = field(default_factory=dict)
 
 
+@dataclass
+class _ReplicaWaitingForRoom:
+    actor_id: str
+    required_resources: _RayResources
+
+
+@dataclass
+class _ClusterOccupancy:
+    nodes: list[_NodeOccupancy]
+    replicas_waiting_for_room: list[_ReplicaWaitingForRoom]
+
+
 class _ModelScheduler:
     def __init__(self) -> None:
         self._models: dict[str, _ScheduledModel] = {}
         self._models_to_pause: set[str] = set()
         self._last_pause_decision_at = float("-inf")
+        self._first_seen_waiting_at: dict[str, float] = {}
 
     @ray.method
     def report_activity_and_check_pause(
-        self,
-        replica_class_name: str,
-        replica_resources: _RayResources,
-        has_requests: bool,
-        waiting_for_replica: bool,
+        self, replica_class_name: str, has_requests: bool
     ) -> bool:
-        now = time.monotonic()
-        self._record_activity(
-            replica_class_name, replica_resources, has_requests, waiting_for_replica, now
+        return self._record_activity_and_check_pause(
+            replica_class_name, has_requests, time.monotonic()
         )
+
+    def _record_activity_and_check_pause(
+        self, replica_class_name: str, has_requests: bool, now: float
+    ) -> bool:
+        self._record_activity(replica_class_name, has_requests, now)
         if now - self._last_pause_decision_at >= _PAUSE_DECISION_INTERVAL_S:
             self._last_pause_decision_at = now
             self._forget_models_silent_since(now - _FORGET_MODELS_SILENT_FOR_S)
-            self._models_to_pause = self._select_models_to_pause()
+            self._models_to_pause = self._select_models_to_pause(now)
         return replica_class_name in self._models_to_pause
 
     def _record_activity(
-        self,
-        replica_class_name: str,
-        replica_resources: _RayResources,
-        has_requests: bool,
-        waiting_for_replica: bool,
-        now: float,
+        self, replica_class_name: str, has_requests: bool, now: float
     ) -> None:
-        model = self._models.setdefault(
-            replica_class_name, _ScheduledModel(replica_resources)
-        )
-        model.replica_resources = replica_resources
-        if waiting_for_replica and not model.waiting_for_replica:
-            model.waiting_since = now
+        model = self._models.setdefault(replica_class_name, _ScheduledModel())
         if has_requests:
             model.last_request_at = now
         model.has_requests = has_requests
-        model.waiting_for_replica = waiting_for_replica
         model.last_report_at = now
 
     def _forget_models_silent_since(self, cutoff: float) -> None:
@@ -212,26 +181,23 @@ class _ModelScheduler:
             if model.last_report_at >= cutoff
         }
 
-    def _select_models_to_pause(self) -> set[str]:
-        if not any(model.waiting_for_replica for model in self._models.values()):
+    def _select_models_to_pause(self, now: float) -> set[str]:
+        if not _any_serve_replica_waiting_for_room():
+            self._first_seen_waiting_at = {}
             return set()
-        nodes = _read_node_occupancy(set(self._models))
-        models_with_placed_replicas = {
-            name for node in nodes for name in node.resources_held_by_model
+        occupancy = _read_cluster_occupancy(set(self._models))
+        self._first_seen_waiting_at = {
+            replica.actor_id: self._first_seen_waiting_at.get(replica.actor_id, now)
+            for replica in occupancy.replicas_waiting_for_room
         }
-        models_waiting_for_room = sorted(
-            (
-                name
-                for name, model in self._models.items()
-                if model.waiting_for_replica
-                and name not in models_with_placed_replicas
-            ),
-            key=lambda name: self._models[name].waiting_since,
+        waiting_longest_first = sorted(
+            occupancy.replicas_waiting_for_room,
+            key=lambda replica: self._first_seen_waiting_at[replica.actor_id],
         )
         models_to_pause: set[str] = set()
-        for name in models_waiting_for_room:
+        for replica in waiting_longest_first:
             models_to_pause |= self._fewest_idle_models_to_pause_for(
-                self._models[name].replica_resources, nodes, models_to_pause
+                replica.required_resources, occupancy.nodes, models_to_pause
             )
         return models_to_pause
 
@@ -281,25 +247,34 @@ class _ModelScheduler:
         return None
 
 
-def _read_node_occupancy(
-    scheduled_replica_class_names: set[str],
-) -> list[_NodeOccupancy]:
+def _any_serve_replica_waiting_for_room() -> bool:
+    return any(
+        _is_serve_replica_waiting_for_room(vars(actor))
+        for actor in _list_actors_in_state("PENDING_CREATION", detail=False)
+    )
+
+
+def _read_cluster_occupancy(scheduled_replica_class_names: set[str]) -> _ClusterOccupancy:
     occupancy_by_node_id = {
         node["NodeID"]: _NodeOccupancy(free_resources=dict(node["Resources"]))
         for node in ray.nodes()
         if node["Alive"]
     }
-    for actor in list_actors(
-        filters=[("state", "=", "ALIVE")],
-        detail=True,
-        limit=_STATE_API_RESULT_LIMIT,
-        raise_on_missing_output=False,
-    ):
+    replicas_waiting_for_room: list[_ReplicaWaitingForRoom] = []
+    for actor in [
+        *_list_actors_in_state("ALIVE", detail=True),
+        *_list_actors_in_state("PENDING_CREATION", detail=True),
+    ]:
         actor_fields = vars(actor)
+        reserved_resources = actor_fields["required_resources"] or {}
+        if _is_serve_replica_waiting_for_room(actor_fields):
+            replicas_waiting_for_room.append(
+                _ReplicaWaitingForRoom(actor_fields["actor_id"], reserved_resources)
+            )
+            continue
         occupancy = occupancy_by_node_id.get(actor_fields["node_id"])
         if occupancy is None:
             continue
-        reserved_resources = actor_fields["required_resources"] or {}
         _subtract_resources(occupancy.free_resources, reserved_resources)
         replica_class_name = actor_fields["class_name"]
         if replica_class_name in scheduled_replica_class_names:
@@ -307,7 +282,27 @@ def _read_node_occupancy(
                 occupancy.resources_held_by_model.setdefault(replica_class_name, {}),
                 reserved_resources,
             )
-    return list(occupancy_by_node_id.values())
+    return _ClusterOccupancy(
+        nodes=list(occupancy_by_node_id.values()),
+        replicas_waiting_for_room=replicas_waiting_for_room,
+    )
+
+
+def _list_actors_in_state(state: str, detail: bool) -> list[Any]:
+    return list_actors(
+        filters=[("state", "=", state)],
+        detail=detail,
+        limit=_STATE_API_RESULT_LIMIT,
+        raise_on_missing_output=False,
+    )
+
+
+def _is_serve_replica_waiting_for_room(actor_fields: dict[str, Any]) -> bool:
+    return (
+        actor_fields["state"] == "PENDING_CREATION"
+        and actor_fields["node_id"] is None
+        and actor_fields["class_name"].startswith(_SERVE_REPLICA_CLASS_PREFIX)
+    )
 
 
 def _add_resources(target: _RayResources, amounts: _RayResources) -> None:
