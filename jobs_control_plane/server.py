@@ -57,6 +57,7 @@ POLL_INTERVAL_SECONDS = int(os.environ.get("CORTEXGRID_POLL_INTERVAL", "5"))
 STARTER_WORKERS = int(os.environ.get("CORTEXGRID_STARTER_WORKERS", "4"))
 HEARTBEAT_PATH = Path("/tmp/cp_heartbeat")
 API_PORT = int(os.environ.get("CORTEXGRID_API_PORT", "8000"))
+_KEEP_ALIVE_TIMEOUT_S = 75
 
 
 def _submit_job_worker(run_id: str, job_id: str, attempt: int) -> None:
@@ -293,7 +294,9 @@ def main() -> None:
     # The poller reaches the state API through the cortexgrid library; until
     # uvicorn is listening its cycles fail and are retried.
     threading.Thread(target=_poll_forever, name="poller", daemon=True).start()
-    uvicorn.run(app, host="0.0.0.0", port=API_PORT)
+    uvicorn.run(
+        app, host="0.0.0.0", port=API_PORT, timeout_keep_alive=_KEEP_ALIVE_TIMEOUT_S
+    )
 
 
 if __name__ == "__main__":
