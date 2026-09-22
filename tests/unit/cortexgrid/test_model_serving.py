@@ -21,6 +21,7 @@ from cortexgrid.model_serving import (
     ServeBundle,
     _build_application_spec,
     _load_deploy_metadata,
+    _phase,
     _placement_options,
     vram_tiers,
     build_bundle,
@@ -1254,6 +1255,36 @@ class TestModelRequirements(unittest.TestCase):
         )
 
         self.assertEqual(spec["args"]["ray_actor_options"]["num_gpus"], 0.25)
+
+
+def _running_app(target_num_replicas: int, replica_states: list[str]) -> dict[str, Any]:
+    return {
+        "status": "RUNNING",
+        "deployments": {
+            "Model": {
+                "target_num_replicas": target_num_replicas,
+                "replicas": [{"state": state} for state in replica_states],
+            }
+        },
+    }
+
+
+class TestPhase(unittest.TestCase):
+    def test_running_app_scaled_to_zero_is_paused(self) -> None:
+        self.assertEqual(_phase(_running_app(0, [])), "paused")
+
+    def test_running_app_still_stopping_its_replica_is_paused(self) -> None:
+        self.assertEqual(_phase(_running_app(0, ["STOPPING"])), "paused")
+
+    def test_running_app_resuming_without_a_running_replica_is_deploying(self) -> None:
+        self.assertEqual(_phase(_running_app(1, ["STARTING"])), "deploying")
+
+    def test_running_app_with_a_running_replica_is_running(self) -> None:
+        self.assertEqual(_phase(_running_app(1, ["RUNNING"])), "running")
+
+    def test_failed_app_stays_failed_at_zero_replicas(self) -> None:
+        app = {**_running_app(0, []), "status": "DEPLOY_FAILED"}
+        self.assertEqual(_phase(app), "failed")
 
 
 if __name__ == "__main__":

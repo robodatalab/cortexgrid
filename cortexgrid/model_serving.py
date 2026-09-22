@@ -39,7 +39,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from ray.serve.schema import ApplicationStatus
+from ray.serve.schema import ApplicationStatus, ReplicaState
 
 from cortexgrid import state
 from cortexgrid._bundle import bundle, digest, stage, worker_provides
@@ -77,6 +77,7 @@ def _route_prefix(family: str, suffix: str, run_name: str) -> str:
 
 
 _PHASE_NOT_DEPLOYED = "not_deployed"
+_PHASE_PAUSED = "paused"
 
 # Ray Serve ApplicationStatus -> normalized serving phase. The single source of
 # the serving vocabulary, shared by Deployment, list_deployed_models, and
@@ -610,7 +611,7 @@ def _spec_already_deployed(spec: dict[str, Any]) -> bool:
 # Phases in which a deployment record stands for a live app: one a redeploy
 # with the same spec may leave alone. A failed app has to be cleared and
 # re-PUT, a deleting one waited out, and a missing one PUT again.
-_LIVE_PHASES = ("running", "deploying", "not_started", "unhealthy")
+_LIVE_PHASES = ("running", "deploying", "not_started", "unhealthy", _PHASE_PAUSED)
 
 
 def _record_is_current(
@@ -687,7 +688,9 @@ def deploy_model(
         phase = record["phase"]
         if wait:
             _wait_for_application_running(record["spec"]["name"], timeout, deadline)
-            phase = "running"
+            phase = _observed(
+                get_serve_details().get("applications", {}).get(record["spec"]["name"])
+            )["phase"]
         return Deployment(
             family=family,
             suffix=suffix,
@@ -771,6 +774,7 @@ class ServingStatus:
       - "deploying"     replicas starting; the replica pulls the weights and
                         builds the model on the worker (DEPLOYING)
       - "running"       serving traffic (RUNNING)
+      - "paused"        scaled to zero replicas by the model scheduler
       - "unhealthy"     Serve app reports UNHEALTHY
       - "failed"        Serve app DEPLOY_FAILED
       - "deleting"      Serve app being torn down (DELETING)
@@ -867,10 +871,33 @@ def _observed(app: dict[str, Any] | None) -> dict[str, Any]:
         return {"phase": _PHASE_NOT_DEPLOYED, "message": "", "replicas": []}
     raw = str(app.get("status", ""))
     return {
-        "phase": _serve_phase(raw),
+        "phase": _phase(app),
         "message": str(app.get("message", "")) or raw,
         "replicas": [asdict(placement) for placement in _placements(app)],
     }
+
+
+def _phase(app: dict[str, Any]) -> str:
+    serve_phase = _serve_phase(str(app.get("status", "")))
+    if serve_phase != "running":
+        return serve_phase
+    deployments = list(app.get("deployments", {}).values())
+    target_replica_counts = [
+        deployment.get("target_num_replicas") for deployment in deployments
+    ]
+    if target_replica_counts and all(count == 0 for count in target_replica_counts):
+        return _PHASE_PAUSED
+    if any(target_replica_counts) and not _has_running_replica(deployments):
+        return "deploying"
+    return serve_phase
+
+
+def _has_running_replica(deployments: list[dict[str, Any]]) -> bool:
+    return any(
+        replica.get("state") == ReplicaState.RUNNING.value
+        for deployment in deployments
+        for replica in deployment.get("replicas", [])
+    )
 
 
 def observe_deployments() -> None:
