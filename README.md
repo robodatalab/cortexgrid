@@ -4,15 +4,15 @@
 
 component | unit test | docker image | integration test |
 | --- | --- | --- | --- |
-| cortexgrid integration | - | <!--s:build_cortexgrid_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_integration-->🟢 passing<!--/s--> |
-| ui integration | - | <!--s:build_cortexgrid_ui_integration-->🔴 failing<!--/s--> | <!--s:test_cortexgrid_ui_integration-->🟢 passing<!--/s--> |
-| cortexgrid | <!--s:test_cortexgrid-->🔴 failing<!--/s--> | - | - |
-| jobs control plane | <!--s:test_jobs_control_plane-->🔴 failing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
+| cortexgrid integration | - | <!--s:build_cortexgrid_integration-->🟢 passing<!--/s--> | <!--s:test_cortexgrid_integration-->🟢 passing<!--/s--> |
+| ui integration | - | <!--s:build_cortexgrid_ui_integration-->🟢 passing<!--/s--> | <!--s:test_cortexgrid_ui_integration-->🟢 passing<!--/s--> |
+| cortexgrid | <!--s:test_cortexgrid-->🟢 passing<!--/s--> | - | - |
+| jobs control plane | <!--s:test_jobs_control_plane-->🟢 passing<!--/s--> | <!--s:build_jobs_control_plane-->🟢 passing<!--/s--> | - |
 | mlflow | - | <!--s:build_mlflow-->⚪ unknown<!--/s--> | - |
 | ray | - | <!--s:build_ray-->🔴 failing<!--/s--> | - |
 | arc runner | - | <!--s:build_arc_runner-->🔴 failing<!--/s--> | - |
-| ui backend | <!--s:test_cortexgrid_ui_backend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_backend-->🟢 passing<!--/s--> | - |
-| ui frontend | <!--s:test_cortexgrid_ui_frontend-->🔴 failing<!--/s--> | <!--s:build_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | - |
+| ui backend | <!--s:test_cortexgrid_ui_backend-->🟢 passing<!--/s--> | <!--s:build_cortexgrid_ui_backend-->🟢 passing<!--/s--> | - |
+| ui frontend | <!--s:test_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | <!--s:build_cortexgrid_ui_frontend-->🟢 passing<!--/s--> | - |
 | k8s seed | <!--s:test_k8s_seed-->🟢 passing<!--/s--> | - | - |
 
 
