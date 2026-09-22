@@ -100,7 +100,7 @@ Two cluster-side limits shape what can actually be asked for:
 - Ray sizes a worker's `memory` from the pod's cgroup limit, so the worker pods carry no memory limit and Ray sees the host's own RAM. Ray keeps roughly 30% of it for its object store; the rest is what replicas can reserve.
 - A GPU worker gets one GPU, so a model needing `num_gpus > 1` has no node to land on today. A fraction of one is fine - see [Sharing a GPU between models](#sharing-a-gpu-between-models).
 
-A requirement no node can satisfy is not an error: the app stays `deploying` until one frees up, or until `deploy_model(wait=True)` times out.
+A requirement no node can satisfy is not an error: the app stays `deploying` until one frees up - idle models are [paused](#sharing-gpus-by-pausing-idle-models) to make room when that is enough - or until `deploy_model(wait=True)` times out.
 
 ### Which GPU it picks, when several fit
 
@@ -151,6 +151,49 @@ Do them together. The attributes keep working only while the model's bundle pred
 ### Changing them later
 
 `set_model_requirements(family, suffix, run_name, requirements)` replaces the stored values; the dashboard's model card edits them the same way. It takes effect on the next `deploy_model` - a replica already running keeps the placement it started with. `import_model` stores requirements only when it uploads the model or finds none stored, so an edit made since is not overwritten by the next run that imports it.
+
+## Sharing GPUs by pausing idle models
+
+A cluster can have more models deployed than its GPUs hold at once. Every model `deploy_model` puts on Ray Serve autoscales between zero replicas and its `num_replicas`, under cortexgrid's `ModelAutoscalingPolicy` instead of Ray's request-based policy:
+
+- a model with requests asks for all of its `num_replicas`;
+- a model the model scheduler pauses drops to zero replicas and reads `paused`;
+- any other model keeps what it has, so a loaded model stays loaded, however long it sits idle, for as long as nothing else needs its room.
+
+```python
+# Each needs the whole card; the cluster has one such card.
+first = cortexgrid.deploy_model("flux", "klein", run_name, wait=True)
+second = cortexgrid.deploy_model("qwen", "7b", run_name, wait=True)   # pauses first
+
+requests.post(f"{first.url}/generate", json=..., timeout=600)          # resumes first, pauses second
+```
+
+### What decides which model is paused
+
+Ray runs one copy of the policy per model inside the Serve controller. It pickles each copy by value, so the copies share no state. What they share is the model scheduler: a named, detached Ray actor (`cortexgrid-model-scheduler-v<N>`, namespace `cortexgrid`) that every copy reports its model's activity to on each control-loop tick, and takes its answer from without blocking the controller.
+
+Once a second, while any Serve replica is waiting for room - `PENDING_CREATION` with no node, because no node has its resources free - the scheduler reads the cluster's occupancy from Ray's state API. For each waiting replica, longest-waiting first, it picks the fewest idle models on one node whose replicas, once stopped, would leave room for it, least recently used first. Their policies return zero replicas; Ray stops them and places the waiting replica on the room they free.
+
+- A model with requests is never paused, so a waiting replica waits for as long as the models holding its card stay busy.
+- Nothing is paused while a node already has room: the waiting replica is being placed there.
+- Nothing is paused when stopping every idle model on a node would still not make room.
+- Waiting replicas are found from Ray's actor state, not from their own policy: Ray does not call the policy of a model with zero running replicas and queued requests - its cold-start path scales the model up itself - and that is exactly a model resuming.
+
+A model being deployed claims room the same way: `deploy_model` starts it at `num_replicas`, so its first replica waits for room like a resuming one does.
+
+### What a caller of a paused model sees
+
+Its request waits at the Serve proxy while an idle model is paused and the paused model's replica starts and loads its weights - seconds for a small model, minutes for a large one - so client timeouts must allow for that. A model reads idle about 1.5 s after its last request: request counts are pushed every 0.5 s and averaged over 1 s, where Ray's defaults (10 s, 30 s) would keep it looking busy for half a minute. Ray's own autoscaling delays are zero.
+
+`deploy_model` and `wait_for_model_serving` return straight away for a paused model: Ray reports its app `RUNNING`.
+
+### What takes part
+
+Only models whose bundle carries the policy, which `_serve_entry.py` applies and which is frozen into the bundle at `save_model` / `import_model` time. A model saved with an older cortexgrid still runs a fixed replica count: it holds its share of a card and is never paused. `import_model` with a newer cortexgrid re-bundles an imported model; a model saved with `save_model` has to be saved again.
+
+`cortexgrid/_model_scheduler.py` runs in the Serve controller, whose environment is the Ray image's, which has no cortexgrid: it may import only the standard library and Ray. A unit test loads the pickled policy with cortexgrid imports blocked.
+
+The scheduler actor's name carries a protocol version. Bump it when changing what the policy and the scheduler exchange: the detached actor outlives deploys, and a policy of the new version must not find one running the old code. An old actor keeps running until it is killed, which is safe once no deployed model runs the old policy.
 
 ## Model config
 
@@ -498,11 +541,24 @@ The serving lifecycle is owned by the Ray Serve controller: it starts at `deploy
 |---|---|
 | `not_deployed` | no Serve app - never deployed, or already undeployed |
 | `not_started` | the controller accepted the app but has not started it yet |
-| `deploying` | replicas starting; the replica pulls weights and builds the model on the worker |
+| `deploying` | replicas starting - after `deploy_model`, or while a `paused` model resumes; the replica pulls weights and builds the model on the worker |
 | `running` | serving traffic |
+| `paused` | scaled to zero replicas by the [model scheduler](#sharing-gpus-by-pausing-idle-models) to make room for another model; the app and its route stay, and its next request resumes it |
 | `unhealthy` | the app went unhealthy after starting |
 | `failed` | deploy failed (`DEPLOY_FAILED`) |
 | `deleting` | the app is being torn down |
+
+What moves a model between them:
+
+| transition | trigger |
+|---|---|
+| `not_deployed` -> `deploying` | `deploy_model` |
+| `deploying` -> `running` | Ray: a replica reaches RUNNING |
+| `running` -> `paused` | the model scheduler: the model is idle and holds room a waiting replica needs |
+| `paused` -> `deploying` | a request reaches the paused model; Ray scales it up from zero |
+| `running` -> `deleting` -> `not_deployed` | `undeploy_model`, then Ray removes the app |
+
+`paused` is derived, not reported by Ray: Ray keeps the app `RUNNING` at zero replicas, so the phase reads `paused` when every deployment's target is zero, and `deploying` while the target is above zero but no replica is running yet.
 
 ### Deploying a model
 
@@ -579,7 +635,7 @@ Re-PUTs the applications list without this app; the controller tears down the re
 | symptom | cause | fix |
 |---|---|---|
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... DEPLOY_FAILED: <message>` | the replica failed to import or build - a dependency missing from the bundle (something the serve-app imports that was not reachable at `save_model` time), a pinned requirement pip could not install on the replica (a version not on PyPI, no wheel for the worker's platform), an exception in the serve-app `__init__`, or OOM while loading weights | read `<message>`; check the serve-app's imports as bundled at `save_model` time and the replica logs in the Ray dashboard; fix and re-deploy. |
-| `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - no node has the model's [requirements](#model-requirements) free (GPUs, RAM, VRAM), or none can ever satisfy them; a slow image pull; a hung `__init__` | compare the requirements with the cluster's free resources in the Ray dashboard; free some by undeploying others, or correct the requirements on the model card; raise `timeout` or pass `timeout=None`. |
+| `deploy_model(wait=True)` / `wait_for_model_serving` raises `TimeoutError: ... did not reach RUNNING within Ns` | app stuck `deploying` - no node has the model's [requirements](#model-requirements) free (GPUs, RAM, VRAM) and [pausing idle models](#sharing-gpus-by-pausing-idle-models) cannot make room (the models holding it are busy, or predate the scheduler), or none can ever satisfy them; a slow image pull; a hung `__init__` | compare the requirements with the cluster's free resources in the Ray dashboard; free some by undeploying others, or correct the requirements on the model card; raise `timeout` or pass `timeout=None`. |
 | `deploy_model(wait=True)` / `wait_for_model_serving` raises `ModelDeployFailed: Serve app ... does not exist` | the app was never deployed, was undeployed, or was dropped by a concurrent `deploy_model` (each deploy PUTs the whole applications list, so a later PUT can drop an app an earlier one added) | check `list_deployed_models`; deploy again. |
 | `model_serving_status` reports `failed` | same as `DEPLOY_FAILED`, observed without `wait` | read `ServingStatus.message`; check replica logs; re-deploy after fixing - `deploy_model` clears the failed app itself. |
 | `model_serving_status` reports `unhealthy` | the app started, then a replica crashed or health checks began failing | inspect replica logs in the Ray dashboard; re-deploy. |
@@ -616,7 +672,7 @@ Observability: each app appears in the Ray dashboard (Serve > Applications) and 
 }
 ```
 
-Replica options travel in `args`: `deploy_model` derives `ray_actor_options` from the model's [requirements](#model-requirements) (`memory` in bytes, `vram_mib` in MiB) and `_serve_entry.build` applies them, with `num_replicas`, via `.options(...)` on the serve-app deployment. `memory` and `resources` are left out when the requirement is 0, so nothing is reserved. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
+Replica options travel in `args`: `deploy_model` derives `ray_actor_options` from the model's [requirements](#model-requirements) (`memory` in bytes, `vram_mib` in MiB) and `_serve_entry.build` applies them via `.options(...)` on the serve-app deployment, together with an autoscaling config between zero and `num_replicas` replicas under the [model scheduler](#sharing-gpus-by-pausing-idle-models). `memory` and `resources` are left out when the requirement is 0, so nothing is reserved. `max_ongoing_requests` is fixed at 100, the default before Ray 2.32 lowered it to 5.
 
 `label_selector` and `fallback_strategy` are the size-class preferences from [Which GPU it picks](#which-gpu-it-picks-when-several-fit), built from the cluster's GPU tiers at deploy time - above, a 16 GiB model on a cluster of 12282 / 24564 / 131072 MiB cards. They are absent for a model with no `vram_gb`, and for a cluster reporting no tiers. Because they are part of the spec, a GPU joining or leaving changes it, which is what makes the next `deploy_model` re-PUT rather than skip as already-deployed.
 
@@ -646,6 +702,8 @@ caller
   v
 Ray Serve controller on the cluster
   places each replica on a node with the requested GPUs / memory / vram_mib free
+  runs ModelAutoscalingPolicy for each deployment every tick; it reports to the model
+    scheduler actor, which pauses idle models when a replica waits for room
   fetches the bundle zip via runtime_env.working_dir and pip-installs runtime_env.pip into a cached virtualenv
   imports cortexgrid._serve_entry:build, which re-imports the serve-app class
   applies ray.serve.ingress(app) to a subclass of the class marked by cortexgrid.serve.ingress
@@ -677,7 +735,7 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 
 ## Pending work
 
-- **Tear-down policy** for idle deployments. Today only explicit `undeploy_model` releases the GPU; consider an idle eviction policy when the registry has more deployable runs than cluster GPUs.
+- **Pausing a busy model.** The model scheduler pauses only idle models, so a replica waiting for room waits for as long as the models holding its card stay busy; there is no fairness between them and no maximum wait.
 - **Multi-GPU replicas.** A worker gets one GPU, so `num_gpus > 1` cannot be placed until the DaemonSet hands a worker more than one.
 - **Stale-bundle GC.** Bundles for undeployed-but-not-deleted runs are not currently garbage-collected. If it becomes a problem, the cleanest signal is "no Serve application currently references this bundle URL"; implement at that point, not before.
 
@@ -699,4 +757,8 @@ The serve-app's own runtime dependencies (fastapi, transformers, diffusers, ...)
 | Bundle timing | bundle the serve-app class at `save_model` time, persist URL+import path as registry tags | bundle at `deploy_model` time from a passed-in `cls` | Save-time bundling lets `deploy_model` callers be stateless - deploy from any process with just `(family, suffix, run_name)`. Re-pairing old weights with a new serve-app requires re-saving (acceptable: it forces an explicit decision and a fresh registry entry). |
 | Retrying a failed app | `deploy_model` undeploys a `DEPLOY_FAILED` app and waits until the controller has removed it, then PUTs | (a) PUT the same spec over the failed app; (b) undeploy, then PUT immediately | Ray resets a failed deployment only when a deploy arrives after it was marked for deletion, or when its version changes. (a) keeps the failed deployment: the app reports `DEPLOY_FAILED` again without retrying. (b) races the controller tick that marks the deployments for deletion, with the same result when the PUT wins. |
 | Status right after a deploy | read the status as soon as the PUT returns | ignore statuses until the app's `last_deployed_time_s` changes | The PUT is synchronous: the controller registers the app, sets it `DEPLOYING` and stamps `last_deployed_time_s` before responding (checked on Ray 2.9.3 and 2.55), so there is no stale status from a previous attempt to filter out. |
+| When a model gives up its GPU | on demand: the model scheduler pauses idle models only when a replica waits for their room | Ray's own scale-to-zero after an idle timeout | A timeout unloads models nobody else needs, and a model waiting for a card still waits out the timeout of the one holding it. Pausing on demand keeps models loaded until their room is needed and frees it within a couple of seconds. |
+| Where the policies' shared state lives | a named, detached Ray actor | module state in the policy | Ray pickles each deployment's policy by value, so every copy gets its own module state; and the controller has no cortexgrid to import a shared module from. |
+| Finding models that wait for room | Serve replicas `PENDING_CREATION` with no node, read from Ray's state API | each model's own policy reporting that it waits | Ray skips the policy of a model with zero running replicas and queued requests - its cold-start path - which is exactly a model resuming. |
+| Showing a paused model | a `paused` serving phase | a separate load-state field beside the phase | Pausing and resuming are transitions of the serving lifecycle with triggers of their own; a second field would describe the same lifecycle twice. |
 | Code delivery transport | upload to S3, pass via `runtime_env.working_dir` | (a) bake serve-app into cluster image; (b) attach code to the model via MLflow artifacts | (a) cortexgrid doesn't own serve-app classes - they live downstream; baking would invert the dependency. (b) MLflow artifact API is slower per-file and not how Ray Serve consumes `working_dir`. |
