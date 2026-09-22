@@ -12,13 +12,16 @@ without the caller holding the class object. So are the model's
 `ModelRequirements`, which `deploy_model` turns into the replica's Ray resource
 requests.
 
-Every model `deploy_model` puts on Ray Serve gets a deployment record with the
-jobs control plane: the spec it PUT, plus the phase, message and replica
+Every deployment `deploy_model` puts on Ray Serve gets a record with the jobs
+control plane, keyed by its `DeploymentKey` - the model's (family, suffix,
+run_name) plus a fingerprint of the config it was deployed with: that config,
+the spec it PUT, plus the phase, message and replica
 placements the control plane last observed (`observe_deployments`, run on
 every poll cycle). Listings and status reads come from those records; waits
 ask the Serve controller directly.
 
-Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>".
+Naming: the Ray Serve application is named "<family>__<suffix>__<run_name>",
+followed by "__<config_fingerprint>" for a deployment given a config.
 This relies on family/suffix/run_name not containing the literal "__".
 
 See [docs/cortexgrid/model-serving.md](../../docs/cortexgrid/model-serving.md)

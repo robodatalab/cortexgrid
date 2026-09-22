@@ -18,7 +18,7 @@ Everything cortexgrid is responsible for lives in a dedicated `cortexgrid` Postg
 | Checkpoint manifest | artifact `checkpoint/<job>/manifest.json` | `checkpoints` row |
 | Model registry entry | MLflow `ModelVersion` + tags | `models` row (tags kept as a JSON object) |
 | Run → imported model link | MLflow run tag `imported_model/<family>/<suffix>` | `run_imported_models` row |
-| Deployment | not recorded (Ray Serve's app list) | `deployments` row: the spec PUT, its URL, and the phase / message / replica placements last observed |
+| Deployment | not recorded (Ray Serve's app list) | `deployments` row keyed by model + config fingerprint: the config, the spec PUT, its URL, and the phase / message / replica placements last observed |
 
 Blobs stay where they are (S3/MinIO): code tarballs, checkpoint attributes, weights, serve bundles.
 
@@ -80,13 +80,14 @@ Internal to the repo (`cortexgrid/state.py` is its only client). JSON bodies unl
 | PUT / GET / DELETE | `/models/{family}/{suffix}/{run_name}` | `create_model_version` / `search_model_versions` / `delete_model_version` |
 | PATCH | `/models/{family}/{suffix}/{run_name}/tags` | `set_model_version_tag` (several at once) |
 | GET / DELETE | `/models?run_id=` | `search_model_versions` |
-| PUT / GET / PATCH / DELETE | `/deployments/{family}/{suffix}/{run_name}` | — (PATCH records an observation) |
+| PUT / GET / PATCH / DELETE | `/deployments/{family}/{suffix}/{run_name}?config_fingerprint=` | — (PATCH records an observation; no `config_fingerprint` means the deployment without config) |
 | GET | `/deployments` | `GET /api/serve/applications/` |
 | GET | `/health` | — |
 
 ## Deployments
 
-- `deploy_model` checks the model's deployment record first. When the record shows the app live (running, deploying, not started or unhealthy) and the spec rebuilt against the GPU tiers stored with the record equals the stored spec, it returns from the record without calling Ray. Otherwise it takes the old path (fresh GPU tiers, clear a failed app, PUT unless Ray already has the spec) and then writes the record.
+- A deployment is keyed by a `DeploymentKey`: the model's `(family, suffix, run_name)` plus a fingerprint of the config it was deployed with, empty for none. The row's primary key is those four columns, so one model can have a deployment per config.
+- `deploy_model` checks the deployment's record first. When the record shows the app live (running, deploying, not started or unhealthy) and the spec rebuilt against the GPU tiers stored with the record equals the stored spec, it returns from the record without calling Ray. Otherwise it takes the old path (fresh GPU tiers, clear a failed app, PUT unless Ray already has the spec) and then writes the record - before waiting for the app, so a replica starting up can read the deployment's config from it.
 - `undeploy_model` PUTs the remaining apps and deletes the record.
 - `list_deployed_models`, `model_serving_status` and `model_replica_placements` read the records. They are at most one poll cycle old.
 - `wait_for_model_serving` and `model_serving_messages` still ask Ray live.
