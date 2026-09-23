@@ -27,10 +27,21 @@
     color: #666;
 }
 
+.deployments-tree__header,
 .deployments-tree__row {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) 8px 13px;
     align-items: center;
-    gap: 8px;
+    column-gap: 12px;
+}
+
+.deployments-tree__header {
+    padding: 4px 16px;
+    font-size: var(--font-sm);
+    color: #666;
+}
+
+.deployments-tree__row {
     cursor: pointer;
     padding: 8px 16px;
     font-size: var(--font-md);
@@ -51,6 +62,13 @@
     background: #cfdbe8;
 }
 
+.deployments-tree__model {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
 .deployments-tree__icon {
     flex: 0 0 auto;
 }
@@ -63,33 +81,21 @@
     white-space: nowrap;
 }
 
-.deployments-tree__run {
-    flex: 0 1 auto;
-    min-width: 0;
+.deployments-tree__experiment {
     color: #666;
-    font-size: var(--font-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.deployments-tree__config {
-    flex: 0 1 auto;
-    min-width: 0;
-    color: #666;
-    font-family: var(--mono);
-    font-size: var(--font-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .deployments-tree__dot {
-    flex: 0 0 auto;
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    margin-left: auto;
+}
+
+.deployments-tree__load {
+    display: flex;
 }
 
 .deployments-tree__dot--ok {

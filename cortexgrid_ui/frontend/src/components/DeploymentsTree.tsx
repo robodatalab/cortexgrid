@@ -3,7 +3,6 @@ import { Box } from "lucide-react";
 import "./DeploymentsTree.css";
 import { servingTier } from "../phases";
 import { deploymentId } from "../ids";
-import { describeDeploymentConfig } from "../deploymentConfig";
 import type { BundleUpdateByDeploymentId } from "../bundleUpdate";
 import type { LoadByDeploymentId } from "../deploymentLoad";
 import { LoadBars } from "./LoadBars";
@@ -40,12 +39,17 @@ export function DeploymentsTree({
                 <span>Deployments</span>
             </div>
             <div className="deployments-tree__list">
+                {sorted.length > 0 && (
+                    <div className="deployments-tree__header">
+                        <span>Model</span>
+                        <span>Experiment</span>
+                    </div>
+                )}
                 {sorted.length === 0 && (
                     <div className="deployments-tree__status">No deployments</div>
                 )}
                 {sorted.map((d) => {
                     const id = deploymentId(d.key);
-                    const config = describeDeploymentConfig(d.config);
                     const isSelected = selection?.id === id;
                     const tier = servingTier(d.phase);
                     return (
@@ -58,34 +62,33 @@ export function DeploymentsTree({
                             }
                             onClick={() => onSelect({ kind: "deployment", id })}
                         >
-                            <Box size={16} className="deployments-tree__icon" />
-                            <span className="deployments-tree__label">
-                                {d.key.family}/{d.key.suffix}
-                            </span>
-                            <span className="deployments-tree__run">
-                                {d.key.run_name}
-                            </span>
-                            {config !== "" && (
-                                <span
-                                    className="deployments-tree__config"
-                                    title={config}
-                                >
-                                    {config}
+                            <span className="deployments-tree__model">
+                                <Box size={16} className="deployments-tree__icon" />
+                                <span className="deployments-tree__label">
+                                    {d.key.family}/{d.key.suffix}
                                 </span>
-                            )}
+                                {id in bundleUpdates && (
+                                    <span
+                                        className="deployments-tree__update"
+                                        title="The registry holds newer code for this model; redeploy it"
+                                    >
+                                        update
+                                    </span>
+                                )}
+                            </span>
+                            <span
+                                className="deployments-tree__experiment"
+                                title={d.experiment_name}
+                            >
+                                {d.experiment_name}
+                            </span>
                             <span
                                 className={`deployments-tree__dot deployments-tree__dot--${tier}`}
                                 aria-label={`Deployment status: ${d.phase}`}
                             />
-                            {id in loads && <LoadBars load={loads[id]} />}
-                            {id in bundleUpdates && (
-                                <span
-                                    className="deployments-tree__update"
-                                    title="The registry holds newer code for this model; redeploy it"
-                                >
-                                    update
-                                </span>
-                            )}
+                            <span className="deployments-tree__load">
+                                {id in loads && <LoadBars load={loads[id]} />}
+                            </span>
                         </div>
                     );
                 })}

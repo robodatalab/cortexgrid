@@ -24,6 +24,7 @@ class TestPollDeployments(unittest.TestCase):
             phase="running",
             bundle_fingerprint="",
             replaced_bundle_fingerprint="",
+            experiment_name="",
         )
         with patch(
             "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -44,6 +45,7 @@ class TestPollDeployments(unittest.TestCase):
             phase="running",
             bundle_fingerprint="",
             replaced_bundle_fingerprint="",
+            experiment_name="",
         )
         with patch(
             "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -62,6 +64,7 @@ class TestPollDeployments(unittest.TestCase):
                 phase="running",
                 bundle_fingerprint="",
                 replaced_bundle_fingerprint="",
+                experiment_name="",
             ),
             Deployment(
                 key=DeploymentKey("DeepSeek3", "chat", "snake-12"),
@@ -70,6 +73,7 @@ class TestPollDeployments(unittest.TestCase):
                 phase="failed",
                 bundle_fingerprint="",
                 replaced_bundle_fingerprint="",
+                experiment_name="",
             ),
         ]
         with patch(

@@ -43,6 +43,7 @@ def _deployment(
         phase=phase,
         bundle_fingerprint="",
         replaced_bundle_fingerprint="",
+        experiment_name="",
     )
 
 

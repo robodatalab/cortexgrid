@@ -82,6 +82,7 @@ class DeploymentBody(ObservationBody):
     spec: dict[str, Any]
     tiers: list[int]
     url: str
+    experiment_name: str = ""
 
 
 @app.get("/health")
@@ -268,6 +269,7 @@ def put_deployment(
         body.message,
         body.replicas,
         body.replaced_bundle_fingerprint,
+        body.experiment_name,
     )
 
 

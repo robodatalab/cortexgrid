@@ -35,6 +35,7 @@ from cortexgrid import state
 from cortexgrid.checkpoint import checkpoint, resume
 from cortexgrid.experiment import (
     Experiment,
+    active_experiment,
     delete_experiment,
     delete_run,
     list_experiments,
@@ -107,13 +108,13 @@ from cortexgrid.model_serving import (
     ModelNotDeployed,
     ModelRequirements,
     ServingStatus,
-    deploy_model,
     list_deployed_models,
     model_serving_status,
     redeploy_model,
     undeploy_model,
     wait_for_model_serving,
 )
+from cortexgrid.model_serving import deploy_model as _deploy_model_serving
 
 
 def remote(
@@ -225,6 +226,28 @@ def register_model(
     )
     _record_imported_model(experiment.run_id, family, suffix, model)
     return model
+
+
+def deploy_model(
+    family: str,
+    suffix: str,
+    run_name: str,
+    num_replicas: int = 1,
+    wait: bool = False,
+    timeout: float | None = 300.0,
+    config: DeploymentConfig | None = None,
+) -> Deployment:
+    experiment = active_experiment()
+    return _deploy_model_serving(
+        family,
+        suffix,
+        run_name,
+        num_replicas=num_replicas,
+        wait=wait,
+        timeout=timeout,
+        config=config,
+        experiment_name="" if experiment is None else experiment.experiment_name,
+    )
 
 
 def _record_imported_model(
