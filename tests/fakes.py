@@ -426,6 +426,7 @@ class FakeState:
                     "config_fingerprint": config_fingerprint,
                     "config": {},
                     "replaced_bundle_fingerprint": "",
+                    "experiment_name": "",
                     **body,
                 }
                 return None

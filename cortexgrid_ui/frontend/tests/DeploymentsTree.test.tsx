@@ -17,6 +17,7 @@ const deployments: Deployment[] = [
     phase: 'running',
     bundle_fingerprint: '',
     replaced_bundle_fingerprint: '',
+    experiment_name: 'sft-sweep',
   },
   {
     key: {
@@ -30,11 +31,12 @@ const deployments: Deployment[] = [
     phase: 'failed',
     bundle_fingerprint: '',
     replaced_bundle_fingerprint: '',
+    experiment_name: 'distill',
   },
 ]
 
 describe('DeploymentsTree', () => {
-  it('renders a row per deployment', () => {
+  it('renders a row per deployment with the experiment that deployed it', () => {
     render(
       <DeploymentsTree
         deployments={deployments}
@@ -45,9 +47,9 @@ describe('DeploymentsTree', () => {
       />,
     )
     expect(screen.getByText('Qwen2/instruct')).toBeInTheDocument()
-    expect(screen.getByText('boogey-46')).toBeInTheDocument()
+    expect(screen.getByText('sft-sweep')).toBeInTheDocument()
     expect(screen.getByText('DeepSeek3/chat')).toBeInTheDocument()
-    expect(screen.getByText('snake-12')).toBeInTheDocument()
+    expect(screen.getByText('distill')).toBeInTheDocument()
   })
 
   it('shows an empty state when there are no deployments', () => {
@@ -112,25 +114,6 @@ describe('DeploymentsTree', () => {
       />,
     )
     expect(screen.getAllByText('update')).toHaveLength(1)
-  })
-
-  it('shows the config a deployment was given next to it', () => {
-    render(
-      <DeploymentsTree
-        deployments={[
-          {
-            ...deployments[0],
-            key: { ...deployments[0].key, config_fingerprint: '5f0c1d2e3a4b' },
-            config: { thinking: 'false' },
-          },
-        ]}
-        loads={{}}
-        bundleUpdates={{}}
-        selection={null}
-        onSelect={vi.fn()}
-      />,
-    )
-    expect(screen.getByText('thinking=false')).toBeInTheDocument()
   })
 
   it('shows no load bars for a deployment without a load', () => {

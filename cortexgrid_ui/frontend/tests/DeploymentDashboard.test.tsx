@@ -20,6 +20,7 @@ const deployment: Deployment = {
   phase: 'running',
   bundle_fingerprint: DEPLOYED_FINGERPRINT,
   replaced_bundle_fingerprint: '',
+  experiment_name: '',
 }
 
 function renderCard(

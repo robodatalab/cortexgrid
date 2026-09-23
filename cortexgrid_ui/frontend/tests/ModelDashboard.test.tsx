@@ -47,6 +47,7 @@ const deployment: Deployment = {
   phase: 'running',
   bundle_fingerprint: 'b'.repeat(64),
   replaced_bundle_fingerprint: '',
+  experiment_name: '',
 }
 
 function renderCard(

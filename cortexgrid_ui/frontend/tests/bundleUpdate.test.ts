@@ -18,6 +18,7 @@ function deploymentRunning(bundleFingerprint: string): Deployment {
     phase: 'running',
     bundle_fingerprint: bundleFingerprint,
     replaced_bundle_fingerprint: '',
+    experiment_name: '',
   }
 }
 

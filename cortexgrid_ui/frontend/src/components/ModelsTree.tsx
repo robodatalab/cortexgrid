@@ -44,6 +44,7 @@ export type Deployment = {
     phase: string;
     bundle_fingerprint: string;
     replaced_bundle_fingerprint: string;
+    experiment_name: string;
 };
 
 export type ModelSelection = { kind: "model"; id: string };

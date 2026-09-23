@@ -104,6 +104,10 @@ class Experiment:
         set_instance(None)
 
 
+def active_experiment() -> Experiment | None:
+    return _SINGLETON_EXPERIMENT
+
+
 def set_instance(instance: Experiment | None) -> None:
     global _SINGLETON_EXPERIMENT
     _SINGLETON_EXPERIMENT = instance

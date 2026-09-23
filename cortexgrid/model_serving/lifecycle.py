@@ -220,6 +220,7 @@ def deploy_model(
     wait: bool = False,
     timeout: float | None = 300.0,
     config: DeploymentConfig | None = None,
+    experiment_name: str = "",
 ) -> Deployment:
     """Schedule a Ray Serve app for a previously-saved model and return a
     handle carrying its base URL. The caller (e.g. model-gateway) builds
@@ -298,6 +299,7 @@ def deploy_model(
             "spec": spec,
             "tiers": tiers,
             "url": url,
+            "experiment_name": experiment_name,
             **observation,
         },
     )
@@ -314,6 +316,7 @@ def deploy_model(
         phase=observation["phase"],
         bundle_fingerprint=meta.fingerprint,
         replaced_bundle_fingerprint=observation["replaced_bundle_fingerprint"],
+        experiment_name=experiment_name,
     )
 
 
@@ -327,6 +330,7 @@ def redeploy_model(key: DeploymentKey) -> Deployment:
         key.run_name,
         num_replicas=replica_count_in_spec(record["spec"]),
         config=record["config"],
+        experiment_name=record["experiment_name"],
     )
 
 

@@ -13,7 +13,9 @@ from ray import serve as ray_serve
 from ray._private.runtime_env.packaging import unzip_package
 from ray.serve.schema import ServeApplicationSchema, ServeDeploySchema
 
+import cortexgrid
 from cortexgrid._bundle import BundleDesc
+from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import (
     BundleMetadata,
     DeploymentKey,
@@ -408,6 +410,30 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(redeployed.key, deployment.key)
         self.assertEqual(redeployed.config, {"thinking": "false"})
+
+    def test_a_deployment_lists_the_experiment_that_deployed_it(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46", experiment_name="sft-sweep")
+
+        self.assertEqual(
+            [d.experiment_name for d in list_deployed_models()], ["sft-sweep"]
+        )
+
+    def test_redeploy_with_new_code_keeps_the_experiment_that_deployed_it(
+        self,
+    ) -> None:
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_OLD_FINGERPRINT),
+        )
+        deploy_model("Qwen2", "instruct", "boogey-46", experiment_name="sft-sweep")
+        _seed_saved_model(
+            self.records, "Qwen2", "instruct", "boogey-46",
+            bundle=_bundle_with_fingerprint(_NEW_FINGERPRINT),
+        )
+
+        redeploy_model(_QWEN2_DEPLOYMENT)
+
+        self.assertEqual(self._record()["experiment_name"], "sft-sweep")
 
     def test_undeploy_removes_only_the_deployment_it_names(self) -> None:
         thinking = deploy_model(
@@ -1509,6 +1535,26 @@ class TestPhase(unittest.TestCase):
     def test_failed_app_stays_failed_at_zero_replicas(self) -> None:
         app = {**_running_app(0, []), "status": "DEPLOY_FAILED"}
         self.assertEqual(_phase(app), "failed")
+
+
+class TestDeployModelFacade(unittest.TestCase):
+    def setUp(self) -> None:
+        self.addCleanup(clear_instance)
+        deploy_patch = patch("cortexgrid._deploy_model_serving")
+        self.deploy = deploy_patch.start()
+        self.addCleanup(deploy_patch.stop)
+
+    def test_records_the_active_experiment_as_the_deployer(self) -> None:
+        set_instance(Experiment(experiment_name="sft-sweep", run_id="run-1"))
+
+        cortexgrid.deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(self.deploy.call_args.kwargs["experiment_name"], "sft-sweep")
+
+    def test_a_deploy_outside_an_experiment_records_no_deployer(self) -> None:
+        cortexgrid.deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(self.deploy.call_args.kwargs["experiment_name"], "")
 
 
 if __name__ == "__main__":

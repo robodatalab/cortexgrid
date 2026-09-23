@@ -31,7 +31,7 @@ _MODEL_COLUMNS = (
 )
 _DEPLOYMENT_COLUMNS = (
     "family, suffix, run_name, config_fingerprint, config, spec, tiers, url, "
-    "phase, message, replicas, replaced_bundle_fingerprint"
+    "phase, message, replicas, replaced_bundle_fingerprint, experiment_name"
 )
 _DEPLOYMENT_KEY_MATCHES = (
     "family = %s AND suffix = %s AND run_name = %s AND config_fingerprint = %s"
@@ -308,16 +308,18 @@ def put_deployment(
     message: str,
     replicas: list[dict[str, Any]],
     replaced_bundle_fingerprint: str,
+    experiment_name: str,
 ) -> None:
     _write(
         f"INSERT INTO deployments ({_DEPLOYMENT_COLUMNS}) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT (family, suffix, run_name, config_fingerprint) DO UPDATE SET "
         "config = EXCLUDED.config, "
         "spec = EXCLUDED.spec, tiers = EXCLUDED.tiers, url = EXCLUDED.url, "
         "phase = EXCLUDED.phase, message = EXCLUDED.message, "
         "replicas = EXCLUDED.replicas, "
         "replaced_bundle_fingerprint = EXCLUDED.replaced_bundle_fingerprint, "
+        "experiment_name = EXCLUDED.experiment_name, "
         "deployed_at = now()",
         (
             family,
@@ -332,6 +334,7 @@ def put_deployment(
             message,
             Jsonb(replicas),
             replaced_bundle_fingerprint,
+            experiment_name,
         ),
     )
 

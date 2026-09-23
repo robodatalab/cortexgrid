@@ -56,6 +56,7 @@ class Deployment:
     phase: str
     bundle_fingerprint: str
     replaced_bundle_fingerprint: str
+    experiment_name: str
 
 
 def replaced_bundle_fingerprint_until_rolled_out(
@@ -82,6 +83,7 @@ def deployment_of_record(record: DeploymentRecord) -> Deployment:
         phase=record["phase"],
         bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
         replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
+        experiment_name=record["experiment_name"],
     )
 
 
