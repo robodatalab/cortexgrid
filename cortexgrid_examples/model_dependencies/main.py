@@ -1,9 +1,17 @@
+import json
+import tempfile
+from pathlib import Path
+
 import cortexgrid
 
-from models import FAMILY, SQUARE_ROOTED_SUFFIX, SquareRooted
+from models import (
+    FAMILY,
+    LINEAR_SUFFIX,
+    SQUARE_ROOTED_SUFFIX,
+    SquareRooted,
+)
 
 XS = [0.0, 1.0, 2.0, 3.0]
-
 
 def main() -> None:
     cortexgrid.Experiment.init("Examples-ModelDependencies")
