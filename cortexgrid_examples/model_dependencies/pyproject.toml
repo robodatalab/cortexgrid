@@ -1,0 +1,13 @@
+[project]
+name = "cortexgrid-example-model-dependencies"
+version = "0.1.0"
+description = "Example: deploy a model that serves on top of another deployed model"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "cortexgrid",
+    "fastapi",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
