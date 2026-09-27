@@ -28,8 +28,10 @@ cortexgrid/__init__.py.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -92,6 +94,9 @@ IMPORTED = "imported"
 # blank so every reader - `load_model`, the dashboard's storage field - sees
 # why there is no path instead of an empty one.
 NO_WEIGHTS = "cortexgrid://no-weights"
+
+_MODEL_CACHE_DIR_ENV = "CORTEXGRID_MODEL_CACHE_DIR"
+_DEFAULT_MODEL_CACHE_DIR = Path.home() / ".cache" / "cortexgrid" / "models"
 
 
 @dataclass
@@ -221,6 +226,23 @@ def _download_s3_uri(uri: str, dest_dir: str | Path | None) -> Path:
             target.parent.mkdir(parents=True, exist_ok=True)
             client.download_file(bucket, obj["Key"], str(target))
     return dest
+
+
+def _model_cache_dir() -> Path:
+    return Path(os.environ.get(_MODEL_CACHE_DIR_ENV, _DEFAULT_MODEL_CACHE_DIR))
+
+
+def _load_imported_weights(uri: str, family: str, suffix: str) -> Path:
+    cached = _model_cache_dir() / family / suffix
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with open(cached.with_name(f"{suffix}.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not cached.is_dir():
+            partial = cached.with_name(f"{suffix}.partial")
+            shutil.rmtree(partial, ignore_errors=True)
+            _download_s3_uri(uri, partial)
+            partial.rename(cached)
+    return cached
 
 
 def save_model(
@@ -499,6 +521,8 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
             f"Model {family}/{suffix}/{run_name} was registered without "
             "weights; there is nothing to load"
         )
+    if run_name == IMPORTED:
+        return _load_imported_weights(version.source, family, suffix)
     return _download_s3_uri(version.source, None)
 
 

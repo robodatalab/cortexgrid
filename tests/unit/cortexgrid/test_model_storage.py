@@ -847,6 +847,56 @@ class TestLoadModel(unittest.TestCase):
             load_model("Qwen2", "instruct", "boogey-46")
 
 
+class TestLoadImportedModel(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = FakeState().install(self)
+        self.s3 = FakeS3()
+        for p in _patches(self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+        self.cache_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.cache_dir, ignore_errors=True)
+        cache_env = patch.dict(
+            "os.environ", {"CORTEXGRID_MODEL_CACHE_DIR": str(self.cache_dir)}
+        )
+        cache_env.start()
+        self.addCleanup(cache_env.stop)
+        _seed_model(self.state, "Qwen3", "8B", None, IMPORTED)
+        self.s3.objects["models/imported/Qwen3/8B/weights/config.json"] = b'{"x":1}'
+
+    def test_downloads_into_the_model_cache(self) -> None:
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual(result, self.cache_dir / "Qwen3" / "8B")
+        self.assertEqual((result / "config.json").read_bytes(), b'{"x":1}')
+
+    def test_reuses_the_cached_weights_without_downloading_again(self) -> None:
+        load_model("Qwen3", "8B", IMPORTED)
+        self.s3.objects.clear()
+
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual((result / "config.json").read_bytes(), b'{"x":1}')
+
+    def test_discards_files_left_by_an_interrupted_download(self) -> None:
+        partial = self.cache_dir / "Qwen3" / "8B.partial"
+        partial.mkdir(parents=True)
+        (partial / "shard.safetensors").write_bytes(b"half")
+
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual([p.name for p in result.iterdir()], ["config.json"])
+
+    def test_leaves_models_saved_by_a_run_out_of_the_cache(self) -> None:
+        _seed_model(self.state, "Qwen3", "8B", "r1", "boogey-46")
+        self.s3.objects["models/boogey-46/Qwen3/8B/weights/config.json"] = b'{"y":2}'
+
+        result = load_model("Qwen3", "8B", "boogey-46")
+        self.addCleanup(shutil.rmtree, result, ignore_errors=True)
+
+        self.assertFalse(result.is_relative_to(self.cache_dir))
+
+
 class TestListModels(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeState().install(self)

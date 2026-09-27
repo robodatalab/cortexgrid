@@ -117,6 +117,8 @@ spec:
             # its cortexgrid.secrets calls go to the head secrets server.
             - name: CORTEXGRID_HEAD_URL
               value: "{{ $.Values.services.head.url }}"
+            - name: CORTEXGRID_MODEL_CACHE_DIR
+              value: /var/cache/cortexgrid/models
             # Ray's runtime_env_agent fetches s3:// working_dir URIs for Serve
             # replicas with unmodified boto3, which only reads the standard
             # AWS_* env names; map them from the s3-creds Secret's S3_* keys.
@@ -147,6 +149,9 @@ spec:
             # S3_* for cortexgrid.s3_util.
             - secretRef:
                 name: s3-creds
+          volumeMounts:
+            - name: model-cache
+              mountPath: /var/cache/cortexgrid/models
           ports:
             - name: metrics
               containerPort: 8080
@@ -156,4 +161,9 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+      volumes:
+        - name: model-cache
+          hostPath:
+            path: /var/cache/cortexgrid/models
+            type: DirectoryOrCreate
 {{- end }}
