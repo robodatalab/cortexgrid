@@ -6,7 +6,6 @@ import cortexgrid
 
 from models import (
     FAMILY,
-    LINEAR_SUFFIX,
     SQUARE_ROOTED_SUFFIX,
     SquareRooted,
 )
