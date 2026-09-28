@@ -10,7 +10,7 @@ from cortexgrid.model_serving.application_spec import (
     app_name,
     bundle_fingerprint_in_spec,
 )
-from cortexgrid.model_serving.deployment_key import DeploymentConfig, DeploymentKey
+from cortexgrid.model_serving.deployment_key import DeploymentKey
 from cortexgrid.model_serving.deployment_records import (
     DeploymentRecord,
     get_deployment_record,
@@ -51,7 +51,7 @@ class Deployment:
     listing always exists, so its phase is never "not_deployed"."""
 
     key: DeploymentKey
-    config: DeploymentConfig
+    config: dict[str, str]
     url: str
     phase: str
     bundle_fingerprint: str
@@ -87,7 +87,7 @@ def deployment_of_record(record: DeploymentRecord) -> Deployment:
     )
 
 
-def deployment_config(key: DeploymentKey) -> DeploymentConfig:
+def deployment_config(key: DeploymentKey) -> dict[str, str]:
     record = get_deployment_record(key)
     if record is None:
         raise ValueError(f"No deployment {key}")

@@ -8,7 +8,8 @@ One registry entry (a `models` row) per (family, suffix, run_name):
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
                            (NO_WEIGHTS for a model registered without any)
     run linkage         -> run_id  (unset for imported models)
-    requirements        -> tags["num_gpus"], ["ram_gb"], ["vram_gb"]
+    requirements        -> tags["num_gpus"], ["ram_gb"], ["vram_gb"], ["models"]
+                           (models: JSON list)
     config              -> tags["config"]  (JSON object)
 
 Three ways in: `save_model` registers a fresh copy under the calling run's
@@ -32,7 +33,7 @@ import fcntl
 import json
 import os
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
@@ -50,6 +51,7 @@ from cortexgrid.model_serving import (
     has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
+    required_models_to_tags,
     requirements_from_tags,
     requirements_to_tags,
     upload_bundle,
@@ -314,8 +316,9 @@ def import_model(
         longer matches the stored bundle, it is re-bundled first and the
         weights are kept (see `_refresh_bundle`). `requirements` and `config`
         are stored only if the version has none yet, so values changed since
-        with `set_model_requirements` / `set_model_config` are kept. To replace
-        the weights, `delete_model` it first.
+        with `set_model_requirements` / `set_model_config` are kept; the
+        required models in `requirements` replace the stored ones regardless.
+        To replace the weights, `delete_model` it first.
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
 
@@ -408,11 +411,13 @@ def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
 def _set_missing_requirements(
     family: str, suffix: str, requirements: ModelRequirements
 ) -> ModelRequirements:
-    """Store `requirements` on an imported model whose version has none yet.
+    """Store `requirements` on an imported model whose version has none yet;
+    its required models are stored either way, since only code declares them.
     Returns the requirements the version holds afterwards."""
     version = _get_version(family, suffix, IMPORTED)
     if has_requirement_tags(version.tags):
-        return requirements_from_tags(version.tags)
+        _set_tags(family, suffix, IMPORTED, required_models_to_tags(requirements.models))
+        return replace(requirements_from_tags(version.tags), models=requirements.models)
     _set_tags(family, suffix, IMPORTED, requirements_to_tags(requirements))
     return requirements
 

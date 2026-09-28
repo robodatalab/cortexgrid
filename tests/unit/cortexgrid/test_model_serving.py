@@ -18,6 +18,7 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import (
     BundleMetadata,
+    DeploymentConfig,
     DeploymentKey,
     ModelDeployFailed,
     ModelNotDeployed,
@@ -35,6 +36,7 @@ from cortexgrid.model_serving import (
     model_serving_status,
     observe_deployments,
     redeploy_model,
+    required_models,
     requirements_from_tags,
     requirements_to_tags,
     undeploy_model,
@@ -56,6 +58,9 @@ _FAKE_META = BundleMetadata(
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
 
 _QWEN2_DEPLOYMENT = DeploymentKey("Qwen2", "instruct", "boogey-46")
+
+_LINEAR = DeploymentConfig("Examples", "linear", cortexgrid.IMPORTED)
+_REQUIRING_LINEAR = ModelRequirements(models=[_LINEAR])
 _FAM_DEPLOYMENT = DeploymentKey("fam", "suf", "run")
 
 _OLD_FINGERPRINT = "a" * 64
@@ -691,6 +696,85 @@ class TestModelServing(unittest.TestCase):
 
         self.assertEqual(puts, [[], [name]])
         self.assertEqual(self._record()["phase"], "deploying")
+
+    def _seed_square_rooted(self, requirements: ModelRequirements) -> None:
+        _seed_saved_model(
+            self.records, "Examples", "linear", cortexgrid.IMPORTED, ModelRequirements()
+        )
+        _seed_saved_model(
+            self.records, "Examples", "squarerooted", cortexgrid.IMPORTED, requirements
+        )
+
+    def test_deploy_deploys_the_models_it_requires_before_the_model_itself(
+        self,
+    ) -> None:
+        self._seed_square_rooted(_REQUIRING_LINEAR)
+
+        deploy_model("Examples", "squarerooted", cortexgrid.IMPORTED)
+
+        self.assertEqual(
+            list(self.state.apps),
+            ["Examples__linear__imported", "Examples__squarerooted__imported"],
+        )
+
+    def test_a_required_model_is_deployed_with_the_config_it_is_required_with(
+        self,
+    ) -> None:
+        self._seed_square_rooted(
+            ModelRequirements(
+                models=[
+                    DeploymentConfig(
+                        "Examples",
+                        "linear",
+                        cortexgrid.IMPORTED,
+                        num_replicas=2,
+                        config={"slope": "3"},
+                    )
+                ]
+            )
+        )
+
+        deploy_model("Examples", "squarerooted", cortexgrid.IMPORTED)
+
+        (linear,) = [d for d in list_deployed_models() if d.key.suffix == "linear"]
+        self.assertEqual(linear.config, {"slope": "3"})
+        self.assertEqual(
+            self.records.deployments[
+                ("Examples", "linear", "imported", linear.key.config_fingerprint)
+            ]["spec"]["args"]["num_replicas"],
+            2,
+        )
+
+    def test_a_model_deployed_on_its_own_is_the_one_its_dependents_use(
+        self,
+    ) -> None:
+        self._seed_square_rooted(_REQUIRING_LINEAR)
+        linear = deploy_model("Examples", "linear", cortexgrid.IMPORTED)
+
+        square_rooted = deploy_model("Examples", "squarerooted", cortexgrid.IMPORTED)
+
+        self.assertEqual(len(self.state.apps), 2)
+        self.assertEqual(
+            [d.key for d in required_models(square_rooted.key)], [linear.key]
+        )
+
+    def test_required_models_are_the_deployments_a_model_depends_on(self) -> None:
+        self._seed_square_rooted(_REQUIRING_LINEAR)
+
+        square_rooted = deploy_model("Examples", "squarerooted", cortexgrid.IMPORTED)
+
+        self.assertEqual(
+            [d.url for d in required_models(square_rooted.key)],
+            ["http://ray:30000/r/Examples/linear/imported"],
+        )
+
+    def test_required_models_raises_for_one_that_is_not_deployed(self) -> None:
+        self._seed_square_rooted(_REQUIRING_LINEAR)
+        square_rooted = deploy_model("Examples", "squarerooted", cortexgrid.IMPORTED)
+        undeploy_model(DeploymentKey("Examples", "linear", cortexgrid.IMPORTED))
+
+        with self.assertRaises(ModelNotDeployed):
+            required_models(square_rooted.key)
 
 
 
@@ -1472,6 +1556,41 @@ class TestModelRequirements(unittest.TestCase):
 
     def test_model_saved_without_tags_has_no_requirements(self) -> None:
         self.assertEqual(requirements_from_tags({}), ModelRequirements())
+
+    def test_required_models_round_trip_through_tags(self) -> None:
+        requirements = ModelRequirements(
+            models=[
+                DeploymentConfig(
+                    "Examples", "linear", "imported", num_replicas=2, config={"a": "b"}
+                )
+            ]
+        )
+
+        self.assertEqual(
+            requirements_from_tags(requirements_to_tags(requirements)), requirements
+        )
+
+    def test_how_to_fetch_a_required_model_stays_out_of_the_tags(self) -> None:
+        requirements = ModelRequirements(
+            models=[
+                DeploymentConfig(
+                    "Examples",
+                    "linear",
+                    "imported",
+                    serve_app=_ServeApp,
+                    source=lambda: "/weights",
+                )
+            ]
+        )
+
+        self.assertEqual(
+            requirements_from_tags(requirements_to_tags(requirements)),
+            _REQUIRING_LINEAR,
+        )
+
+    def test_a_required_model_with_a_source_needs_a_serve_app(self) -> None:
+        with self.assertRaises(ValueError):
+            DeploymentConfig("Examples", "linear", "imported", source=lambda: "/weights")
 
     def test_rejects_negative_values(self) -> None:
         for kwargs in ({"num_gpus": -1}, {"ram_gb": -1.0}, {"vram_gb": -1.0}):

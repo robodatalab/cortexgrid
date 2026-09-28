@@ -39,6 +39,7 @@ from cortexgrid.model_serving.lifecycle import (
     ModelNotDeployed,
     deploy_model,
     redeploy_model,
+    required_models,
     undeploy_model,
     wait_for_model_serving,
 )
@@ -48,6 +49,7 @@ from cortexgrid.model_serving.registry_tags import (
     has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
+    required_models_to_tags,
     requirements_from_tags,
     requirements_to_tags,
 )

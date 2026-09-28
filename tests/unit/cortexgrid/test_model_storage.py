@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -12,6 +13,7 @@ import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import (
     BundleMetadata,
+    DeploymentConfig,
     DeploymentKey,
     ModelRequirements,
     ServeBundle,
@@ -44,6 +46,8 @@ class _FakeServeApp:
 
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+_LINEAR = DeploymentConfig("Examples", "linear", IMPORTED)
 
 # What a serve-app that downloads no weights needs instead: which model to call
 # and where to find the credential. cortexgrid never reads either key.
@@ -546,6 +550,24 @@ class TestImportModel(unittest.TestCase):
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
         self.assertEqual(self._entry()["tags"]["ram_gb"], "16.0")
 
+    def test_reimport_replaces_required_models_but_keeps_stored_hardware(
+        self,
+    ) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+        requiring_linear = ModelRequirements(num_gpus=2, vram_gb=48.0, models=[_LINEAR])
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", requiring_linear
+        )
+
+        stored = replace(_GPU_REQUIREMENTS, models=[_LINEAR])
+        self.assertEqual(result.requirements, stored)
+        self.assertEqual(
+            model_registry_status("Qwen2", "base", IMPORTED).requirements, stored
+        )
+
     def test_reimport_without_requirements_keeps_stored_ones(self) -> None:
         import_model(
             self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
@@ -784,6 +806,58 @@ class TestImportModelRecordsRun(unittest.TestCase):
             self.state.imported_models,
             {("r1", "anthropic", "opus"): model.created_at},
         )
+
+    def test_registering_a_model_imports_the_models_it_requires(self) -> None:
+        self._use_run("r1")
+        linear = replace(_LINEAR, serve_app=_FakeServeApp, source=lambda: self.weights_dir)
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[linear])
+        )
+
+        imported = model_registry_status("Examples", "linear", IMPORTED)
+        self.assertEqual(imported.phase, "ready")
+        self.assertTrue(imported.has_weights)
+        self.assertIn(("r1", "Examples", "linear"), self.state.imported_models)
+
+    def test_a_required_model_already_imported_is_not_fetched_again(self) -> None:
+        self._use_run("r1")
+        fetches: list[int] = []
+
+        def fetch() -> Path:
+            fetches.append(1)
+            return self.weights_dir
+
+        linear = replace(_LINEAR, serve_app=_FakeServeApp, source=fetch)
+        requirements = ModelRequirements(models=[linear])
+
+        cortexgrid.register_model(_FakeServeApp, "Examples", "squarerooted", requirements)
+        cortexgrid.register_model(_FakeServeApp, "Examples", "squarerooted", requirements)
+
+        self.assertEqual(len(fetches), 1)
+
+    def test_a_required_model_with_no_source_is_registered_without_weights(
+        self,
+    ) -> None:
+        self._use_run("r1")
+        linear = replace(_LINEAR, serve_app=_FakeServeApp)
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[linear])
+        )
+
+        self.assertFalse(
+            model_registry_status("Examples", "linear", IMPORTED).has_weights
+        )
+
+    def test_a_required_model_with_no_serve_app_is_left_as_it_is(self) -> None:
+        self._use_run("r1")
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[_LINEAR])
+        )
+
+        self.assertIsNone(model_registry_status("Examples", "linear", IMPORTED))
 
     def test_does_not_record_on_the_run_when_the_import_fails(self) -> None:
         self._use_run("r1")

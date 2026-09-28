@@ -20,7 +20,6 @@ from cortexgrid.jobs import stop_experiment_run_jobs
 from cortexgrid.model_serving import (
     DeploymentKey,
     ModelNotDeployed,
-    ModelRequirements,
     ServingMessage,
     app_name,
     deploy_model,
@@ -31,6 +30,7 @@ from cortexgrid.model_serving import (
 )
 from cortexgrid.model_storage import (
     delete_model,
+    model_registry_status,
     set_model_config,
     set_model_requirements,
 )
@@ -231,8 +231,13 @@ async def model_delete(family: str, suffix: str, run_name: str) -> dict[str, str
 async def model_requirements_update(
     family: str, suffix: str, run_name: str, body: Requirements
 ) -> dict[str, str]:
+    stored = model_registry_status(family, suffix, run_name)
+    if stored is None:
+        raise HTTPException(
+            status_code=404, detail=f"No model {family}/{suffix}/{run_name}"
+        )
     try:
-        requirements = ModelRequirements(**body.model_dump())
+        requirements = replace(stored.requirements, **body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:

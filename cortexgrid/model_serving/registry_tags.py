@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from cortexgrid import state
+from cortexgrid.model_serving.deployment_key import DeploymentConfig
 from cortexgrid.model_serving.placement import ModelRequirements
 from cortexgrid.model_serving.serve_bundle import BundleMetadata
 
@@ -48,6 +49,7 @@ def bundle_fingerprint_from_tags(tags: dict[str, str]) -> str:
 _NUM_GPUS_TAG = "num_gpus"
 _RAM_GB_TAG = "ram_gb"
 _VRAM_GB_TAG = "vram_gb"
+_MODELS_TAG = "models"
 
 
 def has_requirement_tags(tags: dict[str, str]) -> bool:
@@ -62,6 +64,24 @@ def requirements_to_tags(requirements: ModelRequirements) -> dict[str, str]:
         _NUM_GPUS_TAG: str(requirements.num_gpus),
         _RAM_GB_TAG: str(requirements.ram_gb),
         _VRAM_GB_TAG: str(requirements.vram_gb),
+        **required_models_to_tags(requirements.models),
+    }
+
+
+def required_models_to_tags(models: list[DeploymentConfig]) -> dict[str, str]:
+    return {
+        _MODELS_TAG: json.dumps(
+            [
+                {
+                    "family": model.family,
+                    "suffix": model.suffix,
+                    "run_name": model.run_name,
+                    "num_replicas": model.num_replicas,
+                    "config": model.config,
+                }
+                for model in models
+            ]
+        )
     }
 
 
@@ -74,6 +94,9 @@ def requirements_from_tags(tags: dict[str, str]) -> ModelRequirements:
         num_gpus=float(tags.get(_NUM_GPUS_TAG, "0")),
         ram_gb=float(tags.get(_RAM_GB_TAG, "0")),
         vram_gb=float(tags.get(_VRAM_GB_TAG, "0")),
+        models=[
+            DeploymentConfig(**model) for model in json.loads(tags.get(_MODELS_TAG, "[]"))
+        ],
     )
 
 

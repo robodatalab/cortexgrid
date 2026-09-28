@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from cortexgrid.model_serving.deployment_key import DeploymentConfig
 from cortexgrid.ray_util import get_ray_nodes
 
 
@@ -24,6 +25,7 @@ class ModelRequirements:
     ram_gb: float = 0.0
     # GPU memory across the replica's num_gpus GPUs, so it needs a GPU share.
     vram_gb: float = 0.0
+    models: list[DeploymentConfig] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.num_gpus < 0 or self.ram_gb < 0 or self.vram_gb < 0:
