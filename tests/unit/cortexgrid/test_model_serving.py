@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 
@@ -29,6 +30,7 @@ from cortexgrid.model_serving import (
     bundle_class,
     bundle_fingerprint_from_url,
     deploy_model,
+    deployment_key,
     list_deployed_models,
     metadata_to_tags,
     model_replica_placements,
@@ -1613,6 +1615,33 @@ class TestModelRequirements(unittest.TestCase):
 
     def test_a_whole_number_saved_before_sharing_still_reads(self) -> None:
         self.assertEqual(requirements_from_tags({"num_gpus": "1"}).num_gpus, 1.0)
+
+    def test_spec_names_the_apps_of_the_models_it_requires(self) -> None:
+        spec = build_application_spec(
+            _FAM_DEPLOYMENT,
+            _FAKE_META,
+            ModelRequirements(
+                models=[_LINEAR, replace(_LINEAR, suffix="quadratic", config={"a": "b"})]
+            ),
+            1,
+            _TIERS,
+        )
+
+        quadratic = deployment_key("Examples", "quadratic", "imported", {"a": "b"})
+        self.assertEqual(
+            spec["args"]["required_apps"],
+            [
+                "Examples__linear__imported",
+                f"Examples__quadratic__imported__{quadratic.config_fingerprint}",
+            ],
+        )
+
+    def test_spec_of_a_model_that_requires_none_is_unchanged(self) -> None:
+        spec = build_application_spec(
+            _FAM_DEPLOYMENT, _FAKE_META, ModelRequirements(), 1, _TIERS
+        )
+
+        self.assertNotIn("required_apps", spec["args"])
 
     def test_a_share_is_requested_from_ray_as_it_was_stored(self) -> None:
         spec = build_application_spec(
