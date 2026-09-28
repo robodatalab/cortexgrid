@@ -8,7 +8,8 @@ One registry entry (a `models` row) per (family, suffix, run_name):
                            "s3://<bucket>/models/<run_name>/<family>/<suffix>/weights/"
                            (NO_WEIGHTS for a model registered without any)
     run linkage         -> run_id  (unset for imported models)
-    requirements        -> tags["num_gpus"], ["ram_gb"], ["vram_gb"]
+    requirements        -> tags["num_gpus"], ["ram_gb"], ["vram_gb"], ["models"]
+                           (models: JSON list)
     config              -> tags["config"]  (JSON object)
 
 Three ways in: `save_model` registers a fresh copy under the calling run's
@@ -28,9 +29,11 @@ cortexgrid/__init__.py.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
-from dataclasses import dataclass, field
+import shutil
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
@@ -48,6 +51,7 @@ from cortexgrid.model_serving import (
     has_requirement_tags,
     metadata_from_tags,
     metadata_to_tags,
+    required_models_to_tags,
     requirements_from_tags,
     requirements_to_tags,
     upload_bundle,
@@ -92,6 +96,9 @@ IMPORTED = "imported"
 # blank so every reader - `load_model`, the dashboard's storage field - sees
 # why there is no path instead of an empty one.
 NO_WEIGHTS = "cortexgrid://no-weights"
+
+_MODEL_CACHE_DIR_ENV = "CORTEXGRID_MODEL_CACHE_DIR"
+_DEFAULT_MODEL_CACHE_DIR = Path.home() / ".cache" / "cortexgrid" / "models"
 
 
 @dataclass
@@ -223,6 +230,23 @@ def _download_s3_uri(uri: str, dest_dir: str | Path | None) -> Path:
     return dest
 
 
+def _model_cache_dir() -> Path:
+    return Path(os.environ.get(_MODEL_CACHE_DIR_ENV, _DEFAULT_MODEL_CACHE_DIR))
+
+
+def _load_imported_weights(uri: str, family: str, suffix: str) -> Path:
+    cached = _model_cache_dir() / family / suffix
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with open(cached.with_name(f"{suffix}.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not cached.is_dir():
+            partial = cached.with_name(f"{suffix}.partial")
+            shutil.rmtree(partial, ignore_errors=True)
+            _download_s3_uri(uri, partial)
+            partial.rename(cached)
+    return cached
+
+
 def save_model(
     weights_dir: str | Path,
     serve_app: type,
@@ -292,8 +316,9 @@ def import_model(
         longer matches the stored bundle, it is re-bundled first and the
         weights are kept (see `_refresh_bundle`). `requirements` and `config`
         are stored only if the version has none yet, so values changed since
-        with `set_model_requirements` / `set_model_config` are kept. To replace
-        the weights, `delete_model` it first.
+        with `set_model_requirements` / `set_model_config` are kept; the
+        required models in `requirements` replace the stored ones regardless.
+        To replace the weights, `delete_model` it first.
       - "uploading": raises RuntimeError - another process is importing it.
       - "upload_failed" / "broken": deleted and imported again.
 
@@ -386,11 +411,13 @@ def _refresh_bundle(serve_app: type, family: str, suffix: str) -> None:
 def _set_missing_requirements(
     family: str, suffix: str, requirements: ModelRequirements
 ) -> ModelRequirements:
-    """Store `requirements` on an imported model whose version has none yet.
+    """Store `requirements` on an imported model whose version has none yet;
+    its required models are stored either way, since only code declares them.
     Returns the requirements the version holds afterwards."""
     version = _get_version(family, suffix, IMPORTED)
     if has_requirement_tags(version.tags):
-        return requirements_from_tags(version.tags)
+        _set_tags(family, suffix, IMPORTED, required_models_to_tags(requirements.models))
+        return replace(requirements_from_tags(version.tags), models=requirements.models)
     _set_tags(family, suffix, IMPORTED, requirements_to_tags(requirements))
     return requirements
 
@@ -499,6 +526,8 @@ def load_model(family: str, suffix: str, run_name: str) -> Path:
             f"Model {family}/{suffix}/{run_name} was registered without "
             "weights; there is nothing to load"
         )
+    if run_name == IMPORTED:
+        return _load_imported_weights(version.source, family, suffix)
     return _download_s3_uri(version.source, None)
 
 

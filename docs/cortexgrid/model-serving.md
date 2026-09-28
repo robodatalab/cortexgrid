@@ -177,6 +177,8 @@ Ray runs one copy of the policy per model inside the Serve controller. It pickle
 Once a second, while any Serve replica is waiting for room - `PENDING_CREATION` with no node, because no node has its resources free - the scheduler reads the cluster's occupancy from Ray's state API. For each waiting replica, longest-waiting first, it picks the fewest idle models on one node whose replicas, once stopped, would leave room for it, least recently used first. Their policies return zero replicas; Ray stops them and places the waiting replica on the room they free.
 
 - A model with requests is never paused, so a waiting replica waits for as long as the models holding its card stay busy.
+- A model that running models require (`ModelRequirements.models`) is paused only together with all of them, and only when they are all idle. Pausing a dependent leaves the model it requires serving.
+- A waiting replica never pauses a model it requires, directly or through another model. Each deployment's spec names the apps it requires (`required_apps`), which its policy reports to the scheduler with its activity.
 - Nothing is paused while a node already has room: the waiting replica is being placed there.
 - Nothing is paused when stopping every idle model on a node would still not make room.
 - Waiting replicas are found from Ray's actor state, not from their own policy: Ray does not call the policy of a model with zero running replicas and queued requests - its cold-start path scales the model up itself - and that is exactly a model resuming.

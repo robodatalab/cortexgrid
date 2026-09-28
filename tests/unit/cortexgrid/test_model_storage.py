@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -12,6 +13,7 @@ import cortexgrid
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import (
     BundleMetadata,
+    DeploymentConfig,
     DeploymentKey,
     ModelRequirements,
     ServeBundle,
@@ -44,6 +46,8 @@ class _FakeServeApp:
 
 
 _GPU_REQUIREMENTS = ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0)
+
+_LINEAR = DeploymentConfig("Examples", "linear", IMPORTED)
 
 # What a serve-app that downloads no weights needs instead: which model to call
 # and where to find the credential. cortexgrid never reads either key.
@@ -546,6 +550,24 @@ class TestImportModel(unittest.TestCase):
         self.assertEqual(result.requirements, _GPU_REQUIREMENTS)
         self.assertEqual(self._entry()["tags"]["ram_gb"], "16.0")
 
+    def test_reimport_replaces_required_models_but_keeps_stored_hardware(
+        self,
+    ) -> None:
+        import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
+        )
+        requiring_linear = ModelRequirements(num_gpus=2, vram_gb=48.0, models=[_LINEAR])
+
+        result = import_model(
+            self.weights_dir, _FakeServeApp, "Qwen2", "base", requiring_linear
+        )
+
+        stored = replace(_GPU_REQUIREMENTS, models=[_LINEAR])
+        self.assertEqual(result.requirements, stored)
+        self.assertEqual(
+            model_registry_status("Qwen2", "base", IMPORTED).requirements, stored
+        )
+
     def test_reimport_without_requirements_keeps_stored_ones(self) -> None:
         import_model(
             self.weights_dir, _FakeServeApp, "Qwen2", "base", _GPU_REQUIREMENTS
@@ -785,6 +807,58 @@ class TestImportModelRecordsRun(unittest.TestCase):
             {("r1", "anthropic", "opus"): model.created_at},
         )
 
+    def test_registering_a_model_imports_the_models_it_requires(self) -> None:
+        self._use_run("r1")
+        linear = replace(_LINEAR, serve_app=_FakeServeApp, source=lambda: self.weights_dir)
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[linear])
+        )
+
+        imported = model_registry_status("Examples", "linear", IMPORTED)
+        self.assertEqual(imported.phase, "ready")
+        self.assertTrue(imported.has_weights)
+        self.assertIn(("r1", "Examples", "linear"), self.state.imported_models)
+
+    def test_a_required_model_already_imported_is_not_fetched_again(self) -> None:
+        self._use_run("r1")
+        fetches: list[int] = []
+
+        def fetch() -> Path:
+            fetches.append(1)
+            return self.weights_dir
+
+        linear = replace(_LINEAR, serve_app=_FakeServeApp, source=fetch)
+        requirements = ModelRequirements(models=[linear])
+
+        cortexgrid.register_model(_FakeServeApp, "Examples", "squarerooted", requirements)
+        cortexgrid.register_model(_FakeServeApp, "Examples", "squarerooted", requirements)
+
+        self.assertEqual(len(fetches), 1)
+
+    def test_a_required_model_with_no_source_is_registered_without_weights(
+        self,
+    ) -> None:
+        self._use_run("r1")
+        linear = replace(_LINEAR, serve_app=_FakeServeApp)
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[linear])
+        )
+
+        self.assertFalse(
+            model_registry_status("Examples", "linear", IMPORTED).has_weights
+        )
+
+    def test_a_required_model_with_no_serve_app_is_left_as_it_is(self) -> None:
+        self._use_run("r1")
+
+        cortexgrid.register_model(
+            _FakeServeApp, "Examples", "squarerooted", ModelRequirements(models=[_LINEAR])
+        )
+
+        self.assertIsNone(model_registry_status("Examples", "linear", IMPORTED))
+
     def test_does_not_record_on_the_run_when_the_import_fails(self) -> None:
         self._use_run("r1")
 
@@ -845,6 +919,56 @@ class TestLoadModel(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             load_model("Qwen2", "instruct", "boogey-46")
+
+
+class TestLoadImportedModel(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = FakeState().install(self)
+        self.s3 = FakeS3()
+        for p in _patches(self.s3):
+            p.start()
+            self.addCleanup(p.stop)
+        self.cache_dir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.cache_dir, ignore_errors=True)
+        cache_env = patch.dict(
+            "os.environ", {"CORTEXGRID_MODEL_CACHE_DIR": str(self.cache_dir)}
+        )
+        cache_env.start()
+        self.addCleanup(cache_env.stop)
+        _seed_model(self.state, "Qwen3", "8B", None, IMPORTED)
+        self.s3.objects["models/imported/Qwen3/8B/weights/config.json"] = b'{"x":1}'
+
+    def test_downloads_into_the_model_cache(self) -> None:
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual(result, self.cache_dir / "Qwen3" / "8B")
+        self.assertEqual((result / "config.json").read_bytes(), b'{"x":1}')
+
+    def test_reuses_the_cached_weights_without_downloading_again(self) -> None:
+        load_model("Qwen3", "8B", IMPORTED)
+        self.s3.objects.clear()
+
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual((result / "config.json").read_bytes(), b'{"x":1}')
+
+    def test_discards_files_left_by_an_interrupted_download(self) -> None:
+        partial = self.cache_dir / "Qwen3" / "8B.partial"
+        partial.mkdir(parents=True)
+        (partial / "shard.safetensors").write_bytes(b"half")
+
+        result = load_model("Qwen3", "8B", IMPORTED)
+
+        self.assertEqual([p.name for p in result.iterdir()], ["config.json"])
+
+    def test_leaves_models_saved_by_a_run_out_of_the_cache(self) -> None:
+        _seed_model(self.state, "Qwen3", "8B", "r1", "boogey-46")
+        self.s3.objects["models/boogey-46/Qwen3/8B/weights/config.json"] = b'{"y":2}'
+
+        result = load_model("Qwen3", "8B", "boogey-46")
+        self.addCleanup(shutil.rmtree, result, ignore_errors=True)
+
+        self.assertFalse(result.is_relative_to(self.cache_dir))
 
 
 class TestListModels(unittest.TestCase):

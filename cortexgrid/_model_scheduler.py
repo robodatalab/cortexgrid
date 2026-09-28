@@ -16,9 +16,10 @@ log = logging.getLogger(__name__)
 
 
 _RayResources = dict[str, float]
+_ModelGraph = dict[str, set[str]]
 
 
-_SCHEDULER_PROTOCOL_VERSION = 2
+_SCHEDULER_PROTOCOL_VERSION = 3
 _SCHEDULER_ACTOR_NAME = f"cortexgrid-model-scheduler-v{_SCHEDULER_PROTOCOL_VERSION}"
 _SCHEDULER_ACTOR_NAMESPACE = "cortexgrid"
 
@@ -33,7 +34,7 @@ _STATE_API_RESULT_LIMIT = 10_000
 _RESOURCE_FLOAT_TOLERANCE = 1e-6
 
 
-def model_autoscaling_config(max_replicas: int) -> dict[str, Any]:
+def model_autoscaling_config(max_replicas: int, required_apps: list[str]) -> dict[str, Any]:
     return {
         "min_replicas": 0,
         "initial_replicas": max_replicas,
@@ -48,12 +49,14 @@ def model_autoscaling_config(max_replicas: int) -> dict[str, Any]:
                 f"{ModelAutoscalingPolicy.__module__}:"
                 f"{ModelAutoscalingPolicy.__qualname__}"
             ),
+            "policy_kwargs": {"required_apps": required_apps},
         },
     }
 
 
 class ModelAutoscalingPolicy:
-    def __init__(self) -> None:
+    def __init__(self, required_apps: list[str]) -> None:
+        self._required_apps = required_apps
         self._scheduler: ActorProxy[_ModelScheduler] | None = None
         self._pending_pause_answer: Future[bool] | None = None
         self._pause_requested_by_scheduler = False
@@ -63,7 +66,9 @@ class ModelAutoscalingPolicy:
         if not self._awaiting_pause_answer():
             self._pause_requested_by_scheduler = self._collect_pause_answer()
             self._send_activity_report(
-                context.deployment_id.to_replica_actor_class_name(), has_requests
+                context.deployment_id.to_replica_actor_class_name(),
+                context.deployment_id.app_name,
+                has_requests,
             )
         return self._replica_count(context, has_requests), context.policy_state
 
@@ -90,12 +95,14 @@ class ModelAutoscalingPolicy:
             self._scheduler = None
             return False
 
-    def _send_activity_report(self, replica_class_name: str, has_requests: bool) -> None:
+    def _send_activity_report(
+        self, replica_class_name: str, app_name: str, has_requests: bool
+    ) -> None:
         if self._scheduler is None:
             self._scheduler = _get_or_create_scheduler_actor()
         self._pending_pause_answer = (
             self._scheduler.report_activity_and_check_pause.remote(
-                replica_class_name, has_requests
+                replica_class_name, app_name, self._required_apps, has_requests
             ).future()
         )
 
@@ -117,6 +124,8 @@ def _get_or_create_scheduler_actor() -> ActorProxy[_ModelScheduler]:
 
 @dataclass
 class _ScheduledModel:
+    app_name: str = ""
+    required_apps: list[str] = field(default_factory=list)
     has_requests: bool = False
     last_request_at: float = 0.0
     last_report_at: float = 0.0
@@ -131,6 +140,7 @@ class _NodeOccupancy:
 @dataclass
 class _ReplicaWaitingForRoom:
     actor_id: str
+    replica_class_name: str
     required_resources: _RayResources
 
 
@@ -149,16 +159,27 @@ class _ModelScheduler:
 
     @ray.method
     def report_activity_and_check_pause(
-        self, replica_class_name: str, has_requests: bool
+        self,
+        replica_class_name: str,
+        app_name: str,
+        required_apps: list[str],
+        has_requests: bool,
     ) -> bool:
         return self._record_activity_and_check_pause(
-            replica_class_name, has_requests, time.monotonic()
+            replica_class_name, app_name, required_apps, has_requests, time.monotonic()
         )
 
     def _record_activity_and_check_pause(
-        self, replica_class_name: str, has_requests: bool, now: float
+        self,
+        replica_class_name: str,
+        app_name: str,
+        required_apps: list[str],
+        has_requests: bool,
+        now: float,
     ) -> bool:
-        self._record_activity(replica_class_name, has_requests, now)
+        self._record_activity(
+            replica_class_name, app_name, required_apps, has_requests, now
+        )
         if now - self._last_pause_decision_at >= _PAUSE_DECISION_INTERVAL_S:
             self._last_pause_decision_at = now
             self._forget_models_silent_since(now - _FORGET_MODELS_SILENT_FOR_S)
@@ -166,9 +187,16 @@ class _ModelScheduler:
         return replica_class_name in self._models_to_pause
 
     def _record_activity(
-        self, replica_class_name: str, has_requests: bool, now: float
+        self,
+        replica_class_name: str,
+        app_name: str,
+        required_apps: list[str],
+        has_requests: bool,
+        now: float,
     ) -> None:
         model = self._models.setdefault(replica_class_name, _ScheduledModel())
+        model.app_name = app_name
+        model.required_apps = required_apps
         if has_requests:
             model.last_request_at = now
         model.has_requests = has_requests
@@ -194,25 +222,56 @@ class _ModelScheduler:
             occupancy.replicas_waiting_for_room,
             key=lambda replica: self._first_seen_waiting_at[replica.actor_id],
         )
+        running = {
+            name for node in occupancy.nodes for name in node.resources_held_by_model
+        }
+        required = self._models_required_directly()
         models_to_pause: set[str] = set()
         for replica in waiting_longest_first:
             models_to_pause |= self._fewest_idle_models_to_pause_for(
-                replica.required_resources, occupancy.nodes, models_to_pause
+                replica.required_resources,
+                occupancy.nodes,
+                self._pause_groups(
+                    running - models_to_pause,
+                    {replica.replica_class_name}
+                    | _reachable(replica.replica_class_name, required),
+                    required,
+                ),
             )
         return models_to_pause
+
+    def _models_required_directly(self) -> _ModelGraph:
+        model_of_app = {model.app_name: name for name, model in self._models.items()}
+        return {
+            name: {model_of_app[app] for app in model.required_apps if app in model_of_app}
+            for name, model in self._models.items()
+        }
+
+    def _pause_groups(
+        self, running: set[str], unpausable: set[str], required: _ModelGraph
+    ) -> _ModelGraph:
+        dependents = _reversed(required)
+        groups: _ModelGraph = {}
+        for name in running:
+            group = {name} | (_reachable(name, dependents) & running)
+            if unpausable.isdisjoint(group) and not any(
+                self._models[member].has_requests for member in group
+            ):
+                groups[name] = group
+        return groups
 
     def _fewest_idle_models_to_pause_for(
         self,
         required_resources: _RayResources,
         nodes: list[_NodeOccupancy],
-        already_pausing: set[str],
+        pause_groups: _ModelGraph,
     ) -> set[str]:
         fewest_models_to_pause: list[str] | None = None
         for node in nodes:
             if _has_room_for(required_resources, node.free_resources):
                 return set()
             models_to_pause = self._least_recently_used_idle_models_freeing(
-                required_resources, node, already_pausing
+                required_resources, node, pause_groups
             )
             if models_to_pause is not None and (
                 fewest_models_to_pause is None
@@ -225,23 +284,21 @@ class _ModelScheduler:
         self,
         required_resources: _RayResources,
         node: _NodeOccupancy,
-        already_pausing: set[str],
+        pause_groups: _ModelGraph,
     ) -> list[str] | None:
         idle_models_least_recently_used_first = sorted(
-            (
-                name
-                for name in node.resources_held_by_model
-                if name not in already_pausing and not self._models[name].has_requests
-            ),
+            (name for name in node.resources_held_by_model if name in pause_groups),
             key=lambda name: self._models[name].last_request_at,
         )
         resources_free_after_pause = dict(node.free_resources)
         models_to_pause: list[str] = []
         for name in idle_models_least_recently_used_first:
-            models_to_pause.append(name)
-            _add_resources(
-                resources_free_after_pause, node.resources_held_by_model[name]
-            )
+            for member in sorted(pause_groups[name] - set(models_to_pause)):
+                models_to_pause.append(member)
+                _add_resources(
+                    resources_free_after_pause,
+                    node.resources_held_by_model.get(member, {}),
+                )
             if _has_room_for(required_resources, resources_free_after_pause):
                 return models_to_pause
         return None
@@ -269,7 +326,11 @@ def _read_cluster_occupancy(scheduled_replica_class_names: set[str]) -> _Cluster
         reserved_resources = actor_fields["required_resources"] or {}
         if _is_serve_replica_waiting_for_room(actor_fields):
             replicas_waiting_for_room.append(
-                _ReplicaWaitingForRoom(actor_fields["actor_id"], reserved_resources)
+                _ReplicaWaitingForRoom(
+                    actor_fields["actor_id"],
+                    actor_fields["class_name"],
+                    reserved_resources,
+                )
             )
             continue
         occupancy = occupancy_by_node_id.get(actor_fields["node_id"])
@@ -303,6 +364,25 @@ def _is_serve_replica_waiting_for_room(actor_fields: dict[str, Any]) -> bool:
         and actor_fields["node_id"] is None
         and actor_fields["class_name"].startswith(_SERVE_REPLICA_CLASS_PREFIX)
     )
+
+
+def _reachable(start: str, edges: _ModelGraph) -> set[str]:
+    reached: set[str] = set()
+    to_visit = list(edges.get(start, ()))
+    while to_visit:
+        name = to_visit.pop()
+        if name not in reached:
+            reached.add(name)
+            to_visit.extend(edges.get(name, ()))
+    return reached
+
+
+def _reversed(edges: _ModelGraph) -> _ModelGraph:
+    reversed_edges: _ModelGraph = {}
+    for source, targets in edges.items():
+        for target in targets:
+            reversed_edges.setdefault(target, set()).add(source)
+    return reversed_edges
 
 
 def _add_resources(target: _RayResources, amounts: _RayResources) -> None:

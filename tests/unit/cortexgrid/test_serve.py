@@ -72,7 +72,7 @@ class TestBuild(unittest.TestCase):
             })
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            autoscaling_config=model_autoscaling_config(2),
+            autoscaling_config=model_autoscaling_config(2, []),
             max_ongoing_requests=100,
             ray_actor_options=actor_options,
         )
@@ -82,9 +82,22 @@ class TestBuild(unittest.TestCase):
             build({**_ARGS, "class_import_path": f"{__name__}:_MarkedServeApp"})
 
         ray_serve.deployment.return_value.options.assert_called_once_with(
-            autoscaling_config=model_autoscaling_config(1),
+            autoscaling_config=model_autoscaling_config(1, []),
             max_ongoing_requests=100,
             ray_actor_options={},
+        )
+
+    def test_tells_the_scheduler_which_apps_the_model_requires(self) -> None:
+        with patch("cortexgrid._serve_entry.serve", MagicMock()) as ray_serve:
+            build({
+                **_ARGS,
+                "class_import_path": f"{__name__}:_MarkedServeApp",
+                "required_apps": ["base"],
+            })
+
+        options = ray_serve.deployment.return_value.options.call_args.kwargs
+        self.assertEqual(
+            options["autoscaling_config"], model_autoscaling_config(1, ["base"])
         )
 
     def test_unmarked_class_is_deployed_without_ingress(self) -> None:

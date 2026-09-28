@@ -77,6 +77,10 @@ def _past(deadline: float | None) -> bool:
     return deadline is not None and time.monotonic() >= deadline
 
 
+def _time_left(deadline: float | None) -> float | None:
+    return None if deadline is None else max(0.0, deadline - time.monotonic())
+
+
 def wait_for_model_serving(key: DeploymentKey, timeout: float | None = None) -> None:
     """Block until the model's Serve app is RUNNING.
 
@@ -219,7 +223,7 @@ def deploy_model(
     num_replicas: int = 1,
     wait: bool = False,
     timeout: float | None = 300.0,
-    config: DeploymentConfig | None = None,
+    config: dict[str, str] | None = None,
     experiment_name: str = "",
 ) -> Deployment:
     """Schedule a Ray Serve app for a previously-saved model and return a
@@ -259,9 +263,20 @@ def deploy_model(
     stuck in DEPLOYING) will hang forever.
     """
     deadline = _deadline(timeout)
+    meta, requirements = load_deploy_metadata(family, suffix, run_name)
+    for model in requirements.models:
+        deploy_model(
+            model.family,
+            model.suffix,
+            model.run_name,
+            num_replicas=model.num_replicas,
+            wait=True,
+            timeout=_time_left(deadline),
+            config=model.config,
+            experiment_name=experiment_name,
+        )
     deployment_config = config or {}
     key = deployment_key(family, suffix, run_name, deployment_config)
-    meta, requirements = load_deploy_metadata(family, suffix, run_name)
     record = get_deployment_record(key)
     if record is not None and _record_is_current(
         record, key, meta, requirements, num_replicas
@@ -332,6 +347,21 @@ def redeploy_model(key: DeploymentKey) -> Deployment:
         config=record["config"],
         experiment_name=record["experiment_name"],
     )
+
+
+def required_models(deployment: DeploymentKey) -> list[Deployment]:
+    _, requirements = load_deploy_metadata(
+        deployment.family, deployment.suffix, deployment.run_name
+    )
+    return [_deployment_of(model) for model in requirements.models]
+
+
+def _deployment_of(model: DeploymentConfig) -> Deployment:
+    key = deployment_key(model.family, model.suffix, model.run_name, model.config)
+    record = get_deployment_record(key)
+    if record is None:
+        raise ModelNotDeployed(f"{key} is not deployed")
+    return deployment_of_record(record)
 
 
 def undeploy_model(key: DeploymentKey) -> None:

@@ -9,11 +9,13 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from cortexgrid.model_serving import (
+    DeploymentConfig,
     DeploymentKey,
     ModelNotDeployed,
     ModelRequirements,
     ReplicaPlacement,
 )
+from cortexgrid.model_storage import model_registry_status, set_model_requirements
 
 from cortexgrid_ui.backend.main import app
 from cortexgrid_ui.backend.models.infra_status import PodStatus
@@ -183,6 +185,19 @@ class TestModelRequirementsEndpoint(unittest.TestCase):
         self.assertEqual(
             cached["Qwen2/instruct/boogey-46"].requirements,
             ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0),
+        )
+
+    def test_keeps_the_models_the_model_requires(self) -> None:
+        linear = DeploymentConfig("Examples", "linear", "imported")
+        set_model_requirements(
+            "Qwen2", "instruct", "boogey-46", ModelRequirements(models=[linear])
+        )
+
+        self._put({"num_gpus": 1, "ram_gb": 16.0, "vram_gb": 24.0})
+
+        self.assertEqual(
+            model_registry_status("Qwen2", "instruct", "boogey-46").requirements,
+            ModelRequirements(num_gpus=1, ram_gb=16.0, vram_gb=24.0, models=[linear]),
         )
 
     def test_rejects_vram_without_a_gpu(self) -> None:

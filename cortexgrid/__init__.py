@@ -111,6 +111,7 @@ from cortexgrid.model_serving import (
     list_deployed_models,
     model_serving_status,
     redeploy_model,
+    required_models,
     undeploy_model,
     wait_for_model_serving,
 )
@@ -170,6 +171,7 @@ def save_model(
     run produced (e.g. a fine-tune). For a model produced elsewhere that should
     be uploaded once and reused across runs, use `import_model`."""
     experiment = Experiment.get_instance()
+    _register_required_models(requirements)
     return _save_model_storage(
         weights_dir,
         serve_app,
@@ -198,6 +200,7 @@ def import_model(
     `created_at` under (family, suffix), whether this call uploaded the model
     or reused it."""
     experiment = Experiment.get_instance()
+    _register_required_models(requirements)
     model = _import_model_storage(
         source, serve_app, family, suffix, requirements, config
     )
@@ -221,6 +224,7 @@ def register_model(
     (see `cortexgrid.model_storage.register_model`). The model belongs to no
     run, so the run keeps the link the same way."""
     experiment = Experiment.get_instance()
+    _register_required_models(requirements)
     model = _register_model_storage(
         serve_app, family, suffix, requirements, config
     )
@@ -235,7 +239,7 @@ def deploy_model(
     num_replicas: int = 1,
     wait: bool = False,
     timeout: float | None = 300.0,
-    config: DeploymentConfig | None = None,
+    config: dict[str, str] | None = None,
 ) -> Deployment:
     experiment = active_experiment()
     return _deploy_model_serving(
@@ -248,6 +252,16 @@ def deploy_model(
         config=config,
         experiment_name="" if experiment is None else experiment.experiment_name,
     )
+
+
+def _register_required_models(requirements: ModelRequirements | None) -> None:
+    for model in [] if requirements is None else requirements.models:
+        if model.serve_app is None:
+            continue
+        if model.source is None:
+            register_model(model.serve_app, model.family, model.suffix)
+        else:
+            import_model(model.source, model.serve_app, model.family, model.suffix)
 
 
 def _record_imported_model(
@@ -342,6 +356,7 @@ __all__ = [
     "ServingStatus",
     "deploy_model",
     "redeploy_model",
+    "required_models",
     "wait_for_model_serving",
     "model_serving_status",
     "undeploy_model",

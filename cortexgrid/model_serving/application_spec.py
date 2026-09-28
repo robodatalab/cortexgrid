@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cortexgrid.model_serving.deployment_key import DeploymentKey
+from cortexgrid.model_serving.deployment_key import DeploymentKey, deployment_key
 from cortexgrid.model_serving.placement import ModelRequirements, ray_actor_options
 from cortexgrid.model_serving.serve_bundle import (
     BundleMetadata,
@@ -41,6 +41,22 @@ def build_application_spec(
     runtime_env: dict[str, Any] = {"working_dir": meta.bundle_url}
     if meta.pip_requirements:
         runtime_env["pip"] = meta.pip_requirements
+    args: dict[str, Any] = {
+        "class_import_path": meta.class_import_path,
+        "family": key.family,
+        "suffix": key.suffix,
+        "run_name": key.run_name,
+        "config_fingerprint": key.config_fingerprint,
+        "num_replicas": num_replicas,
+        "ray_actor_options": ray_actor_options(requirements, tiers),
+    }
+    if requirements.models:
+        args["required_apps"] = [
+            app_name(
+                deployment_key(model.family, model.suffix, model.run_name, model.config)
+            )
+            for model in requirements.models
+        ]
     return {
         "name": app_name(key),
         "route_prefix": route_prefix(key),
@@ -49,15 +65,7 @@ def build_application_spec(
         # Deployment class is rejected, so cortexgrid.deploy_model goes through
         # a generic builder that re-imports the user's class and binds it.
         "import_path": "cortexgrid._serve_entry:build",
-        "args": {
-            "class_import_path": meta.class_import_path,
-            "family": key.family,
-            "suffix": key.suffix,
-            "run_name": key.run_name,
-            "config_fingerprint": key.config_fingerprint,
-            "num_replicas": num_replicas,
-            "ray_actor_options": ray_actor_options(requirements, tiers),
-        },
+        "args": args,
         "runtime_env": runtime_env,
     }
 
