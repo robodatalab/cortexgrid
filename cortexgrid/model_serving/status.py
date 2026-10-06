@@ -6,13 +6,9 @@ from typing import Any
 
 from ray.serve.schema import ApplicationStatus, ReplicaState
 
-from cortexgrid.model_serving.application_spec import (
-    app_name,
-    bundle_fingerprint_in_spec,
-)
+from cortexgrid.model_serving.application_spec import app_name
 from cortexgrid.model_serving.deployment_key import DeploymentKey
 from cortexgrid.model_serving.deployment_records import (
-    DeploymentRecord,
     get_deployment_record,
     key_of_record,
     list_deployment_records,
@@ -21,7 +17,7 @@ from cortexgrid.model_serving.deployment_records import (
 from cortexgrid.ray_util import get_serve_details
 
 
-_PHASE_NOT_DEPLOYED = "not_deployed"
+PHASE_NOT_DEPLOYED = "not_deployed"
 PHASE_PAUSED = "paused"
 _ROLLED_OUT_PHASES = ("running", PHASE_PAUSED)
 
@@ -44,47 +40,10 @@ def _serve_phase(raw_status: str) -> str:
     return _PHASE_BY_SERVE_STATUS.get(raw_status, "deploying")
 
 
-@dataclass
-class Deployment:
-    """A scheduled Ray Serve app fronting a model. `phase` is the normalized
-    serving lifecycle phase (see `ServingStatus`); an app that appears in a
-    listing always exists, so its phase is never "not_deployed"."""
-
-    key: DeploymentKey
-    config: dict[str, str]
-    url: str
-    phase: str
-    bundle_fingerprint: str
-    replaced_bundle_fingerprint: str
-    experiment_name: str
-
-
 def replaced_bundle_fingerprint_until_rolled_out(
     replaced_bundle_fingerprint: str, phase: str
 ) -> str:
     return "" if phase in _ROLLED_OUT_PHASES else replaced_bundle_fingerprint
-
-
-def list_deployed_models() -> list[Deployment]:
-    """Return a Deployment for every model `deploy_model` put on Ray Serve
-    whose app the control plane last saw existing."""
-    return [
-        deployment_of_record(record)
-        for record in list_deployment_records()
-        if record["phase"] != _PHASE_NOT_DEPLOYED
-    ]
-
-
-def deployment_of_record(record: DeploymentRecord) -> Deployment:
-    return Deployment(
-        key=key_of_record(record),
-        config=record["config"],
-        url=record["url"],
-        phase=record["phase"],
-        bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
-        replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
-        experiment_name=record["experiment_name"],
-    )
 
 
 def deployment_config(key: DeploymentKey) -> dict[str, str]:
@@ -134,8 +93,8 @@ def model_serving_status(key: DeploymentKey) -> ServingStatus:
     `cortexgrid.model_storage.model_registry_status`.
     """
     record = get_deployment_record(key)
-    if record is None or record["phase"] == _PHASE_NOT_DEPLOYED:
-        return ServingStatus(key, _PHASE_NOT_DEPLOYED, "", None)
+    if record is None or record["phase"] == PHASE_NOT_DEPLOYED:
+        return ServingStatus(key, PHASE_NOT_DEPLOYED, "", None)
     return ServingStatus(
         key=key,
         phase=record["phase"],
@@ -193,7 +152,7 @@ def observed(app: dict[str, Any] | None) -> dict[str, Any]:
     deployment record keeps; an app that does not exist reads as
     "not_deployed"."""
     if app is None:
-        return {"phase": _PHASE_NOT_DEPLOYED, "message": "", "replicas": []}
+        return {"phase": PHASE_NOT_DEPLOYED, "message": "", "replicas": []}
     raw = str(app.get("status", ""))
     return {
         "phase": _phase(app),

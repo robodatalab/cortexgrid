@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import math
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import cortexgrid
@@ -20,10 +19,7 @@ _linear_app = FastAPI()
 _square_rooted_app = FastAPI()
 
 
-@dataclass
-class ServedLinear:
-    url: str
-
+class ServedLinear(cortexgrid.DeploymentClient):
     def predict(self, xs: list[float]) -> list[float]:
         response = requests.post(f"{self.url}/predict", json={"x": xs})
         response.raise_for_status()
@@ -33,8 +29,8 @@ class ServedLinear:
 @serve.ingress(_linear_app)
 class Linear:
     @classmethod
-    def client(cls, url: str) -> ServedLinear:
-        return ServedLinear(url)
+    def client(cls, deployment: cortexgrid.Deployment[ServedLinear]) -> ServedLinear:
+        return ServedLinear(key=deployment.key, url=deployment.url)
 
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         path = cortexgrid.load_model(
@@ -57,10 +53,7 @@ def linear_weights() -> Path:
     return weights_dir
 
 
-@dataclass
-class ServedSquareRooted:
-    url: str
-
+class ServedSquareRooted(cortexgrid.DeploymentClient):
     def predict(self, xs: list[float]) -> list[float]:
         response = requests.post(f"{self.url}/predict", json={"x": xs})
         response.raise_for_status()
@@ -84,12 +77,14 @@ class SquareRooted:
         )
 
     @classmethod
-    def client(cls, url: str) -> ServedSquareRooted:
-        return ServedSquareRooted(url)
+    def client(
+        cls, deployment: cortexgrid.Deployment[ServedSquareRooted]
+    ) -> ServedSquareRooted:
+        return ServedSquareRooted(key=deployment.key, url=deployment.url)
 
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         linear = cortexgrid.required_models(deployment)[0]
-        self._linear = Linear.client(linear.url)
+        self._linear: ServedLinear = linear.client()
 
     @_square_rooted_app.post("/predict")
     def predict(self, body: dict[str, list[float]]) -> dict[str, list[float]]:

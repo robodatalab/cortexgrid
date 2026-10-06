@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Generic, TypeVar
 
 from ray.serve.schema import ApplicationStatus
 
@@ -22,6 +25,8 @@ from cortexgrid.model_serving.deployment_records import (
     DeploymentRecord,
     delete_deployment_record,
     get_deployment_record,
+    key_of_record,
+    list_deployment_records,
     patch_deployment_record,
     put_deployment_record,
 )
@@ -29,9 +34,8 @@ from cortexgrid.model_serving.placement import ModelRequirements, vram_tiers
 from cortexgrid.model_serving.registry_tags import load_deploy_metadata
 from cortexgrid.model_serving.serve_bundle import BundleMetadata
 from cortexgrid.model_serving.status import (
+    PHASE_NOT_DEPLOYED,
     PHASE_PAUSED,
-    Deployment,
-    deployment_of_record,
     observed,
     replaced_bundle_fingerprint_until_rolled_out,
 )
@@ -101,21 +105,101 @@ def _wait_for_application_running(
     """`wait_for_model_serving` against a deadline already running. `timeout`
     only labels the TimeoutError."""
     while True:
-        app = get_serve_details().get("applications", {}).get(name)
-        if app is None:
-            raise ModelDeployFailed(f"Serve app {name!r} does not exist")
+        app = _application_still_able_to_serve(name)
         status = str(app.get("status", "(missing)"))
-        message = str(app.get("message", ""))
         if status == ApplicationStatus.RUNNING.value:
             return
-        if status == ApplicationStatus.DEPLOY_FAILED.value:
-            raise ModelDeployFailed(f"Serve app {name!r} DEPLOY_FAILED: {message}")
         if _past(deadline):
+            message = str(app.get("message", ""))
             raise TimeoutError(
                 f"Serve app {name!r} did not reach RUNNING within {timeout}s "
                 f"(last status={status!r}, message={message!r})"
             )
         time.sleep(_SERVING_POLL_INTERVAL_S)
+
+
+def _application_still_able_to_serve(name: str) -> dict[str, Any]:
+    serve_details = get_serve_details()
+    applications = serve_details.get("applications", {})
+    app: dict[str, Any] | None = applications.get(name)
+    if app is None:
+        raise ModelDeployFailed(f"Serve app {name!r} does not exist")
+    status = app.get("status")
+    if status == ApplicationStatus.DEPLOY_FAILED.value:
+        message = app.get("message", "")
+        raise ModelDeployFailed(f"Serve app {name!r} DEPLOY_FAILED: {message}")
+    return app
+
+
+def _model_is_serving(key: DeploymentKey) -> bool:
+    name = app_name(key)
+    app = _application_still_able_to_serve(name)
+    status = app.get("status")
+    return status == ApplicationStatus.RUNNING.value
+
+
+@dataclass
+class DeploymentClient:
+    key: DeploymentKey
+    url: str
+
+    async def is_ready(self) -> bool:
+        serving = await asyncio.to_thread(_model_is_serving, self.key)
+        return serving
+
+
+DeploymentClientT = TypeVar("DeploymentClientT", bound=DeploymentClient)
+
+
+@dataclass
+class Deployment(Generic[DeploymentClientT]):
+    """A scheduled Ray Serve app fronting a model. `phase` is the normalized
+    serving lifecycle phase (see `ServingStatus`); an app that appears in a
+    listing always exists, so its phase is never "not_deployed"."""
+
+    key: DeploymentKey
+    config: dict[str, str]
+    url: str
+    phase: str
+    bundle_fingerprint: str
+    replaced_bundle_fingerprint: str
+    experiment_name: str
+    class_import_path: str
+
+    def client(self) -> DeploymentClientT:
+        wait_for_model_serving(self.key)
+        deployment_client = self.client_async()
+        return deployment_client
+
+    def client_async(self) -> DeploymentClientT:
+        module_name, class_name = self.class_import_path.split(":")
+        serve_app_module = importlib.import_module(module_name)
+        serve_app = getattr(serve_app_module, class_name)
+        deployment_client: DeploymentClientT = serve_app.client(self)
+        return deployment_client
+
+
+def list_deployed_models() -> list[Deployment[Any]]:
+    """Return a Deployment for every model `deploy_model` put on Ray Serve
+    whose app the control plane last saw existing."""
+    return [
+        deployment_of_record(record)
+        for record in list_deployment_records()
+        if record["phase"] != PHASE_NOT_DEPLOYED
+    ]
+
+
+def deployment_of_record(record: DeploymentRecord) -> Deployment[Any]:
+    return Deployment(
+        key=key_of_record(record),
+        config=record["config"],
+        url=record["url"],
+        phase=record["phase"],
+        bundle_fingerprint=bundle_fingerprint_in_spec(record["spec"]),
+        replaced_bundle_fingerprint=record["replaced_bundle_fingerprint"],
+        experiment_name=record["experiment_name"],
+        class_import_path=record["spec"]["args"]["class_import_path"],
+    )
 
 
 def _clear_failed_application(
@@ -225,11 +309,10 @@ def deploy_model(
     timeout: float | None = 300.0,
     config: dict[str, str] | None = None,
     experiment_name: str = "",
-) -> Deployment:
+) -> Deployment[Any]:
     """Schedule a Ray Serve app for a previously-saved model and return a
-    handle carrying its base URL. The caller (e.g. model-gateway) builds
-    whatever client the app's routes need - streaming, long timeouts, custom
-    request schemas - against that URL; cortexgrid imposes no traffic contract.
+    handle on it. The handle's `client()` is the client the serve-app's own
+    `client` factory makes for its routes; cortexgrid imposes no traffic contract.
 
     The serve-app class is pulled from the registry entry's tags `save_model`
     wrote at save time; the caller does not need to hold the class object.
@@ -332,10 +415,11 @@ def deploy_model(
         bundle_fingerprint=meta.fingerprint,
         replaced_bundle_fingerprint=observation["replaced_bundle_fingerprint"],
         experiment_name=experiment_name,
+        class_import_path=meta.class_import_path,
     )
 
 
-def redeploy_model(key: DeploymentKey) -> Deployment:
+def redeploy_model(key: DeploymentKey) -> Deployment[Any]:
     record = get_deployment_record(key)
     if record is None:
         raise ModelNotDeployed(f"{key} is not deployed")
@@ -349,14 +433,14 @@ def redeploy_model(key: DeploymentKey) -> Deployment:
     )
 
 
-def required_models(deployment: DeploymentKey) -> list[Deployment]:
+def required_models(deployment: DeploymentKey) -> list[Deployment[Any]]:
     _, requirements = load_deploy_metadata(
         deployment.family, deployment.suffix, deployment.run_name
     )
     return [_deployment_of(model) for model in requirements.models]
 
 
-def _deployment_of(model: DeploymentConfig) -> Deployment:
+def _deployment_of(model: DeploymentConfig) -> Deployment[Any]:
     key = deployment_key(model.family, model.suffix, model.run_name, model.config)
     record = get_deployment_record(key)
     if record is None:

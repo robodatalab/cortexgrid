@@ -35,9 +35,12 @@ from cortexgrid.model_serving.deployment_key import (
     deployment_key,
 )
 from cortexgrid.model_serving.lifecycle import (
+    Deployment,
+    DeploymentClient,
     ModelDeployFailed,
     ModelNotDeployed,
     deploy_model,
+    list_deployed_models,
     redeploy_model,
     required_models,
     undeploy_model,
@@ -62,12 +65,10 @@ from cortexgrid.model_serving.serve_bundle import (
     upload_bundle,
 )
 from cortexgrid.model_serving.status import (
-    Deployment,
     ReplicaPlacement,
     ServingMessage,
     ServingStatus,
     deployment_config,
-    list_deployed_models,
     model_replica_placements,
     model_serving_messages,
     model_serving_status,
