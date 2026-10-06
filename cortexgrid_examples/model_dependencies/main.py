@@ -3,6 +3,7 @@ import cortexgrid
 from models import (
     FAMILY,
     SQUARE_ROOTED_SUFFIX,
+    ServedSquareRooted,
     SquareRooted,
 )
 
@@ -16,11 +17,11 @@ def main() -> None:
         suffix=SQUARE_ROOTED_SUFFIX,
         requirements=SquareRooted.requirements(),
     )
-    square_rooted = cortexgrid.deploy_model(
-        FAMILY, SQUARE_ROOTED_SUFFIX, cortexgrid.IMPORTED, wait=True
-    )
+    square_rooted = cortexgrid.deploy_model(FAMILY, SQUARE_ROOTED_SUFFIX, cortexgrid.IMPORTED)
     try:
-        print(f"square rooted: {SquareRooted.client(square_rooted.url).predict(XS)}")
+        square_rooted_model: ServedSquareRooted = square_rooted.client()
+        predicted = square_rooted_model.predict(XS)
+        print(f"square rooted: {predicted}")
     finally:
         cortexgrid.undeploy_model(square_rooted.key)
         cortexgrid.delete_model(FAMILY, SQUARE_ROOTED_SUFFIX, cortexgrid.IMPORTED)

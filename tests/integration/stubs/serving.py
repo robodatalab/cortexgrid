@@ -49,6 +49,12 @@ class AddConstantServeApp:
     directory at startup and returns `x + constant` on its own POST /add route.
     Saved without requirements, so it runs on any node, CPU-only included."""
 
+    @classmethod
+    def client(
+        cls, deployment: cortexgrid.Deployment[cortexgrid.DeploymentClient]
+    ) -> cortexgrid.DeploymentClient:
+        return cortexgrid.DeploymentClient(key=deployment.key, url=deployment.url)
+
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         weights_dir = cortexgrid.load_model(
             deployment.family, deployment.suffix, deployment.run_name

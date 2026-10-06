@@ -25,6 +25,7 @@ class TestPollDeployments(unittest.TestCase):
             bundle_fingerprint="",
             replaced_bundle_fingerprint="",
             experiment_name="",
+            class_import_path="",
         )
         with patch(
             "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -46,6 +47,7 @@ class TestPollDeployments(unittest.TestCase):
             bundle_fingerprint="",
             replaced_bundle_fingerprint="",
             experiment_name="",
+            class_import_path="",
         )
         with patch(
             "cortexgrid_ui.backend.streams.deployments_stream.list_deployed_models",
@@ -65,6 +67,7 @@ class TestPollDeployments(unittest.TestCase):
                 bundle_fingerprint="",
                 replaced_bundle_fingerprint="",
                 experiment_name="",
+                class_import_path="",
             ),
             Deployment(
                 key=DeploymentKey("DeepSeek3", "chat", "snake-12"),
@@ -74,6 +77,7 @@ class TestPollDeployments(unittest.TestCase):
                 bundle_fingerprint="",
                 replaced_bundle_fingerprint="",
                 experiment_name="",
+                class_import_path="",
             ),
         ]
         with patch(

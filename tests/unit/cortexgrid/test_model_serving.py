@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import shutil
@@ -19,6 +20,8 @@ from cortexgrid._bundle import BundleDesc
 from cortexgrid.experiment import Experiment, clear_instance, set_instance
 from cortexgrid.model_serving import (
     BundleMetadata,
+    Deployment,
+    DeploymentClient,
     DeploymentConfig,
     DeploymentKey,
     ModelDeployFailed,
@@ -225,6 +228,18 @@ class TestModelServing(unittest.TestCase):
             [(d.key.family, d.key.suffix, d.key.run_name) for d in listed],
             [("Qwen2", "instruct", "boogey-46")],
         )
+
+    def test_deployment_names_the_serve_app_its_client_comes_from(self) -> None:
+        deployment = deploy_model("Qwen2", "instruct", "boogey-46")
+
+        self.assertEqual(deployment.class_import_path, "stub:Stub")
+
+    def test_listed_deployment_names_the_serve_app_its_client_comes_from(self) -> None:
+        deploy_model("Qwen2", "instruct", "boogey-46")
+
+        listed = list_deployed_models()
+
+        self.assertEqual([d.class_import_path for d in listed], ["stub:Stub"])
 
     def test_undeployed_model_disappears_from_listings(self) -> None:
         deploy_model("Qwen2", "instruct", "boogey-46")
@@ -872,6 +887,92 @@ class TestWaitForModelServing(unittest.TestCase):
         self.assertEqual(polls, 3)
 
 
+class TestDeploymentClient(unittest.TestCase):
+    def setUp(self) -> None:
+        self.state = FakeServeState()
+        self.state.apps["Qwen2__instruct__boogey-46"] = {
+            "name": "Qwen2__instruct__boogey-46"
+        }
+        patches = [
+            patch(
+                "cortexgrid.model_serving.lifecycle.get_serve_details",
+                side_effect=self.state.get_details,
+            ),
+            patch("cortexgrid.model_serving.lifecycle.time.sleep"),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.deployment: Deployment[DeploymentClient] = Deployment(
+            key=_QWEN2_DEPLOYMENT,
+            config={},
+            url="http://ray:30000/r/Qwen2/instruct/boogey-46",
+            phase="deploying",
+            bundle_fingerprint="",
+            replaced_bundle_fingerprint="",
+            experiment_name="",
+            class_import_path=f"{__name__}:_ServeApp",
+        )
+
+    def test_client_is_the_serve_apps_client_of_a_serving_deployment(self) -> None:
+        self.state.status = "RUNNING"
+
+        deployment_client = self.deployment.client()
+
+        self.assertEqual(
+            deployment_client,
+            DeploymentClient(
+                key=_QWEN2_DEPLOYMENT, url="http://ray:30000/r/Qwen2/instruct/boogey-46"
+            ),
+        )
+
+    def test_client_raises_for_a_deployment_that_failed(self) -> None:
+        self.state.status = "DEPLOY_FAILED"
+        self.state.message = "replica died on import"
+
+        with self.assertRaisesRegex(ModelDeployFailed, "replica died on import"):
+            self.deployment.client()
+
+    def test_client_async_is_the_serve_apps_client_before_the_app_serves(self) -> None:
+        self.state.status = "DEPLOYING"
+
+        deployment_client = self.deployment.client_async()
+
+        self.assertEqual(
+            deployment_client,
+            DeploymentClient(
+                key=_QWEN2_DEPLOYMENT, url="http://ray:30000/r/Qwen2/instruct/boogey-46"
+            ),
+        )
+
+    def test_client_is_ready_once_the_app_serves(self) -> None:
+        self.state.status = "RUNNING"
+        deployment_client = self.deployment.client_async()
+
+        asking_whether_ready = deployment_client.is_ready()
+        ready = asyncio.run(asking_whether_ready)
+
+        self.assertTrue(ready)
+
+    def test_client_is_not_ready_while_the_app_deploys(self) -> None:
+        self.state.status = "DEPLOYING"
+        deployment_client = self.deployment.client_async()
+
+        asking_whether_ready = deployment_client.is_ready()
+        ready = asyncio.run(asking_whether_ready)
+
+        self.assertFalse(ready)
+
+    def test_client_readiness_raises_for_a_deployment_that_failed(self) -> None:
+        self.state.status = "DEPLOY_FAILED"
+        self.state.message = "replica died on import"
+        deployment_client = self.deployment.client_async()
+
+        asking_whether_ready = deployment_client.is_ready()
+        with self.assertRaisesRegex(ModelDeployFailed, "replica died on import"):
+            asyncio.run(asking_whether_ready)
+
+
 class TestModelServingStatus(unittest.TestCase):
     def setUp(self) -> None:
         self.state = FakeServeState()
@@ -1015,6 +1116,12 @@ class TestModelServingMessages(unittest.TestCase):
 
 
 class _ServeApp:
+    @classmethod
+    def client(cls, deployment: Deployment[DeploymentClient]) -> DeploymentClient:
+        return DeploymentClient(key=deployment.key, url=deployment.url)
+
+
+class _ServeAppWithoutClient:
     pass
 
 
@@ -1047,6 +1154,15 @@ class TestServeDependencies(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "cortexgrid.serve.ingress"),
         ):
             bundle_class(_RayIngressServeApp, "fam", "suf", "run")
+
+        bundle.assert_not_called()
+
+    def test_bundle_class_rejects_a_class_without_a_client_factory(self) -> None:
+        with (
+            patch("cortexgrid.model_serving.serve_bundle.bundle") as bundle,
+            self.assertRaisesRegex(ValueError, "_ServeAppWithoutClient has no client factory"),
+        ):
+            bundle_class(_ServeAppWithoutClient, "fam", "suf", "run")
 
         bundle.assert_not_called()
 

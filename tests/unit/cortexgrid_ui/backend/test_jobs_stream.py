@@ -44,6 +44,7 @@ def _deployment(
         bundle_fingerprint="",
         replaced_bundle_fingerprint="",
         experiment_name="",
+        class_import_path="",
     )
 
 

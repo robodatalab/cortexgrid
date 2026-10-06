@@ -102,6 +102,7 @@ from cortexgrid.model_storage import register_model as _register_model_storage
 from cortexgrid.model_storage import save_model as _save_model_storage
 from cortexgrid.model_serving import (
     Deployment,
+    DeploymentClient,
     DeploymentConfig,
     DeploymentKey,
     ModelDeployFailed,
@@ -240,7 +241,7 @@ def deploy_model(
     wait: bool = False,
     timeout: float | None = 300.0,
     config: dict[str, str] | None = None,
-) -> Deployment:
+) -> Deployment[Any]:
     experiment = active_experiment()
     return _deploy_model_serving(
         family,
@@ -349,6 +350,7 @@ __all__ = [
     "delete_model",
     # Model serving
     "Deployment",
+    "DeploymentClient",
     "DeploymentConfig",
     "DeploymentKey",
     "ModelDeployFailed",

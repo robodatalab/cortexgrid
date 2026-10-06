@@ -55,11 +55,18 @@ def build_bundle(cls: type) -> ServeBundle:
     is a subclass Ray defines in its own module, and on older Ray (e.g. 2.9) it
     reports that module as its own, so the class's source and import path would
     resolve to Ray instead of the serve-app. `cortexgrid.serve.ingress` leaves
-    the class unwrapped."""
+    the class unwrapped. Raises ValueError, too, for a class with no `client`
+    factory, which every `Deployment` of it makes its client with."""
     if any(klass.__module__.startswith("ray.serve") for klass in cls.__mro__):
         raise ValueError(
             f"{cls.__name__} is wrapped by ray.serve.ingress; decorate it with "
             "cortexgrid.serve.ingress instead (from cortexgrid import serve)"
+        )
+    if not callable(getattr(cls, "client", None)):
+        raise ValueError(
+            f"{cls.__name__} has no client factory; give it a classmethod "
+            "client(cls, deployment: cortexgrid.Deployment) returning its "
+            "cortexgrid.DeploymentClient"
         )
     entry_file = Path(inspect.getfile(cls)).resolve()
     serve_entry = Path(__file__).parent.with_name("_serve_entry.py")

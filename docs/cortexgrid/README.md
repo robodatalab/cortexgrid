@@ -185,8 +185,15 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
+class MyClient(cortexgrid.DeploymentClient):
+    def complete(self, prompt: str) -> str: ...
+
 @serve.ingress(app)
 class MyServeApp:
+    @classmethod
+    def client(cls, deployment: cortexgrid.Deployment[MyClient]) -> MyClient:
+        return MyClient(key=deployment.key, url=deployment.url)
+
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         self._weights_dir = cortexgrid.load_model(
             deployment.family, deployment.suffix, deployment.run_name
@@ -200,8 +207,8 @@ saved = cortexgrid.save_model(
     # What one replica needs; the model is deployed only on a host that has it.
     requirements=cortexgrid.ModelRequirements(num_gpus=1, ram_gb=8, vram_gb=16),
 )
-deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name, wait=True)
-print(deployed.url)
+deployed = cortexgrid.deploy_model("qwen", "instruct", saved.run_name)
+model = deployed.client()   # MyServeApp's client, once the app serves
 ```
 
 The requirements are part of the model, not of the serve-app class: GPUs, RAM and VRAM (GiB, 0 meaning no requirement) are stored with it and matched against what the cluster's hosts have free. Among the hosts that fit, the model goes to the **smallest GPU** that does, so a 4 GiB model does not occupy a 128 GiB card a bigger one needs; it moves up only once the smaller cards are full. `num_gpus` may be a fraction (`0.25`) to share one card between models, in which case `vram_gb` is what keeps them from overcommitting it. Correct them later with `cortexgrid.set_model_requirements(family, suffix, run_name, requirements)` or on the model card in the dashboard; `cortexgrid.deploy_model(..., num_replicas=2)` chooses how many copies to run.
