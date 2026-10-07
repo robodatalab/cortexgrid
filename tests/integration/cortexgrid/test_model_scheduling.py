@@ -91,7 +91,7 @@ def _add(deployed: cortexgrid.Deployment, x: int) -> int:
         f"{deployed.url}/add", json={"x": x}, timeout=_REQUEST_TIMEOUT_WHILE_RESUMING_S
     )
     response.raise_for_status()
-    return response.json()["result"]
+    return response.json()
 
 
 if __name__ == "__main__":

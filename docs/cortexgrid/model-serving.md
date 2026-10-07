@@ -31,49 +31,36 @@ No `ray.init` anywhere in cortexgrid.model_serving.
 
 ## The serve-app
 
-A serve-app is an ordinary class fronted by a FastAPI app, marked with `cortexgrid.serve.ingress`. It takes its deployment's `DeploymentKey` in `__init__`, downloads its weights from the registry with the key's triple, defines whatever routes it wants, and names the client that speaks them. It declares no resources: what a replica needs is a property of the model, stored in the registry (see [Model requirements](#model-requirements)), as is anything else about the model the app has to know (see [Model config](#model-config)).
+A serve-app is an ordinary class marked with `cortexgrid.serve.ingress`. It takes its deployment's `DeploymentKey` in `__init__`, downloads its weights from the registry with the key's triple, and marks the methods it serves with `cortexgrid.serve.endpoint`. It declares no resources: what a replica needs is a property of the model, stored in the registry (see [Model requirements](#model-requirements)), as is anything else about the model the app has to know (see [Model config](#model-config)).
 
 ```python
 import cortexgrid
-import requests
 from cortexgrid import serve
-from fastapi import FastAPI
-
-app = FastAPI()
 
 
-class MyClient(cortexgrid.DeploymentClient):
-    def complete(self, prompt: str) -> str:
-        response = requests.post(f"{self.url}/complete", json={"prompt": prompt}, timeout=600)
-        response.raise_for_status()
-        return response.json()["text"]
-
-
-@serve.ingress(app)
+@serve.ingress
 class MyServeApp:
-    @classmethod
-    def client(cls, deployment: cortexgrid.Deployment[MyClient]) -> MyClient:
-        return MyClient(key=deployment.key, url=deployment.url)
-
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         weights_dir = cortexgrid.load_model(   # a Path
             deployment.family, deployment.suffix, deployment.run_name
         )
         self._model = load_however_you_like(weights_dir)
 
-    @app.post("/complete")
-    async def complete(self, body: dict):
-        ...   # stream, batch, long-running - cortexgrid does not care
+    @serve.endpoint
+    async def complete(self, prompt: str) -> str:
+        ...
 ```
 
-The `client` classmethod takes the serve-app's `Deployment` and returns a `cortexgrid.DeploymentClient` - the deployment's `key` and `url` - extended with whatever methods speak the app's routes. Every `Deployment` makes its client with it, so `save_model`, `import_model` and `register_model` reject a class without one with a `ValueError`:
+Each endpoint answers POST `/<method name>`. Its arguments travel as the fields of a JSON body and its answer as JSON, both converted by pydantic according to the method's annotations, so a dataclass or a pydantic model crosses as it is. A type pydantic cannot convert carries its conversion in an `Annotated` alias, e.g. `Annotated[torch.Tensor, PlainValidator(torch.tensor), PlainSerializer(torch.Tensor.tolist)]`. An endpoint may be `async def` or `def`.
+
+`serve.ingress` also generates the serve-app's client: a `cortexgrid.DeploymentClient` - the deployment's `key` and `url` - with one method per endpoint, of the same name, parameters and answer, async where the endpoint is, that calls the endpoint over HTTP. It is a class of its own, not a subclass of the serve-app, so none of the serve-app's code runs where the client is made; `Deployment[MyServeApp]` types it as `MyServeApp`, so endpoint calls are type-checked. `serve.ingress` records it on the class as `client`, and every `Deployment` makes its client with it, so `save_model`, `import_model` and `register_model` reject a class without one with a `ValueError`:
 
 - `deployment.client()` blocks as `wait_for_model_serving` does, with no timeout, and returns the client once the app is `running`.
 - `deployment.client_async()` returns the client at once; `await client.is_ready()` reports whether the app is `running` yet, and raises `ModelDeployFailed` where the wait would.
 
 Neither needs the class object: the `Deployment` carries the serve-app's `class_import_path` and imports the class from it, so its module has to be importable wherever the client is made.
 
-`serve.ingress` has the same shape as Ray's `ray.serve.ingress`, so the serve-app needs no Ray import. Unlike Ray's, it does not wrap the class: it only records `app` on it and returns the class as written. Beyond the `client` factory, cortexgrid does not constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` to a thin subclass of it (see [On the replica](#on-the-replica)) and `serve.deployment(...)` (with the resources and replica count `deploy_model` put in the spec) and binds it with the deployment's key. There is no `cortexgrid.Model` base class and no generic `/infer` route.
+`serve.ingress` takes no app, so the serve-app needs no Ray or FastAPI import. Unlike Ray's `ray.serve.ingress`, it does not wrap the class: it builds the FastAPI app from the endpoints, records it and the client on the class, and returns the class as written. Beyond that, cortexgrid does not constrain the class either. At deploy time, on the cluster, it applies Ray's `ray.serve.ingress(app)` to a thin subclass of it (see [On the replica](#on-the-replica)) and `serve.deployment(...)` (with the resources and replica count `deploy_model` put in the spec) and binds it with the deployment's key. There is no `cortexgrid.Model` base class and no generic `/infer` route.
 
 Why not `ray.serve.ingress` directly: Ray's decorator replaces the class with a wrapper subclass defined in `ray/serve/api.py`. Older Ray (e.g. 2.9, which the cluster image ran before 2.58) copies only `__name__` onto it, so the wrapper's `__module__` stays `ray.serve.api`. Everything that locates the serve-app by its module - bundling its source at `save_model`, recording its `class_import_path` - then finds Ray's file instead of the serve-app's, and the bundle ships no serve-app code. This bites whenever `save_model` runs where that Ray version is installed, e.g. inside a `cortexgrid.remote` job. Deferring Ray's wrapper to deploy time keeps the class locatable everywhere else, whatever the Ray version. `save_model` rejects a class wrapped by `ray.serve.ingress` with a `ValueError`.
 
@@ -239,7 +226,7 @@ cortexgrid.set_model_config(
 The serve-app reads it at construction, with the `DeploymentKey` it was constructed with. `model_config` returns this config with the [deployment's own](#deployment-config) laid over it:
 
 ```python
-@serve.ingress(app)
+@serve.ingress
 class AnthropicServeApp:
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         config = cortexgrid.model_config(deployment)
@@ -321,31 +308,18 @@ No `RAY_ADDRESS`, no Ray Client. The calls go out over HTTP to `RAY_JOB_SERVER_U
 A model behind a provider's API - Gemini, OpenAI, Anthropic - is served exactly like one with weights, minus the weights. The serve-app forwards requests instead of running a model, the API key lives in the secrets store, and which model to ask for travels on the registry entry as [config](#model-config). End to end, for Gemini:
 
 ```python
+import asyncio
+
 import cortexgrid
-import requests
 from cortexgrid import serve
-from fastapi import FastAPI
 from google import genai
-
-app = FastAPI()
-
-
-class GeminiClient(cortexgrid.DeploymentClient):
-    def complete(self, prompt: str) -> str:
-        response = requests.post(f"{self.url}/complete", json={"prompt": prompt}, timeout=60)
-        response.raise_for_status()
-        return response.json()["text"]
 
 
 # 1. The serve-app. Nothing to load: it reads its settings for the deployment
-#    it was constructed with, and the key from the secrets store. Its routes
-#    are its own - cortexgrid imposes no request/response shape.
-@serve.ingress(app)
+#    it was constructed with, and the key from the secrets store. Its
+#    endpoints are its own - cortexgrid imposes no request/response shape.
+@serve.ingress
 class GeminiServeApp:
-    @classmethod
-    def client(cls, deployment: cortexgrid.Deployment[GeminiClient]) -> GeminiClient:
-        return GeminiClient(key=deployment.key, url=deployment.url)
-
     def __init__(self, deployment: cortexgrid.DeploymentKey) -> None:
         config = cortexgrid.model_config(deployment)
         self._model = config["model"]
@@ -353,12 +327,12 @@ class GeminiServeApp:
             api_key=cortexgrid.get_secret(config["api_key_secret"])
         )
 
-    @app.post("/complete")
-    async def complete(self, body: dict) -> dict:
+    @serve.endpoint
+    async def complete(self, prompt: str) -> str:
         response = await self._client.aio.models.generate_content(
-            model=self._model, contents=body["prompt"]
+            model=self._model, contents=prompt
         )
-        return {"text": response.text}
+        return response.text
 
 
 cortexgrid.Experiment.init("my-experiment")
@@ -378,8 +352,9 @@ m = cortexgrid.register_model(
 
 # 4. Deploy and call it like any other model. m.run_name is cortexgrid.IMPORTED.
 deployed = cortexgrid.deploy_model(m.family, m.suffix, m.run_name)
-gemini: GeminiClient = deployed.client()
-gemini.complete("hello")
+gemini: GeminiServeApp = deployed.client()
+answering = gemini.complete("hello")
+asyncio.run(answering)
 ```
 
 Run that again and nothing is re-registered: the entry is written once under `(gemini, flash, cortexgrid.IMPORTED)` and later calls only re-bundle `GeminiServeApp` if its code changed, so the snippet can sit at the top of a script or a job. See [Registering a model with no weights](#registering-a-model-with-no-weights) for what happens when an attempt is already in flight or failed.
@@ -443,8 +418,9 @@ All exported from `cortexgrid.*`.
 
 | Function | Purpose |
 |----------|---------|
-| `serve.ingress(app)` | Class decorator (`from cortexgrid import serve`). Marks the serve-app as fronted by the FastAPI `app` and returns the class unwrapped; Ray's `ray.serve.ingress(app)` is applied on the cluster at deploy time. Use it instead of `ray.serve.ingress`, see [The serve-app](#the-serve-app). |
-| `client(cls, deployment) -> DeploymentClient` | Classmethod every serve-app defines: the client of its routes for one `Deployment`. Bundling rejects a serve-app without it. See [The serve-app](#the-serve-app). |
+| `serve.ingress` | Class decorator (`from cortexgrid import serve`). Builds the FastAPI app from the serve-app's endpoints, generates its client, and returns the class unwrapped; Ray's `ray.serve.ingress(app)` is applied on the cluster at deploy time. Use it instead of `ray.serve.ingress`, see [The serve-app](#the-serve-app). |
+| `serve.endpoint` | Method decorator: serves the method at POST `/<method name>`, its parameters and answer converted to and from JSON by their annotations. |
+| `client(deployment) -> DeploymentClient` | The client class `serve.ingress` generates and records on the serve-app: one method per endpoint, calling it over HTTP for one `Deployment`. Bundling rejects a serve-app without it. See [The serve-app](#the-serve-app). |
 
 ### Registry
 
@@ -469,8 +445,8 @@ All exported from `cortexgrid.*`.
 |----------|---------|
 | `deploy_model(family, suffix, run_name, num_replicas=1, wait=False, timeout=300.0, config=None) -> Deployment` | Read the bundle metadata and requirements from the registry, PUT the Serve app spec - each replica requesting the model's requirements. `config` is the [deployment's own](#deployment-config); each distinct one is its own deployment. Idempotent on the resulting `DeploymentKey`: the app name is deterministic, so a re-PUT replaces. A `DEPLOY_FAILED` app from an earlier attempt is undeployed and, like an app still `deleting`, waited out before the PUT, so the retry starts afresh. With `wait=True`, then blocks as `wait_for_model_serving` does. `timeout` (default 300) caps the whole call. Records the deployment with the jobs control plane; a redeploy its record shows live with the same spec returns without asking Ray. Returns a `Deployment` carrying the app URL. |
 | `wait_for_model_serving(key, timeout=None)` | Block until the controller reports the app `RUNNING`. Raises `ModelDeployFailed` on `DEPLOY_FAILED` (with the controller's message) and as soon as no app exists for the model; exceeding a finite `timeout` raises `TimeoutError`. `timeout=None` waits unbounded; an app that never leaves `deploying` hangs forever. |
-| `Deployment.client() -> DeploymentClient` | The serve-app's client for this deployment, once its app is `running`: blocks as `wait_for_model_serving` does, with no timeout. |
-| `Deployment.client_async() -> DeploymentClient` | The serve-app's client for this deployment, at once. |
+| `Deployment[ServeApp].client() -> ServeApp` | The serve-app's client for this deployment, once its app is `running`: blocks as `wait_for_model_serving` does, with no timeout. Typed as the serve-app; a `DeploymentClient` at runtime. |
+| `Deployment[ServeApp].client_async() -> ServeApp` | The serve-app's client for this deployment, at once. |
 | `await DeploymentClient.is_ready() -> bool` | Whether the client's app is `running` yet. Raises `ModelDeployFailed` where `wait_for_model_serving` would. |
 | `undeploy_model(key)` | Re-PUT the applications list with this deployment's app removed, and drop its record. |
 | `redeploy_model(key) -> Deployment` | `deploy_model` again with the deployment's config and replica count, so it runs the code the registry holds now. Raises `ModelNotDeployed` for a key with no deployment. See [Keeping deployments on the latest code](#keeping-deployments-on-the-latest-code). |
@@ -478,7 +454,7 @@ All exported from `cortexgrid.*`.
 | `list_deployed_models() -> list[Deployment]` | Every deployment `deploy_model` put on Ray Serve whose app the control plane last saw existing, each carrying its serving `phase` - one per config for a model deployed with several. |
 | `model_replica_placements(key) -> list[ReplicaPlacement]` | Which worker each live replica landed on - what the requirements and the size-class preferences resolved to. Empty when no app exists; fills in as replicas are placed. See [Seeing where a replica actually landed](#seeing-where-a-replica-actually-landed). |
 
-`DeploymentKey`: `family`, `suffix`, `run_name`, `config_fingerprint` (empty for a deployment without config). `Deployment`: `key`, `config`, `url`, `phase`, `bundle_fingerprint`, `replaced_bundle_fingerprint`, `experiment_name`, `class_import_path`. `DeploymentClient`: `key`, `url`. `ServingStatus`: `key`, `phase`, `message`, `url`. `ReplicaPlacement`: `replica_id`, `state`, `node_id`, `node_ip`. `ModelDeployFailed` subclasses `RuntimeError`; `ModelNotDeployed` subclasses `LookupError`. cortexgrid returns these handles and no more; the client of the serve-app's routes is the serve-app's own.
+`DeploymentKey`: `family`, `suffix`, `run_name`, `config_fingerprint` (empty for a deployment without config). `Deployment`: `key`, `config`, `url`, `phase`, `bundle_fingerprint`, `replaced_bundle_fingerprint`, `experiment_name`, `class_import_path`. `DeploymentClient`: `key`, `url`. `ServingStatus`: `key`, `phase`, `message`, `url`. `ReplicaPlacement`: `replica_id`, `state`, `node_id`, `node_ip`. `ModelDeployFailed` subclasses `RuntimeError`; `ModelNotDeployed` subclasses `LookupError`. cortexgrid returns these handles and no more; the client of the serve-app's endpoints is the one `serve.ingress` generates for it.
 
 The Ray Serve app name is `<family>__<suffix>__<run_name>`, followed by `__<config_fingerprint>` for a deployment given a config; the route prefix is `/r/<family>/<suffix>/<run_name>`, followed by `/<config_fingerprint>` likewise. The serve-app's own routes hang off that prefix (e.g. `{url}/complete`, `{url}/generate`). `family`, `suffix`, `run_name` must not contain `/` or `__`.
 

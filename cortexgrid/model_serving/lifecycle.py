@@ -148,11 +148,11 @@ class DeploymentClient:
         return serving
 
 
-DeploymentClientT = TypeVar("DeploymentClientT", bound=DeploymentClient)
+ServeAppT = TypeVar("ServeAppT")
 
 
 @dataclass
-class Deployment(Generic[DeploymentClientT]):
+class Deployment(Generic[ServeAppT]):
     """A scheduled Ray Serve app fronting a model. `phase` is the normalized
     serving lifecycle phase (see `ServingStatus`); an app that appears in a
     listing always exists, so its phase is never "not_deployed"."""
@@ -166,16 +166,16 @@ class Deployment(Generic[DeploymentClientT]):
     experiment_name: str
     class_import_path: str
 
-    def client(self) -> DeploymentClientT:
+    def client(self) -> ServeAppT:
         wait_for_model_serving(self.key)
         deployment_client = self.client_async()
         return deployment_client
 
-    def client_async(self) -> DeploymentClientT:
+    def client_async(self) -> ServeAppT:
         module_name, class_name = self.class_import_path.split(":")
         serve_app_module = importlib.import_module(module_name)
         serve_app = getattr(serve_app_module, class_name)
-        deployment_client: DeploymentClientT = serve_app.client(self)
+        deployment_client: ServeAppT = serve_app.client(self)
         return deployment_client
 
 

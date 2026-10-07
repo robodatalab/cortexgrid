@@ -5,7 +5,6 @@ description = "Example: deploy a model that serves on top of another deployed mo
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "cortexgrid",
-    "fastapi",
 ]
 
 [build-system]
