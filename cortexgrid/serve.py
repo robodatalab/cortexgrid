@@ -24,11 +24,13 @@ locatable everywhere else (the laptop, Ray jobs, tests).
 from __future__ import annotations
 
 import inspect
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar, get_type_hints
+from typing import Any, Callable, TypeVar, get_args, get_type_hints
 
 import httpx
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter
 
 from cortexgrid.model_serving.lifecycle import Deployment, DeploymentClient
@@ -88,7 +90,12 @@ class _EndpointMarshalling:
         parameters_in_order = list(parameter_values)
         signature_without_self = signature.replace(parameters=parameters_in_order[1:])
         hints = get_type_hints(method)
-        answer_hint = hints.pop("return")
+        returned_hint = hints.pop("return")
+        if inspect.isasyncgenfunction(method):
+            streamed_hints = get_args(returned_hint)
+            answer_hint = streamed_hints[0]
+        else:
+            answer_hint = returned_hint
         answer = TypeAdapter(answer_hint)
         parameters = {name: TypeAdapter(hint) for name, hint in hints.items()}
         return cls(signature_without_self, parameters, answer)
@@ -113,11 +120,27 @@ class _EndpointMarshalling:
     def answer_from_json(self, answered: Any) -> Any:
         return self.answer.validate_python(answered)
 
+    def answer_to_json_line(self, answer: Any) -> bytes:
+        answered = self.answer.dump_json(answer)
+        return answered + b"\n"
+
+    def answer_from_json_line(self, line: str) -> Any:
+        return self.answer.validate_json(line)
+
 
 def _route_of(
     method: Callable[..., Any], marshalling: _EndpointMarshalling
 ) -> Callable[..., Any]:
-    if inspect.iscoroutinefunction(method):
+    if inspect.isasyncgenfunction(method):
+
+        async def route(self: Any, body: dict[str, Any]) -> Any:
+            arguments = marshalling.arguments_from_json(body)
+            answers = method(self, **arguments)
+            lines = _json_lines_of(answers, marshalling)
+            streamed = StreamingResponse(lines, media_type="application/x-ndjson")
+            return streamed
+
+    elif inspect.iscoroutinefunction(method):
 
         async def route(self: Any, body: dict[str, Any]) -> Any:
             arguments = marshalling.arguments_from_json(body)
@@ -138,10 +161,31 @@ def _route_of(
     return route
 
 
+async def _json_lines_of(
+    answers: AsyncIterator[Any], marshalling: _EndpointMarshalling
+) -> AsyncIterator[bytes]:
+    async for answer in answers:
+        line = marshalling.answer_to_json_line(answer)
+        yield line
+
+
 def _call_of(
     name: str, method: Callable[..., Any], marshalling: _EndpointMarshalling
 ) -> Callable[..., Any]:
-    if inspect.iscoroutinefunction(method):
+    if inspect.isasyncgenfunction(method):
+
+        async def call(self: _EndpointsClient, *args: Any, **kwargs: Any) -> Any:
+            body = marshalling.arguments_to_json(*args, **kwargs)
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST", f"{self.url}/{name}", json=body
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        answer = marshalling.answer_from_json_line(line)
+                        yield answer
+
+    elif inspect.iscoroutinefunction(method):
 
         async def call(self: _EndpointsClient, *args: Any, **kwargs: Any) -> Any:
             body = marshalling.arguments_to_json(*args, **kwargs)

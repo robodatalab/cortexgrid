@@ -51,7 +51,7 @@ class MyServeApp:
         ...
 ```
 
-Each endpoint answers POST `/<method name>`. Its arguments travel as the fields of a JSON body and its answer as JSON, both converted by pydantic according to the method's annotations, so a dataclass or a pydantic model crosses as it is. A type pydantic cannot convert carries its conversion in an `Annotated` alias, e.g. `Annotated[torch.Tensor, PlainValidator(torch.tensor), PlainSerializer(torch.Tensor.tolist)]`. An endpoint may be `async def` or `def`.
+Each endpoint answers POST `/<method name>`. Its arguments travel as the fields of a JSON body and its answer as JSON, both converted by pydantic according to the method's annotations, so a dataclass or a pydantic model crosses as it is. A type pydantic cannot convert carries its conversion in an `Annotated` alias, e.g. `Annotated[torch.Tensor, PlainValidator(torch.tensor), PlainSerializer(torch.Tensor.tolist)]`. An endpoint may be `async def` or `def`, or an async generator (`-> AsyncIterator[T]`), which streams each `T` it yields as one JSON line and whose client method yields them back as they arrive.
 
 `serve.ingress` also generates the serve-app's client: a `cortexgrid.DeploymentClient` - the deployment's `key` and `url` - with one method per endpoint, of the same name, parameters and answer, async where the endpoint is, that calls the endpoint over HTTP. It is a class of its own, not a subclass of the serve-app, so none of the serve-app's code runs where the client is made; `Deployment[MyServeApp]` types it as `MyServeApp`, so endpoint calls are type-checked. `serve.ingress` records it on the class as `client`, and every `Deployment` makes its client with it, so `save_model`, `import_model` and `register_model` reject a class without one with a `ValueError`:
 
@@ -419,7 +419,7 @@ All exported from `cortexgrid.*`.
 | Function | Purpose |
 |----------|---------|
 | `serve.ingress` | Class decorator (`from cortexgrid import serve`). Builds the FastAPI app from the serve-app's endpoints, generates its client, and returns the class unwrapped; Ray's `ray.serve.ingress(app)` is applied on the cluster at deploy time. Use it instead of `ray.serve.ingress`, see [The serve-app](#the-serve-app). |
-| `serve.endpoint` | Method decorator: serves the method at POST `/<method name>`, its parameters and answer converted to and from JSON by their annotations. |
+| `serve.endpoint` | Method decorator: serves the method at POST `/<method name>`, its parameters and answer converted to and from JSON by their annotations. An async generator streams its answers, one JSON line each. |
 | `client(deployment) -> DeploymentClient` | The client class `serve.ingress` generates and records on the serve-app: one method per endpoint, calling it over HTTP for one `Deployment`. Bundling rejects a serve-app without it. See [The serve-app](#the-serve-app). |
 
 ### Registry
