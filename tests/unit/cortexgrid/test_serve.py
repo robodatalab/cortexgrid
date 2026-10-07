@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import unittest
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from parameterized import parameterized
@@ -92,6 +94,99 @@ class TestEndpoint(unittest.TestCase):
         response = client.post("/add", json={"x": 1})
 
         self.assertEqual(response.status_code, 404)
+
+
+class TestEndpointClient(unittest.TestCase):
+    @parameterized.expand([
+        ("parameters_by_position", "add", (2, 3), {}, 5),
+        ("parameters_by_name", "add", (), {"x": 2, "y": 3}, 5),
+        ("parameter_left_out_takes_its_default", "add", (2,), {}, 3),
+        ("dataclass_in_and_out", "mirror", (_Point(x=1.0, y=2.0),), {}, _Point(x=2.0, y=1.0)),
+    ])
+    def test_async_endpoint_answers_over_http(
+        self, _case: str, endpoint: str, args: tuple, kwargs: dict, expected: object
+    ) -> None:
+        @serve.ingress
+        class _ServeApp:
+            @serve.endpoint
+            async def add(self, x: int, y: int = 1) -> int:
+                return x + y
+
+            @serve.endpoint
+            async def mirror(self, point: _Point) -> _Point:
+                return _Point(x=point.y, y=point.x)
+
+        app = serve.ingress_app(_ServeApp)
+        ray_ingress = ray_serve.ingress(app)
+        ray_ingress(_ServeApp)
+        replica_context = MagicMock(servable_object=_ServeApp())
+        transport = httpx.ASGITransport(app=app)
+        http_client = httpx.AsyncClient(transport=transport)
+        deployment = MagicMock(url="http://serve-app")
+        client = _ServeApp.client(deployment)
+        calling = getattr(client, endpoint)
+        with (
+            patch("ray.serve.get_replica_context", return_value=replica_context),
+            patch("cortexgrid.serve.httpx.AsyncClient", return_value=http_client),
+        ):
+            answering = calling(*args, **kwargs)
+            answer = asyncio.run(answering)
+
+        self.assertEqual(answer, expected)
+
+    @parameterized.expand([
+        ("list", [2.0, 4.0], [1.0, 2.0]),
+        ("empty_list", [], []),
+    ])
+    def test_sync_endpoint_answers_over_http(
+        self, _case: str, xs: list[float], expected: list[float]
+    ) -> None:
+        @serve.ingress
+        class _ServeApp:
+            @serve.endpoint
+            def halve(self, xs: list[float]) -> list[float]:
+                return [x / 2 for x in xs]
+
+        app = serve.ingress_app(_ServeApp)
+        ray_ingress = ray_serve.ingress(app)
+        ray_ingress(_ServeApp)
+        replica_context = MagicMock(servable_object=_ServeApp())
+        http_client = TestClient(app)
+        deployment = MagicMock(url="http://serve-app")
+        client = _ServeApp.client(deployment)
+        with (
+            patch("ray.serve.get_replica_context", return_value=replica_context),
+            patch("cortexgrid.serve.httpx.Client", return_value=http_client),
+        ):
+            answer = client.halve(xs)
+
+        self.assertEqual(answer, expected)
+
+    def test_client_has_none_of_the_serve_apps_own_code(self) -> None:
+        @serve.ingress
+        class _ServeApp:
+            def __init__(self) -> None:
+                self.loaded = True
+
+            @classmethod
+            def deploy(cls) -> None:
+                pass
+
+            def helper(self) -> None:
+                pass
+
+            @serve.endpoint
+            async def add(self, x: int) -> int:
+                return x + 1
+
+        deployment = MagicMock(url="http://serve-app")
+        client = _ServeApp.client(deployment)
+
+        self.assertNotIsInstance(client, _ServeApp)
+        self.assertFalse(hasattr(client, "loaded"))
+        self.assertFalse(hasattr(client, "deploy"))
+        self.assertFalse(hasattr(client, "helper"))
+        self.assertTrue(hasattr(client, "add"))
 
 
 class TestBuild(unittest.TestCase):
