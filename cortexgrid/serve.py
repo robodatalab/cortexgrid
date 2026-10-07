@@ -8,8 +8,8 @@
         async def predict(self, xs: list[float]) -> list[float]: ...
 
 Unlike `ray.serve.ingress`, it builds the FastAPI app from the class's
-`serve.endpoint` methods, and the class is left unwrapped: the FastAPI app
-and the client generated for it are only recorded on it, and
+`serve.endpoint` methods, and the class is left unwrapped: the FastAPI app,
+its routes and the client generated for it are only recorded on it, and
 `cortexgrid._serve_entry.build` applies Ray's ingress when it builds the Serve
 application on the cluster.
 
@@ -59,6 +59,10 @@ def ingress(cls: _T) -> _T:
         if getattr(method, _ENDPOINT_ATTR, False):
             marshalling = _EndpointMarshalling.of(method)
             route = _route_of(method, marshalling)
+            route_name = f"__cortexgrid_{name}_route__"
+            route.__module__ = cls.__module__
+            route.__qualname__ = f"{cls.__qualname__}.{route_name}"
+            setattr(cls, route_name, route)
             app.add_api_route(f"/{name}", route, methods=["POST"])
             calls[name] = _call_of(name, method, marshalling)
     client = type(f"{cls.__name__}Client", (_EndpointsClient,), calls)
@@ -157,7 +161,6 @@ def _route_of(
             return answered
 
     route.__name__ = method.__name__
-    route.__qualname__ = method.__qualname__
     return route
 
 

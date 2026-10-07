@@ -11,7 +11,10 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from parameterized import parameterized
+from ray import cloudpickle
 from ray import serve as ray_serve
+from ray._common.serialization import pickle_dumps
+from ray.serve._private.utils import ensure_serialization_context
 
 from cortexgrid import serve
 from cortexgrid._serve_entry import build
@@ -25,6 +28,13 @@ class _MarkedServeApp:
 
 class _UnmarkedServeApp:
     pass
+
+
+@serve.ingress
+class _AddingServeApp:
+    @serve.endpoint
+    def add(self, x: int) -> int:
+        return x + 1
 
 
 @dataclass
@@ -127,6 +137,18 @@ class TestEndpoint(unittest.TestCase):
         response = client.post("/add", json={"x": 1})
 
         self.assertEqual(response.status_code, 404)
+
+
+class TestEndpointOnTheReplica(unittest.TestCase):
+    def test_ray_ships_an_endpoint_s_route_by_reference(self) -> None:
+        app = serve.ingress_app(_AddingServeApp)
+        route = app.routes[-1]
+        ensure_serialization_context()
+        pickled = pickle_dumps(route.endpoint, error_msg="the route did not pickle")
+
+        endpoint_on_the_replica = cloudpickle.loads(pickled)
+
+        self.assertIs(endpoint_on_the_replica, route.endpoint)
 
 
 class TestEndpointClient(unittest.TestCase):
