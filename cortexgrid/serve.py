@@ -93,7 +93,7 @@ class _EndpointMarshalling:
         parameter_values = signature.parameters.values()
         parameters_in_order = list(parameter_values)
         signature_without_self = signature.replace(parameters=parameters_in_order[1:])
-        hints = get_type_hints(method)
+        hints = get_type_hints(method, include_extras=True)
         returned_hint = hints.pop("return")
         if inspect.isasyncgenfunction(method):
             streamed_hints = get_args(returned_hint)

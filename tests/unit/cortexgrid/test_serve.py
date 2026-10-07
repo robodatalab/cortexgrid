@@ -11,6 +11,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from parameterized import parameterized
+from pydantic import Base64Bytes
 from ray import cloudpickle
 from ray import serve as ray_serve
 from ray._common.serialization import pickle_dumps
@@ -65,6 +66,7 @@ class TestEndpoint(unittest.TestCase):
         ("dataclass_in_and_out", "/mirror", {"point": {"x": 1.0, "y": 2.0}}, {"x": 2.0, "y": 1.0}),
         ("list_in_and_out", "/halve", {"xs": [2.0, 4.0]}, [1.0, 2.0]),
         ("empty_list", "/halve", {"xs": []}, []),
+        ("annotated_type_in_its_own_encoding", "/length", {"data": "aGk="}, 2),
     ])
     def test_answers_post_at_the_method_name(
         self, _case: str, path: str, body: dict, expected: object
@@ -82,6 +84,10 @@ class TestEndpoint(unittest.TestCase):
             @serve.endpoint
             def halve(self, xs: list[float]) -> list[float]:
                 return [x / 2 for x in xs]
+
+            @serve.endpoint
+            async def length(self, data: Base64Bytes) -> int:
+                return len(data)
 
         app = serve.ingress_app(_ServeApp)
         ray_ingress = ray_serve.ingress(app)
@@ -157,6 +163,7 @@ class TestEndpointClient(unittest.TestCase):
         ("parameters_by_name", "add", (), {"x": 2, "y": 3}, 5),
         ("parameter_left_out_takes_its_default", "add", (2,), {}, 3),
         ("dataclass_in_and_out", "mirror", (_Point(x=1.0, y=2.0),), {}, _Point(x=2.0, y=1.0)),
+        ("annotated_type_in_its_own_encoding", "length", (b"hi",), {}, 2),
     ])
     def test_async_endpoint_answers_over_http(
         self, _case: str, endpoint: str, args: tuple, kwargs: dict, expected: object
@@ -170,6 +177,10 @@ class TestEndpointClient(unittest.TestCase):
             @serve.endpoint
             async def mirror(self, point: _Point) -> _Point:
                 return _Point(x=point.y, y=point.x)
+
+            @serve.endpoint
+            async def length(self, data: Base64Bytes) -> int:
+                return len(data)
 
         app = serve.ingress_app(_ServeApp)
         ray_ingress = ray_serve.ingress(app)
