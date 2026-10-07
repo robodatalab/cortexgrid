@@ -3,7 +3,6 @@ import cortexgrid
 from models import (
     FAMILY,
     SQUARE_ROOTED_SUFFIX,
-    ServedSquareRooted,
     SquareRooted,
 )
 
@@ -19,7 +18,7 @@ def main() -> None:
     )
     square_rooted = cortexgrid.deploy_model(FAMILY, SQUARE_ROOTED_SUFFIX, cortexgrid.IMPORTED)
     try:
-        square_rooted_model: ServedSquareRooted = square_rooted.client()
+        square_rooted_model: SquareRooted = square_rooted.client()
         predicted = square_rooted_model.predict(XS)
         print(f"square rooted: {predicted}")
     finally:

@@ -4,8 +4,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import requests
-
 import cortexgrid
 from cortexgrid.model_serving import app_name
 from cortexgrid.ray_util import get_serve_details
@@ -48,11 +46,8 @@ class TestModelServing(unittest.TestCase):
 
         deployed = cortexgrid.deploy_model(family, suffix, self.run_name, wait=True)
         try:
-            response = requests.post(
-                f"{deployed.url}/add", json={"x": 27}, timeout=60
-            )
-            response.raise_for_status()
-            self.assertEqual(response.json()["result"], 42)
+            stub: AddConstantServeApp = deployed.client()
+            self.assertEqual(stub.add(27), 42)
         finally:
             cortexgrid.undeploy_model(
                 cortexgrid.DeploymentKey(family, suffix, self.run_name)
@@ -98,8 +93,10 @@ class TestModelServing(unittest.TestCase):
         )
         self.addCleanup(cortexgrid.undeploy_model, plus_200.key)
 
-        self.assertEqual(_add(plus_100, 1), 102)
-        self.assertEqual(_add(plus_200, 1), 202)
+        stub_plus_100: AddConstantServeApp = plus_100.client()
+        stub_plus_200: AddConstantServeApp = plus_200.client()
+        self.assertEqual(stub_plus_100.add(1), 102)
+        self.assertEqual(stub_plus_200.add(1), 202)
 
     def test_deployed_model_can_be_contacted_from_a_job(self) -> None:
         family, suffix = "it-deploy-from-job", "stub"
@@ -116,12 +113,6 @@ class TestModelServing(unittest.TestCase):
                 cortexgrid.DeploymentKey(family, suffix, self.run_name)
             )
 
-
-
-def _add(deployed: cortexgrid.Deployment, x: int) -> int:
-    response = requests.post(f"{deployed.url}/add", json={"x": x}, timeout=60)
-    response.raise_for_status()
-    return response.json()["result"]
 
 if __name__ == "__main__":
     unittest.main()
