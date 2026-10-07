@@ -23,7 +23,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: tests
-          image: ghcr.io/robodatalab/cortexgrid-integration:4bb962c9344677a7b9974c1d90fc989c54cf324e
+          image: ghcr.io/robodatalab/cortexgrid-integration:125e486fc8d8d9a46949709897767617091fb22b
           env:
             # cortexgrid.secrets reads every secret from the head secrets server.
             - name: CORTEXGRID_HEAD_URL
