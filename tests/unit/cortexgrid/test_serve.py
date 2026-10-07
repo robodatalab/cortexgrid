@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import unittest
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
@@ -82,6 +83,38 @@ class TestEndpoint(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)
+
+    @parameterized.expand([
+        ("numbers", "/count", {"up_to": 3}, "0\n1\n2\n"),
+        ("nothing_streamed", "/count", {"up_to": 0}, ""),
+        ("dataclasses", "/mirrors", {"points": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]}, '{"x":2.0,"y":1.0}\n{"x":4.0,"y":3.0}\n'),
+    ])
+    def test_async_generator_streams_one_json_line_per_answer(
+        self, _case: str, path: str, body: dict, expected: str
+    ) -> None:
+        @serve.ingress
+        class _ServeApp:
+            @serve.endpoint
+            async def count(self, up_to: int) -> AsyncIterator[int]:
+                for number in range(up_to):
+                    yield number
+
+            @serve.endpoint
+            async def mirrors(self, points: list[_Point]) -> AsyncIterator[_Point]:
+                for point in points:
+                    yield _Point(x=point.y, y=point.x)
+
+        app = serve.ingress_app(_ServeApp)
+        ray_ingress = ray_serve.ingress(app)
+        ray_ingress(_ServeApp)
+        replica_context = MagicMock(servable_object=_ServeApp())
+        client = TestClient(app)
+        with patch("ray.serve.get_replica_context", return_value=replica_context):
+            response = client.post(path, json=body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/x-ndjson")
+        self.assertEqual(response.text, expected)
 
     def test_method_not_marked_as_endpoint_is_not_served(self) -> None:
         @serve.ingress
@@ -187,6 +220,45 @@ class TestEndpointClient(unittest.TestCase):
         self.assertFalse(hasattr(client, "deploy"))
         self.assertFalse(hasattr(client, "helper"))
         self.assertTrue(hasattr(client, "add"))
+
+
+class TestStreamingEndpointClient(unittest.IsolatedAsyncioTestCase):
+    @parameterized.expand([
+        ("numbers", "count", (3,), [0, 1, 2]),
+        ("nothing_streamed", "count", (0,), []),
+        ("dataclasses", "mirrors", ([_Point(x=1.0, y=2.0), _Point(x=3.0, y=4.0)],), [_Point(x=2.0, y=1.0), _Point(x=4.0, y=3.0)]),
+    ])
+    async def test_async_generator_yields_the_streamed_answers(
+        self, _case: str, endpoint: str, args: tuple, expected: list
+    ) -> None:
+        @serve.ingress
+        class _ServeApp:
+            @serve.endpoint
+            async def count(self, up_to: int) -> AsyncIterator[int]:
+                for number in range(up_to):
+                    yield number
+
+            @serve.endpoint
+            async def mirrors(self, points: list[_Point]) -> AsyncIterator[_Point]:
+                for point in points:
+                    yield _Point(x=point.y, y=point.x)
+
+        app = serve.ingress_app(_ServeApp)
+        ray_ingress = ray_serve.ingress(app)
+        ray_ingress(_ServeApp)
+        replica_context = MagicMock(servable_object=_ServeApp())
+        transport = httpx.ASGITransport(app=app)
+        http_client = httpx.AsyncClient(transport=transport)
+        deployment = MagicMock(url="http://serve-app")
+        client = _ServeApp.client(deployment)
+        streaming = getattr(client, endpoint)
+        with (
+            patch("ray.serve.get_replica_context", return_value=replica_context),
+            patch("cortexgrid.serve.httpx.AsyncClient", return_value=http_client),
+        ):
+            answers = [answer async for answer in streaming(*args)]
+
+        self.assertEqual(answers, expected)
 
 
 class TestBuild(unittest.TestCase):
